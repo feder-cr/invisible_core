@@ -8,3 +8,4 @@ dist/
 venv/
 *.bak
 *-bak
+*._backup
