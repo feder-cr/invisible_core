@@ -1,0 +1,61 @@
+{
+  "_meta": {
+    "name": "audio | gpu_class",
+    "parents": ["gpu_class"],
+    "child": "audio",
+    "value_shape": {"rate": "int Hz", "latency": "int ms", "channels": "int 2/6/8"},
+    "source": "Realistic Windows WASAPI/DirectSound config distributions per hardware tier. integrated_old → vecchi realtek onboard 44.1kHz 2ch latenza alta. workstation → pro audio interface (48/96kHz, 6/8ch, low-latency). Gaming tiers → 48kHz low latency 2ch o 5.1.",
+    "rationale": "Prima: audio marginal indipendente da GPU → fingerprinter potevano vedere workstation GPU + 44.1kHz/2ch come sospetto (combo implausibile). Ora: audio joint sample conditional su gpu_class, coerente con livello hardware del sistema."
+  },
+  "table": {
+    "integrated_old": [
+      {"value": {"rate": 44100, "latency": 40, "channels": 2}, "prob": 0.30},
+      {"value": {"rate": 44100, "latency": 60, "channels": 2}, "prob": 0.25},
+      {"value": {"rate": 48000, "latency": 40, "channels": 2}, "prob": 0.25},
+      {"value": {"rate": 44100, "latency": 50, "channels": 2}, "prob": 0.15},
+      {"value": {"rate": 48000, "latency": 60, "channels": 2}, "prob": 0.05}
+    ],
+    "integrated_modern": [
+      {"value": {"rate": 48000, "latency": 20, "channels": 2}, "prob": 0.30},
+      {"value": {"rate": 48000, "latency": 30, "channels": 2}, "prob": 0.25},
+      {"value": {"rate": 44100, "latency": 25, "channels": 2}, "prob": 0.15},
+      {"value": {"rate": 48000, "latency": 40, "channels": 2}, "prob": 0.15},
+      {"value": {"rate": 48000, "latency": 20, "channels": 6}, "prob": 0.08},
+      {"value": {"rate": 44100, "latency": 40, "channels": 2}, "prob": 0.07}
+    ],
+    "low_end": [
+      {"value": {"rate": 44100, "latency": 40, "channels": 2}, "prob": 0.25},
+      {"value": {"rate": 48000, "latency": 40, "channels": 2}, "prob": 0.25},
+      {"value": {"rate": 48000, "latency": 30, "channels": 2}, "prob": 0.20},
+      {"value": {"rate": 48000, "latency": 20, "channels": 2}, "prob": 0.15},
+      {"value": {"rate": 44100, "latency": 50, "channels": 2}, "prob": 0.15}
+    ],
+    "mid_range": [
+      {"value": {"rate": 48000, "latency": 20, "channels": 2}, "prob": 0.30},
+      {"value": {"rate": 48000, "latency": 30, "channels": 2}, "prob": 0.20},
+      {"value": {"rate": 48000, "latency": 20, "channels": 6}, "prob": 0.18},
+      {"value": {"rate": 48000, "latency": 25, "channels": 2}, "prob": 0.12},
+      {"value": {"rate": 44100, "latency": 20, "channels": 2}, "prob": 0.10},
+      {"value": {"rate": 48000, "latency": 40, "channels": 2}, "prob": 0.10}
+    ],
+    "high_end": [
+      {"value": {"rate": 48000, "latency": 20, "channels": 2}, "prob": 0.25},
+      {"value": {"rate": 48000, "latency": 20, "channels": 6}, "prob": 0.22},
+      {"value": {"rate": 48000, "latency": 20, "channels": 8}, "prob": 0.15},
+      {"value": {"rate": 48000, "latency": 30, "channels": 2}, "prob": 0.12},
+      {"value": {"rate": 96000, "latency": 20, "channels": 2}, "prob": 0.10},
+      {"value": {"rate": 44100, "latency": 20, "channels": 2}, "prob": 0.08},
+      {"value": {"rate": 48000, "latency": 40, "channels": 6}, "prob": 0.08}
+    ],
+    "workstation": [
+      {"value": {"rate": 48000, "latency": 20, "channels": 6}, "prob": 0.22},
+      {"value": {"rate": 48000, "latency": 20, "channels": 8}, "prob": 0.20},
+      {"value": {"rate": 96000, "latency": 20, "channels": 2}, "prob": 0.18},
+      {"value": {"rate": 48000, "latency": 20, "channels": 2}, "prob": 0.15},
+      {"value": {"rate": 192000, "latency": 20, "channels": 2}, "prob": 0.08},
+      {"value": {"rate": 44100, "latency": 20, "channels": 2}, "prob": 0.08},
+      {"value": {"rate": 96000, "latency": 20, "channels": 6}, "prob": 0.06},
+      {"value": {"rate": 48000, "latency": 30, "channels": 6}, "prob": 0.03}
+    ]
+  }
+}

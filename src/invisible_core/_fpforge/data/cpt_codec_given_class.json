@@ -1,0 +1,78 @@
+{
+  "_meta": {
+    "name": "codec prefs | gpu_class",
+    "parents": ["gpu_class"],
+    "children": ["av1_enabled", "webm_encoder_enabled", "mediasource_webm", "mediasource_mp4", "webspeech_synth"],
+    "source": "5 JS-visible codec/media prefs, joint-sampled given gpu_class. Modern/workstation GPUs bias toward latest-Firefox-defaults (all-on). Integrated_old skews toward mixed/conservative states (older FF builds, AV1 adoption lower).",
+    "rationale": {
+      "av1_enabled": "media.av1.enabled — JS-visible via HTMLVideoElement.canPlayType('video/webm; codecs=\"av01.0.05M.08\"').",
+      "webm_encoder_enabled": "media.encoder.webm.enabled — JS-visible via MediaRecorder.isTypeSupported('video/webm').",
+      "mediasource_webm": "media.mediasource.webm.enabled — JS-visible via MediaSource.isTypeSupported('video/webm; codecs=\"vp9\"').",
+      "mediasource_mp4": "media.mediasource.mp4.enabled — JS-visible via MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E\"').",
+      "webspeech_synth": "media.webspeech.synth.enabled — JS-visible via ('speechSynthesis' in window). Triggers CreepJS voices probe."
+    },
+    "note": "Replaced hw_video_decoding/wmf_enabled/ffvpx_enabled (backend-only, invisible to JS fingerprinters) with these 3 JS-visible ones for actual media.$hash entropy gain."
+  },
+  "table": {
+    "integrated_old": [
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.25},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.18},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.20},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.10},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": false, "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.08},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": false, "webspeech_synth": true},  "prob": 0.07},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.07},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.05}
+    ],
+    "integrated_modern": [
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.55},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.14},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.10},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.08},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": false, "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.05},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": false, "webspeech_synth": true},  "prob": 0.04},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.02},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.02}
+    ],
+    "low_end": [
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.40},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.22},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.12},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.08},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.06},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": false, "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.05},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": false, "webspeech_synth": true},  "prob": 0.04},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.03}
+    ],
+    "mid_range": [
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.62},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.10},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.09},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.07},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": false, "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.04},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": false, "webspeech_synth": true},  "prob": 0.04},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.02},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.02}
+    ],
+    "high_end": [
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.72},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.08},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.06},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.06},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": false, "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.03},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": false, "webspeech_synth": true},  "prob": 0.03},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.01},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.01}
+    ],
+    "workstation": [
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.80},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.06},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.04},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.04},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": false, "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.02},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": true,  "mediasource_webm": true,  "mediasource_mp4": false, "webspeech_synth": true},  "prob": 0.02},
+      {"value": {"av1_enabled": false, "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": true},  "prob": 0.01},
+      {"value": {"av1_enabled": true,  "webm_encoder_enabled": false, "mediasource_webm": true,  "mediasource_mp4": true,  "webspeech_synth": false}, "prob": 0.01}
+    ]
+  }
+}
