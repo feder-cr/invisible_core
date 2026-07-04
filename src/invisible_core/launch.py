@@ -22,3 +22,54 @@ def write_user_js(profile_dir: "str | os.PathLike[str]", prefs: Dict[str, Any]) 
     lines = [f"user_pref({json.dumps(k)}, {json.dumps(v)});" for k, v in prefs.items()]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
+
+
+# IANA→POSIX TZ map — copied verbatim from the wrapper's launcher.py so the
+# libc TZ env matches Date/Intl exactly (Arizona/Hawaii have no DST).
+_IANA_TO_POSIX_TZ: Dict[str, str] = {
+    "America/New_York":             "EST5EDT",
+    "America/Detroit":              "EST5EDT",
+    "America/Indiana/Indianapolis": "EST5EDT",
+    "America/Kentucky/Louisville":  "EST5EDT",
+    "America/Chicago":              "CST6CDT",
+    "America/Denver":               "MST7MDT",
+    "America/Los_Angeles":          "PST8PDT",
+    "America/Phoenix":              "MST7",
+    "America/Anchorage":            "AKST9AKDT",
+    "Pacific/Honolulu":             "HST10",
+}
+
+
+def _tz_env(timezone: str) -> str:
+    """POSIX TZ value for an IANA zone (falls back to the IANA name)."""
+    return _IANA_TO_POSIX_TZ.get(timezone, timezone)
+
+
+def build_launch_env(
+    prefs: Dict[str, Any],
+    *,
+    timezone: Optional[str] = None,
+    egress_ip: Optional[str] = None,
+    base_env: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Subprocess env for the patched binary. Mirrors the wrapper's _build_env.
+
+    STEALTHFOX_FONTLIST/SYSTEMUI must be present at process start (the binary
+    reads them in the gfxPlatformFontList ctor, before any pref IPC). TZ tunes
+    the libc clock. STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy egress IP;
+    an already-set value in base_env wins.
+    """
+    env = dict(os.environ if base_env is None else base_env)
+    if timezone:
+        env["TZ"] = _tz_env(timezone)
+    fontlist = prefs.get("zoom.stealth.font.fontlist")
+    if fontlist:
+        env["STEALTHFOX_FONTLIST"] = fontlist
+    system_ui = prefs.get("zoom.stealth.font.system_ui")
+    if system_ui:
+        env["STEALTHFOX_SYSTEMUI"] = system_ui
+    webrtc_ip = env.get("STEALTHFOX_WEBRTC_PUBLIC_IP") or egress_ip
+    if webrtc_ip:
+        env["STEALTHFOX_WEBRTC_PUBLIC_IP"] = webrtc_ip
+        env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] = "1"
+    return env
