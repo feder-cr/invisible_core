@@ -7,7 +7,7 @@ bugfixes don't force a multi-hour Firefox rebuild.
 from __future__ import annotations
 
 # Bump this when a new patched Firefox build is released on GitHub.
-BINARY_VERSION: str = "firefox-13"
+BINARY_VERSION: str = "firefox-14"
 
 # Releases known to be broken — ensure_binary() refuses them with a clear error
 # instead of handing the user an unusable binary. firefox-8 was packaged without
@@ -56,9 +56,12 @@ BINARY_ENTRY_REL = {
     "darwin": "Firefox.app/Contents/MacOS/firefox",
 }
 
-# GitHub release URL template. The "TODO" owner is resolved at publication time.
+# GitHub release URL template. Binaries are hosted on the source repo
+# (firefox_antidetect_patch) since firefox-14 — the same repo that builds them,
+# so both the Playwright wrapper and the direct-launch profile-manager fetch
+# from one place. (firefox-13 and earlier lived on invisible_playwright.)
 RELEASE_URL_TEMPLATE = (
-    "https://github.com/feder-cr/invisible_playwright/releases/download/{tag}/{asset}"
+    "https://github.com/feder-cr/firefox_antidetect_patch/releases/download/{tag}/{asset}"
 )
 
 # ─────────────────────────────────────────────────────────────────────────
