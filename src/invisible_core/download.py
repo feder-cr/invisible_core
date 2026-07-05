@@ -73,7 +73,10 @@ def _resolve_asset_url(tag: str, asset_name: str) -> str:
     raise RuntimeError(f"asset {asset_name!r} not found in release {tag!r}")
 
 
-def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16) -> None:
+def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
+    """Download ``url`` to ``dst``. If ``progress`` is given it is called with
+    ``(bytes_done, total_bytes)`` as the download proceeds (total is 0 when the
+    server sends no Content-Length)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     headers: dict[str, str] = {}
     token = _github_token()
@@ -82,10 +85,18 @@ def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16) -> None:
         headers["Accept"] = "application/octet-stream"
     with requests.get(url, stream=True, timeout=60, headers=headers) as r:
         r.raise_for_status()
+        total = int(r.headers.get("Content-Length") or 0)
+        done = 0
         with open(dst, "wb") as f:
             for chunk in r.iter_content(chunk_size):
                 if chunk:
                     f.write(chunk)
+                    done += len(chunk)
+                    if progress is not None:
+                        try:
+                            progress(done, total)
+                        except Exception:
+                            pass
 
 
 def _sha256_file(path: Path) -> str:
@@ -147,8 +158,11 @@ def _post_extract_darwin(app_root: Path, entry: Path) -> None:
         pass
 
 
-def ensure_binary(version: str = BINARY_VERSION) -> Path:
-    """Return a path to a runnable Firefox executable. Download if needed."""
+def ensure_binary(version: str = BINARY_VERSION, progress=None) -> Path:
+    """Return a path to a runnable Firefox executable. Download if needed.
+
+    ``progress``, if given, is called with ``(bytes_done, total_bytes)`` while the
+    (large) archive downloads, for a UI progress bar."""
     if version in BROKEN_VERSIONS:
         raise RuntimeError(
             f"{version} is a known-broken release (the juggler automation layer is "
@@ -173,7 +187,7 @@ def ensure_binary(version: str = BINARY_VERSION) -> Path:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         archive_path = tmp / asset
-        _download_file(url_archive, archive_path)
+        _download_file(url_archive, archive_path, progress=progress)
         sums_path = tmp / "checksums.txt"
         _download_file(url_sums, sums_path)
         sums = _parse_checksums(sums_path.read_text())
