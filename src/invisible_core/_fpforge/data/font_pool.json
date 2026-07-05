@@ -4,6 +4,12 @@
       "name": "arial"
     },
     {
+      "name": "arial black"
+    },
+    {
+      "name": "bahnschrift"
+    },
+    {
       "name": "calibri"
     },
     {
@@ -34,6 +40,9 @@
       "name": "ebrima"
     },
     {
+      "name": "franklin gothic"
+    },
+    {
       "name": "franklin gothic medium"
     },
     {
@@ -49,22 +58,22 @@
       "name": "impact"
     },
     {
+      "name": "ink free"
+    },
+    {
       "name": "javanese text"
+    },
+    {
+      "name": "leelawadee"
+    },
+    {
+      "name": "leelawadee ui"
     },
     {
       "name": "lucida console"
     },
     {
       "name": "lucida sans unicode"
-    },
-    {
-      "name": "ms gothic"
-    },
-    {
-      "name": "ms pgothic"
-    },
-    {
-      "name": "mv boli"
     },
     {
       "name": "malgun gothic"
@@ -91,7 +100,16 @@
       "name": "microsoft sans serif"
     },
     {
+      "name": "microsoft tai le"
+    },
+    {
+      "name": "microsoft uighur"
+    },
+    {
       "name": "microsoft yahei"
+    },
+    {
+      "name": "microsoft yahei ui"
     },
     {
       "name": "microsoft yi baiti"
@@ -100,16 +118,46 @@
       "name": "mingliu-extb"
     },
     {
+      "name": "mingliu_hkscs-extb"
+    },
+    {
+      "name": "mingliu_mscs-extb"
+    },
+    {
       "name": "mongolian baiti"
+    },
+    {
+      "name": "ms gothic"
+    },
+    {
+      "name": "ms pgothic"
+    },
+    {
+      "name": "ms ui gothic"
+    },
+    {
+      "name": "mv boli"
     },
     {
       "name": "myanmar text"
     },
     {
-      "name": "pmingliu-extb"
+      "name": "nirmala ui"
+    },
+    {
+      "name": "nsimsun"
     },
     {
       "name": "palatino linotype"
+    },
+    {
+      "name": "pmingliu-extb"
+    },
+    {
+      "name": "segoe fluent icons"
+    },
+    {
+      "name": "segoe mdl2 assets"
     },
     {
       "name": "segoe print"
@@ -121,7 +169,22 @@
       "name": "segoe ui"
     },
     {
+      "name": "segoe ui emoji"
+    },
+    {
+      "name": "segoe ui historic"
+    },
+    {
+      "name": "segoe ui light"
+    },
+    {
+      "name": "segoe ui semilight"
+    },
+    {
       "name": "segoe ui symbol"
+    },
+    {
+      "name": "segoe ui variable"
     },
     {
       "name": "simsun"
@@ -136,6 +199,15 @@
       "name": "sylfaen"
     },
     {
+      "name": "symbol"
+    },
+    {
+      "name": "tahoma"
+    },
+    {
+      "name": "times new roman"
+    },
+    {
       "name": "trebuchet ms"
     },
     {
@@ -145,16 +217,22 @@
       "name": "webdings"
     },
     {
+      "name": "wingdings"
+    },
+    {
+      "name": "wingdings 2"
+    },
+    {
+      "name": "wingdings 3"
+    },
+    {
       "name": "yu gothic"
     },
     {
-      "name": "courier"
+      "name": "yu gothic medium"
     },
     {
-      "name": "helvetica"
-    },
-    {
-      "name": "segoe ui light"
+      "name": "yu gothic ui"
     }
   ],
   "optional": [],
