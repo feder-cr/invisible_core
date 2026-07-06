@@ -158,11 +158,22 @@ def _post_extract_darwin(app_root: Path, entry: Path) -> None:
         pass
 
 
-def ensure_binary(version: str = BINARY_VERSION, progress=None) -> Path:
+def ensure_binary(version: str = BINARY_VERSION, progress=None, status=None) -> Path:
     """Return a path to a runnable Firefox executable. Download if needed.
 
     ``progress``, if given, is called with ``(bytes_done, total_bytes)`` while the
-    (large) archive downloads, for a UI progress bar."""
+    (large) archive downloads, for a UI progress bar. ``status``, if given, is
+    called with a phase string ("downloading" | "verifying" | "extracting") so a
+    UI can show what the post-100% (silent, no byte-progress) steps are doing -
+    the SHA256 check + the archive extraction can take tens of seconds with no
+    download progress, and otherwise look frozen at 100%."""
+    def _phase(p: str) -> None:
+        if status is not None:
+            try:
+                status(p)
+            except Exception:
+                pass
+
     if version in BROKEN_VERSIONS:
         raise RuntimeError(
             f"{version} is a known-broken release (the juggler automation layer is "
@@ -187,6 +198,7 @@ def ensure_binary(version: str = BINARY_VERSION, progress=None) -> Path:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         archive_path = tmp / asset
+        _phase("downloading")
         _download_file(url_archive, archive_path, progress=progress)
         sums_path = tmp / "checksums.txt"
         _download_file(url_sums, sums_path)
@@ -194,11 +206,13 @@ def ensure_binary(version: str = BINARY_VERSION, progress=None) -> Path:
         expected = sums.get(asset)
         if expected is None:
             raise RuntimeError(f"no SHA256 for {asset} in checksums.txt")
+        _phase("verifying")
         actual = _sha256_file(archive_path)
         if actual.lower() != expected.lower():
             raise RuntimeError(
                 f"SHA256 mismatch for {asset}: got {actual}, expected {expected}"
             )
+        _phase("extracting")
         _extract(archive_path, version_dir)
 
     if plat == "darwin":
