@@ -22,11 +22,14 @@ def test_write_user_js_creates_dir_and_overwrites(tmp_path):
     assert "a" not in text  # overwritten, not appended
 
 
-def test_build_launch_env_sets_font_and_webrtc():
+def test_build_launch_env_no_font_env_but_webrtc():
+    # Fonts are handled entirely in the binary (always bundle-only, self-contained),
+    # so build_launch_env must NOT set any STEALTHFOX_FONTLIST/SYSTEMUI env - even
+    # when legacy font prefs are passed. WebRTC egress + TZ are still wired.
     prefs = {"zoom.stealth.font.fontlist": "Arial,Calibri", "zoom.stealth.font.system_ui": "Segoe UI"}
     env = build_launch_env(prefs, timezone="America/New_York", egress_ip="1.2.3.4", base_env={})
-    assert env["STEALTHFOX_FONTLIST"] == "Arial,Calibri"
-    assert env["STEALTHFOX_SYSTEMUI"] == "Segoe UI"
+    assert "STEALTHFOX_FONTLIST" not in env
+    assert "STEALTHFOX_SYSTEMUI" not in env
     assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "1.2.3.4"
     assert env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] == "1"
     assert env["TZ"]  # a POSIX TZ string was set

@@ -559,37 +559,12 @@ def translate_profile_to_prefs(
     prefs["media.mediasource.webm.enabled"]   = profile.codec.mediasource_webm
     prefs["media.mediasource.mp4.enabled"]    = profile.codec.mediasource_mp4
 
-    # Fonts — real bundled fonts (no collapse). The binary ships the real
-    # Windows font files in <GRE>/fonts and loads them via MOZ_BUNDLED_FONTS, so
-    # glyphs are genuine on every host. We expose this profile's family set via
-    # the per-profile fontlist, which the binary applies to the native system
-    # font allow-list AT CONSTRUCTION (no runtime rebuild → no scan stall), and
-    # force the system-ui generic to Segoe UI. profile.fonts is the _fpforge
-    # sample (core always + a conditioned optional subset). Per-profile metric
-    # uniqueness comes from the shared fpp.hw_seed jitter in the HarfBuzz shaper
-    # (set with the other fpp prefs), not from fabricated widths.
-    prefs["zoom.stealth.font.fontlist"] = ",".join(profile.fonts)
-    prefs["zoom.stealth.font.system_ui"] = "Segoe UI"
-
-    # Activate the bundled real-Windows fonts (MOZ_BUNDLED_FONTS / <GRE>/fonts).
-    prefs["gfx.bundled-fonts.activate"] = 1
-    # Point the CSS generics at Windows defaults. On a Windows HOST Firefox's
-    # built-in name-lists already resolve to these (and they're in the fontlist
-    # so they survive the allow-list); but on a non-Windows host (Linux/Mac) the
-    # built-in defaults name host fonts (DejaVu/Liberation/…) which the allow-list
-    # hides — so the generics would collapse. Setting them explicitly keeps the
-    # generics resolving to the bundled Windows families on EVERY host (system-ui
-    # is forced to Segoe UI by the C++ hook above, so it is not listed here).
-    prefs["font.name-list.serif.x-western"] = "Times New Roman"
-    prefs["font.name-list.sans-serif.x-western"] = "Arial"
-    prefs["font.name-list.monospace.x-western"] = "Consolas"
-    prefs["font.name-list.sans-serif.ja"] = "Yu Gothic UI"
-    prefs["font.name-list.serif.ja"] = "Yu Gothic UI"
-    prefs["font.name-list.sans-serif.ko"] = "Malgun Gothic"
-    prefs["font.name-list.serif.ko"] = "Malgun Gothic"
-    prefs["font.name-list.sans-serif.zh-CN"] = "Microsoft YaHei UI"
-    prefs["font.name-list.sans-serif.zh-TW"] = "Microsoft JhengHei UI"
-    prefs["font.name-list.sans-serif.zh-HK"] = "Microsoft JhengHei UI"
+    # Fonts - NOTHING to configure here. The patched binary is self-contained:
+    # it is always bundle-only (host system fonts never enter the font list),
+    # exposes exactly the bundled standard-Windows families, and bakes system-ui
+    # -> "Segoe UI" and the CSS generics -> Windows fonts in C++. There is no
+    # external fontlist / allow-list / name-list: the list IS the bundle. See
+    # gfxPlatformFontList (StealthSkipFamily, StealthGenericWindowsFont).
 
     # UI / dark mode + Windows colors palette (only when light theme).
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)

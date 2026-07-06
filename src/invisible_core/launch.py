@@ -54,20 +54,14 @@ def build_launch_env(
 ) -> Dict[str, str]:
     """Subprocess env for the patched binary. Mirrors the wrapper's _build_env.
 
-    STEALTHFOX_FONTLIST/SYSTEMUI must be present at process start (the binary
-    reads them in the gfxPlatformFontList ctor, before any pref IPC). TZ tunes
-    the libc clock. STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy egress IP;
-    an already-set value in base_env wins.
+    Fonts need NO env: the patched binary is self-contained (always bundle-only,
+    the exposed set is the bundle itself). TZ tunes the libc clock.
+    STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy egress IP; an already-set
+    value in base_env wins.
     """
     env = dict(os.environ if base_env is None else base_env)
     if timezone:
         env["TZ"] = _tz_env(timezone)
-    fontlist = prefs.get("zoom.stealth.font.fontlist")
-    if fontlist:
-        env["STEALTHFOX_FONTLIST"] = fontlist
-    system_ui = prefs.get("zoom.stealth.font.system_ui")
-    if system_ui:
-        env["STEALTHFOX_SYSTEMUI"] = system_ui
     webrtc_ip = env.get("STEALTHFOX_WEBRTC_PUBLIC_IP") or egress_ip
     if webrtc_ip:
         env["STEALTHFOX_WEBRTC_PUBLIC_IP"] = webrtc_ip
