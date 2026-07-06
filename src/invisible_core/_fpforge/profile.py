@@ -65,7 +65,6 @@ class WebGLProfile:
 #      "codec.mediasource_webm", "codec.mediasource_mp4",
 #      "codec.webspeech_synth"
 #      "webgl.msaa_samples"
-#      "fonts"            (replaces the whole list)
 #      "dark_theme"
 # ──────────────────────────────────────────────────────────────────────
 
@@ -80,7 +79,7 @@ _PIN_GROUPS = {
     },
     "webgl": {"msaa_samples"},
 }
-_PIN_TOP = {"fonts", "dark_theme"}
+_PIN_TOP = {"dark_theme"}
 
 
 def _validate_pin_key(key: str) -> None:
@@ -118,7 +117,6 @@ class Profile:
     audio: AudioProfile
     codec: CodecProfile
     webgl: WebGLProfile
-    fonts: List[str]
     dark_theme: bool
     # Bayesian browsing-history: list of {name, category, cookie_profile}
     # dicts sampled from data/browsing_pool.json with per-class CPT. Used
@@ -157,7 +155,6 @@ _PIN_TO_RAW = {
     "codec.webspeech_synth": "webspeech_synth",
     "webgl.msaa_samples": "msaa_samples",
     "dark_theme": "dark_theme",
-    # "fonts" is a list — handled specially (joined into font_whitelist).
 }
 
 
@@ -165,11 +162,6 @@ def _apply_pins_to_raw(raw: Dict[str, Any], pin: Dict[str, Any]) -> Dict[str, An
     """Return a copy of `raw` with the pinned sampler-level fields updated."""
     out = dict(raw)
     for key, value in pin.items():
-        if key == "fonts":
-            if not isinstance(value, (list, tuple)):
-                raise TypeError("pin 'fonts' must be a list/tuple of strings")
-            out["font_whitelist"] = ",".join(value)
-            continue
         raw_key = _PIN_TO_RAW.get(key)
         if raw_key is None:
             # Shouldn't happen after validation, but guard anyway.
@@ -227,13 +219,6 @@ def generate_profile(
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
 
-    # Font whitelist is stored as a comma-separated string in raw; split it.
-    font_wl = raw.get("font_whitelist", "")
-    if isinstance(font_wl, str):
-        fonts = [f.strip() for f in font_wl.split(",") if f.strip()]
-    else:
-        fonts = list(font_wl) if font_wl else []
-
     return Profile(
         seed=int(raw["stealth_seed"]),
         gpu=GPUProfile(
@@ -266,7 +251,6 @@ def generate_profile(
             webspeech_synth=bool(raw["webspeech_synth"]),
         ),
         webgl=WebGLProfile(msaa_samples=int(raw["msaa_samples"])),
-        fonts=fonts,
         dark_theme=bool(raw["dark_theme"]),
         browsing_history=list(raw.get("browsing_history") or []),
         _raw=raw,

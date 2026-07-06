@@ -75,7 +75,6 @@ _CPT_CODEC = _load("cpt_codec_given_class.json")["table"]
 # Audio now conditional on gpu_class (workstation → pro audio, old → 44.1kHz onboard)
 _CPT_AUDIO = _load("cpt_audio_given_class.json")["table"]
 _INDEP = _load("priors_independent.json")
-_FONT_POOL = _load("font_pool.json")
 # hardwareConcurrency: grounded in the REAL Windows marginal (browserforge Windows UAs).
 # cores are OS-level, ~independent of GPU given the OS (browserforge confirms), so this is a
 # root marginal — NOT conditioned on gpu_class/intra_tier. Fixes the old CPT over-representing
@@ -86,20 +85,6 @@ _CORES_MARGINAL = [
     for e in _load("win_hw_marginals.json")["cores"]
     if 2 <= int(e["value"]) <= 64 and e["prob"] >= 0.004
 ]
-# Each entry is a dict {"name": "<lowercase family>", "factor": float}.
-# - name: the font family advertised to the page.
-# - factor: per-family width scale used by the consumer to make the family
-#   detectable by width-diff probes.
-# Core = always-included; Optional = sampled with P(font | gpu_class).
-_FONT_CORE: list = _FONT_POOL["core"]
-_FONT_OPTIONAL: list = _FONT_POOL["optional"]
-_CPT_FONTS_OPT = _load("cpt_fonts_optional_given_class.json")["table"]  # legacy (per-font sampling, superseded by profiles)
-# Realistic Windows font PROFILES (2026-06-18): each = a real machine's optional-font set
-# (validated to NOT over-claim on FP Pro). Profile-level variation (machines differ in
-# Office/extra fonts) instead of per-font random sampling, which produced unrealistic
-# combinations (exotic fonts -> FP Pro over-detection -> tampering_ml tell).
-_FONT_PROFILES: list = _FONT_POOL.get("profiles", [])
-_OPT_BY_NAME = {e["name"]: e for e in _FONT_OPTIONAL}
 # Browsing-history pool + CPT (per-class probabilities for visited sites).
 # Drives _recaptcha_seed's cookie pre-seed: each persona ends up with a
 # coherent list of ~15-30 visited sites whose categories correlate with
@@ -257,79 +242,6 @@ _NETWORK = Network([
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  FONT LIST (Bayesian: core ∪ sampled_optional | gpu_class)
-# ═══════════════════════════════════════════════════════════════════════
-# The browser sees ONLY these families (everything else hidden) and renders
-# them from the REAL Windows font files the binary bundles in <GRE>/fonts
-# (MOZ_BUNDLED_FONTS). No fabricated widths: per-session metric uniqueness
-# comes from the HarfBuzz per-glyph jitter (shared fpp.hw_seed), not here.
-# Core (~112): always included — fresh Win11 + Office 2021 English.
-# Optional (~40): one realistic Windows profile sampled per seed (weighted,
-# deterministic) → ~3-8 optional families differ per session while staying
-# centered on 'typical Windows user'.
-
-
-def derive_font_prefs(gpu_class: str, rng) -> Dict[str, str]:
-    """Build the session's font family list.
-
-    Profile-based (not per-font random):
-      - Core families always included (OS defaults + CSS-generic backers).
-      - Optional families come from ONE realistic Windows profile picked per
-        seed (weighted, deterministic).
-
-    Returns ``{"whitelist": "arial,calibri,marlett,..."}`` — the comma-joined
-    family list to advertise. The binary applies it to the native system font
-    allow-list AT CONSTRUCTION and renders each family from the bundled real
-    Windows file, so glyphs and widths are genuine. To add a family, just add
-    an entry to font_pool.json:core/optional — no special-case code needed.
-    """
-    # Profile-based (2026-06-18): pick ONE realistic Windows font profile (weighted,
-    # deterministic per seed). Per-font random sampling is superseded — it produced
-    # unrealistic optional combinations (exotic fonts) that FP Pro over-detected
-    # (detected-set 26 vs real 20 -> tampering_ml ~0.72). Profiles are validated subsets
-    # of a real machine's set, so the detected-set matches a genuine Windows install.
-    included: list = list(_FONT_CORE)  # core: always present (OS defaults + generic backers)
-    profile = None
-    if _FONT_PROFILES:
-        total = sum(p.get("weight", 1) for p in _FONT_PROFILES)
-        anchor = rng.random() * total
-        cum = 0.0
-        for p in _FONT_PROFILES:
-            cum += p.get("weight", 1)
-            if anchor < cum:
-                profile = p
-                break
-        if profile is None:
-            profile = _FONT_PROFILES[-1]
-    if profile is not None:
-        for name in profile.get("optional", []):
-            entry = _OPT_BY_NAME.get(name)
-            if entry is not None:
-                included.append(entry)
-    else:
-        included.extend(_FONT_OPTIONAL)  # fallback (no profiles defined): all optional
-    # Dedup by name (a profile may list a font that is also in core, e.g. after a
-    # standard font is promoted core→always-present) so the list never carries a
-    # duplicate family.
-    _seen: set = set()
-    _uniq: list = []
-    for e in included:
-        if e["name"] not in _seen:
-            _seen.add(e["name"])
-            _uniq.append(e)
-    included = _uniq
-    # Deterministic ordering: sort by name
-    included.sort(key=lambda e: e["name"])
-    whitelist = ",".join(e["name"] for e in included)
-    return {"whitelist": whitelist}
-
-
-# Back-compat shim: legacy callers still import derive_font_whitelist.
-def derive_font_whitelist(gpu_class: str, rng) -> str:
-    return derive_font_prefs(gpu_class, rng)["whitelist"]
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  BROWSING HISTORY (Bayesian: per-site P(visited|gpu_class))
 # ═══════════════════════════════════════════════════════════════════════
 def derive_browsing_history(gpu_class: str, rng) -> list:
@@ -422,15 +334,6 @@ class Forge:
             "storage_quota_mb": int(bundle["storage_quota_mb"]),
             # Independent marginals
             "dark_theme": int(bundle["dark_theme"]),
-            # Bayesian font prefs (coherent pair: whitelist + per-family
-            # width scale metrics, both sampled from the same font_pool.json
-            # and conditioned on gpu_class).
-            **{
-                f"font_{k}": v
-                for k, v in derive_font_prefs(
-                    bundle["gpu_class"], self._rng
-                ).items()
-            },
             # Bayesian browsing history (per-class P(visited|gpu_class)).
             # Consumed by _recaptcha_seed.py to seed coherent cookie history
             # when invisible_playwright is launched with prep_recaptcha=True.
