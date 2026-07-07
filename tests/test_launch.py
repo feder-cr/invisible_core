@@ -1,6 +1,44 @@
 import json
 from pathlib import Path
-from invisible_core.launch import write_user_js, build_launch_env
+from invisible_core.launch import write_user_js, build_launch_env, build_launch_plan
+
+
+def test_write_user_js_float_is_quoted(tmp_path):
+    # Firefox has no float pref type; a fractional value must be a STRING or the
+    # user.js fails to parse from that line on. Regression: device-pixel-ratio
+    # 1.25 was emitted as a bare `1.25` -> "prefs parse error: unexpected char".
+    out = write_user_js(tmp_path / "p", {"zoom.stealth.screen.dpr": 1.25})
+    assert out.read_text(encoding="utf-8").strip() == 'user_pref("zoom.stealth.screen.dpr", "1.25");'
+
+
+def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
+    import invisible_core.download as _dl
+    import invisible_core._geo as _geo
+    import invisible_core._fpforge as _fp
+    import invisible_core.prefs as _prefs
+    import invisible_core._proxy as _proxy
+    from invisible_core._geo import SessionGeo
+
+    monkeypatch.setattr(_dl, "ensure_binary", lambda ver=None: "/fake/firefox")
+    monkeypatch.setattr(_geo, "prepare_session_geo",
+                        lambda tz, proxy: SessionGeo("America/New_York", "1.2.3.4"))
+    monkeypatch.setattr(_geo, "resolve_session_locale", lambda ip, proxy: "en-US")
+    monkeypatch.setattr(_fp, "generate_profile", lambda seed, pin=None: object())
+    # include a float pref to exercise the serialization end to end
+    monkeypatch.setattr(_prefs, "translate_profile_to_prefs",
+                        lambda fp, **kw: {"zoom.stealth.screen.dpr": 1.25})
+    monkeypatch.setattr(_proxy, "configure_proxy", lambda proxy, prefs: None)
+
+    pdir = tmp_path / "p"
+    plan = build_launch_plan(42, profile_dir=pdir, timezone="auto", locale="auto")
+
+    assert plan.binary == "/fake/firefox"
+    assert plan.argv == ["/fake/firefox", "-no-remote", "-profile", str(pdir), "about:blank"]
+    text = (pdir / "user.js").read_text(encoding="utf-8")
+    assert 'user_pref("zoom.stealth.screen.dpr", "1.25");' in text            # float -> string
+    assert 'user_pref("toolkit.startup.max_resumed_crashes", -1);' in text    # no Safe Mode prompt
+    assert 'user_pref("browser.sessionstore.resume_from_crash", false);' in text
+    assert plan.env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "1.2.3.4"
 
 
 def test_write_user_js_emits_user_pref_lines(tmp_path):

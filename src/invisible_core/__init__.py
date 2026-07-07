@@ -39,7 +39,7 @@ from ._headless import cloak_prefs, make_virtual_display
 from ._proxy import configure_proxy
 from .config import get_default_args, get_default_stealth_prefs
 from .constants import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
-from .launch import build_launch_env, write_user_js
+from .launch import LaunchPlan, build_launch_env, build_launch_plan, write_user_js
 
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
@@ -81,6 +81,8 @@ __all__ = [
     "cloak_prefs",
     "make_virtual_display",
     # direct-launch helpers (shared by the wrapper + the profile manager)
+    "build_launch_plan",
+    "LaunchPlan",
     "build_launch_env",
     "write_user_js",
     # constants
