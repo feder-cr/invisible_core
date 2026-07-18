@@ -7,7 +7,7 @@ bugfixes don't force a multi-hour Firefox rebuild.
 from __future__ import annotations
 
 # Bump this when a new patched Firefox build is released on GitHub.
-BINARY_VERSION: str = "firefox-16"
+BINARY_VERSION: str = "firefox-17"
 
 # Releases known to be broken — ensure_binary() refuses them with a clear error
 # instead of handing the user an unusable binary. firefox-8 was packaged without
