@@ -30,6 +30,7 @@ import os
 import re
 from typing import Any, Dict, Optional
 
+from ..constants import USER_AGENT
 from ._network import Network, Node
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,10 +45,10 @@ def _load(filename: str) -> Any:
 #  LOCKED IDENTITY (compiled into our Firefox 150 build — never varies)
 # ═══════════════════════════════════════════════════════════════════════
 _LOCKED: Dict[str, Any] = {
-    "user_agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) "
-        "Gecko/20100101 Firefox/150.0.1"
-    ),
+    # Derived from FIREFOX_UPSTREAM_VERSION (constants.USER_AGENT). The old
+    # literal "Firefox/150.0.1" was a patch-versioned UA that no real Firefox
+    # emits, so the spoof itself was a tell.
+    "user_agent": USER_AGENT,
     "platform": "Win32",
     "oscpu": "Windows NT 10.0; Win64; x64",
     "app_code_name": "Mozilla",

@@ -20,6 +20,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Dict, Optional
 
+from .constants import USER_AGENT
 from ._fpforge import Profile
 from ._webgl_personas import render_noise_seed, select_persona
 
@@ -30,9 +31,10 @@ from ._webgl_personas import render_noise_seed, select_persona
 # ──────────────────────────────────────────────────────────────────────
 
 _NAVIGATOR_OVERRIDES: Dict[str, str] = {
-    "general.useragent.override":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) "
-        "Gecko/20100101 Firefox/150.0.1",
+    # Derived from FIREFOX_UPSTREAM_VERSION (see constants.USER_AGENT): the
+    # previous literal said "Firefox/150.0.1", a patch-versioned form that no
+    # real Firefox emits.
+    "general.useragent.override": USER_AGENT,
     "general.platform.override":   "Win32",
     "general.oscpu.override":      "Windows NT 10.0; Win64; x64",
     # general.buildID.override removed 2026-04-28: the previous value
@@ -186,6 +188,20 @@ _BASELINE: Dict[str, Any] = {
     "privacy.fingerprintingProtection":                              False,
     "privacy.fingerprintingProtection.pbmode":                       False,
     "privacy.fingerprintingProtection.remoteOverrides.enabled":      False,
+
+    # Master toggle for Firefox's baseline fingerprinting protection. FF151
+    # graduated it from nightly-only to all channels; its 3 desktop targets are
+    # EfficientCanvasRandomization + ScreenAvailToResolution + MaxTouchPointsCollapse.
+    # EfficientCanvasRandomization re-noises the 2D canvas at the image-encoder
+    # stage, DOWNSTREAM of our seeded substitution, with a per-session key →
+    # canvas hash drifts every session (fppro_consistency FAIL on FF151).
+    # We do our own seeded canvas/screen/touch via patches, so turn Firefox's
+    # baseline off (same rationale as the two prefs above). FF150 release had
+    # these off already (nightly-only), so this RESTORES shipped-FF150 behavior.
+    # Verified A/B: canvas becomes seed-deterministic (canvas_geo host-independent;
+    # canvas_text stays host-dependent via glyph rasterization on FF150 AND FF151,
+    # a pre-existing property, not a rebase regression). e2e/screen/flags unchanged.
+    "privacy.baselineFingerprintingProtection":                      False,
 
     # WebRTC: enabled, looks like a real Firefox behind NAT, no real-IP leak.
     # obfuscate_host_addresses=true → host candidate is `<uuid>.local` mDNS,

@@ -7,7 +7,7 @@ bugfixes don't force a multi-hour Firefox rebuild.
 from __future__ import annotations
 
 # Bump this when a new patched Firefox build is released on GitHub.
-BINARY_VERSION: str = "firefox-17"
+BINARY_VERSION: str = "firefox-18"
 
 # Releases known to be broken — ensure_binary() refuses them with a clear error
 # instead of handing the user an unusable binary. firefox-8 was packaged without
@@ -16,11 +16,31 @@ BINARY_VERSION: str = "firefox-17"
 # firefox-8 from before the bump would otherwise keep being used silently.
 BROKEN_VERSIONS: frozenset[str] = frozenset({"firefox-8"})
 
-# Underlying Firefox version (for display only; does not drive downloads).
-FIREFOX_UPSTREAM_VERSION: str = "150.0.1"
+# Underlying Firefox version. Drives the spoofed UA below and the archive
+# basename, so it is NOT display-only: it must match the base the binary was
+# actually built from. A binary that behaves like 151 while claiming 150 is a
+# cross-check a detector can make (the FF151 PNG encoder signature is already
+# observable), so this moves in the same change that ships the binary.
+FIREFOX_UPSTREAM_VERSION: str = "151.0"
 
 # The base filename prefix used inside archives.
 BINARY_BASENAME: str = f"firefox-{FIREFOX_UPSTREAM_VERSION}-stealth"
+
+# ── Spoofed User-Agent ────────────────────────────────────────────────
+# Single source of truth, derived from FIREFOX_UPSTREAM_VERSION so it can
+# never drift from the binary we actually ship.
+#
+# Firefox puts only MAJOR.MINOR in the UA - a real 150.0.1 build reports
+# "Firefox/150.0", never "Firefox/150.0.1" (verified against the binary:
+# navigator.userAgent of the unpatched build ends in "Firefox/150.0").
+# Both call sites used to hardcode "Firefox/150.0.1", a string no real
+# Firefox ever emits - i.e. the spoof itself was the fingerprint. Deriving
+# it here keeps the form correct and makes the next base bump automatic.
+UA_VERSION: str = ".".join(FIREFOX_UPSTREAM_VERSION.split(".")[:2])  # e.g. "151.0"
+USER_AGENT: str = (
+    f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{UA_VERSION}) "
+    f"Gecko/20100101 Firefox/{UA_VERSION}"
+)
 
 
 def ARCHIVE_NAME(platform_key: str, machine: str) -> str:
