@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "invisible-core"
+name = "invisible_core"
 # Derived from the seal (see src/invisible_core/_version.py): the tag number of
 # the engine this core is sealed to, so a binary bump always moves the version
 # string pip compares before it decides whether to reinstall. A core-only fix
