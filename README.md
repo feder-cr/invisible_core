@@ -1,12 +1,16 @@
 # invisible_core
 
-Pure config for a patched Firefox stealth profile — **zero Playwright dependency**.
+Pure config for a patched Firefox stealth profile - **zero Playwright dependency**.
 
 `seed → fingerprint profile → Firefox prefs`, plus patched-binary download,
 proxy config, and geo/timezone resolution. This is the shared foundation used by:
 
-- **invisible_playwright** — the Playwright automation wrapper (`InvisiblePlaywright`).
-- **invisible_manager** — the antidetect profile manager (launches the binary directly).
+- **invisible_playwright** - the Playwright automation wrapper (`InvisiblePlaywright`).
+- **invisible_firefox** - the antidetect profile manager (launches the binary directly).
+
+```bash
+pip install invisible-core
+```
 
 ```python
 from invisible_core import generate_profile, translate_profile_to_prefs, ensure_binary

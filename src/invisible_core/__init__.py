@@ -1,10 +1,10 @@
-"""invisible_core — pure config for a patched Firefox stealth profile.
+"""invisible_core - pure config for a patched Firefox stealth profile.
 
 Zero Playwright dependency: seed -> fingerprint profile -> Firefox prefs,
 binary download, proxy config, geo/timezone resolution. This is the shared
 foundation used by both:
   - invisible_playwright (the Playwright automation wrapper), and
-  - invisible_manager (the antidetect profile manager, launches the binary directly).
+  - invisible_firefox (the antidetect profile manager, launches the binary directly).
 
 Quickstart:
 
@@ -41,12 +41,28 @@ from .config import get_default_args, get_default_stealth_prefs
 from .constants import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
 from .launch import LaunchPlan, build_launch_env, build_launch_plan, write_user_js
 
+# One headline version, and it is the honest one.
+#
+# `__version__` is DERIVED from the seal this package ships (invisible_core/
+# seal.json -> _version.py), so it describes the code that is about to run. That
+# is the number to put in a bug report, and the number both consumers pin with
+# `invisible-core==`.
+#
+# `__install_record_version__` is a different fact: what the installer wrote into
+# the .dist-info when the distribution was put there. It can disagree - measured
+# in this tree: record 0.1.0, files 18.0.0 - and when it does, the record is the
+# stale one while the files are what executes. It is kept because `pip`, `pip
+# check` and the doctor's "STALE RECORD" line all read it, and diagnosing that
+# skew needs both numbers. It is named so it cannot be mistaken for the version.
+from ._version import __version__
+
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
 try:
-    __version__ = _pkg_version("invisible-core")
+    __install_record_version__ = _pkg_version("invisible-core")
 except PackageNotFoundError:
-    __version__ = "0.0.0+unknown"
+    # Running from a source checkout with no install record at all.
+    __install_record_version__ = ""
 
 __all__ = [
     # fingerprint generation
@@ -89,4 +105,5 @@ __all__ = [
     "BINARY_VERSION",
     "FIREFOX_UPSTREAM_VERSION",
     "__version__",
+    "__install_record_version__",
 ]

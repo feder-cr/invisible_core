@@ -18,15 +18,25 @@ import platformdirs
 import requests
 
 from .constants import (
-    ARCHIVE_NAME,
     BINARY_ENTRY_REL,
-    BINARY_VERSION,
-    BROKEN_VERSIONS,
     GEOIP_ASSET,
     GEOIP_MMDB_NAME,
     GEOIP_REPO,
     GEOIP_RELEASE_URL_TEMPLATE,
     RELEASE_URL_TEMPLATE,
+)
+from .seal import (
+    Asset,
+    EngineMismatch,
+    Seal,
+    SealError,
+    SealMismatch,
+    active_seal,
+    read_engine_identity,
+    read_stamp,
+    resource_root,
+    verify_engine,
+    write_stamp,
 )
 
 
@@ -43,11 +53,34 @@ def _parse_owner_repo(template: str) -> tuple[str, str]:
 
 
 def cache_root() -> Path:
-    """Directory where all cached binaries live."""
+    """Directory where all cached binaries live.
+
+    INVISIBLE_PLAYWRIGHT_CACHE_DIR overrides it. It was set by the test suite
+    and read nowhere, so "isolated" cache tests were operating on the
+    developer's real cache; honouring it makes them hermetic on every OS.
+    """
+    override = os.environ.get("INVISIBLE_PLAYWRIGHT_CACHE_DIR")
+    if override:
+        return Path(override)
     return Path(platformdirs.user_cache_dir("invisible-playwright"))
 
 
-def cache_dir_for_version(version: str = BINARY_VERSION) -> Path:
+def cache_dir_for_seal(seal: Seal | None = None) -> Path:
+    """The cache directory IS the identity: tag, base version and BuildID.
+
+    A different seal names a different directory, so a warm tree belonging to a
+    different expectation is not rejected, it is never looked at.
+    """
+    s = seal or active_seal()
+    return cache_root() / f"{s.tag}_{s.upstream_version}_{s.build_id}"
+
+
+def cache_dir_for_version(version: str | None = None) -> Path:
+    """Back-compat shim. The sealed tag resolves to the content-keyed dir; any
+    other tag resolves to its legacy flat name (enumeration / cleanup only)."""
+    s = active_seal()
+    if version is None or version == s.tag:
+        return cache_dir_for_seal(s)
     return cache_root() / version
 
 
@@ -158,15 +191,74 @@ def _post_extract_darwin(app_root: Path, entry: Path) -> None:
         pass
 
 
-def ensure_binary(version: str = BINARY_VERSION, progress=None, status=None) -> Path:
-    """Return a path to a runnable Firefox executable. Download if needed.
+def _adopt_existing_cache(seal: Seal, asset: Asset, version_dir: Path) -> Path | None:
+    """Use a tree that is already on disk if it IS the sealed build.
+
+    Covers every warm cache in the field (flat cache_root()/<tag> layout) and a
+    content-keyed tree whose stamp was lost. Verified -> moved onto the
+    content-keyed name and stamped, no download. Not verified -> left exactly
+    where it is (it may belong to the other product) and the cold path runs.
+    """
+    candidates = []
+    if version_dir.exists():
+        candidates.append(version_dir)
+    legacy = cache_root() / seal.tag
+    if legacy != version_dir and legacy.exists():
+        candidates.append(legacy)
+
+    for d in candidates:
+        entry = d / asset.entry_rel
+        if not entry.exists():
+            continue
+        try:
+            verify_engine(entry, seal, source=f"existing cache {d.name}", asset=asset)
+        except EngineMismatch as e:
+            # e.summary, never a line index into the rendered message: index 3
+            # was the "engine says: Firefox X build Y" observation, so every
+            # refusal printed a line that reads like a success.
+            print(f"invisible-core: not adopting {d}: {e.summary}", file=sys.stderr)
+            continue
+        if asset.omni_sha256:
+            omni = resource_root(entry) / "omni.ja"
+            if omni.exists() and _sha256_file(omni).lower() != asset.omni_sha256.lower():
+                print(f"invisible-core: not adopting {d}: omni.ja content does not match "
+                      f"the sealed payload (superseded or modified tree)", file=sys.stderr)
+                continue
+        else:
+            # This leg ships no omni.ja (the Linux archives tar the unpacked
+            # dist/bin layout), so the seal has no payload digest to compare.
+            # Say so: an absent check is not a passed check.
+            print(f"invisible-core: {d.name}: this platform's asset has no sealed omni.ja "
+                  f"digest, so the payload bytes are not content-verified; adoption rests "
+                  f"on application.ini, platform.ini and the juggler markers",
+                  file=sys.stderr)
+        if d != version_dir:
+            try:
+                os.replace(d, version_dir)
+                d, entry = version_dir, version_dir / asset.entry_rel
+            except OSError:
+                pass  # in use, or another process moved it; it is verified, use it here
+        write_stamp(d, seal, asset=asset.name, asset_sha256=None, adopted=True)
+        print(f"invisible-core: adopted the engine already cached at {d} "
+              f"({seal.describe()}); no download needed", file=sys.stderr)
+        return entry
+    return None
+
+
+def ensure_binary(version: str | None = None, progress=None, status=None,
+                  *, seal: Seal | None = None) -> Path:
+    """Return a verified path to the sealed Firefox executable. Download if needed.
+
+    `version`, when given, must be the sealed tag: this core is paired with
+    exactly one build and cannot coherently install another.
 
     ``progress``, if given, is called with ``(bytes_done, total_bytes)`` while the
     (large) archive downloads, for a UI progress bar. ``status``, if given, is
     called with a phase string ("downloading" | "verifying" | "extracting") so a
     UI can show what the post-100% (silent, no byte-progress) steps are doing -
     the SHA256 check + the archive extraction can take tens of seconds with no
-    download progress, and otherwise look frozen at 100%."""
+    download progress, and otherwise look frozen at 100%.
+    """
     def _phase(p: str) -> None:
         if status is not None:
             try:
@@ -174,62 +266,157 @@ def ensure_binary(version: str = BINARY_VERSION, progress=None, status=None) -> 
             except Exception:
                 pass
 
-    if version in BROKEN_VERSIONS:
-        raise RuntimeError(
-            f"{version} is a known-broken release (the juggler automation layer is "
-            f"missing, so Playwright cannot drive it). Upgrade invisible_playwright "
-            f"(current BINARY_VERSION={BINARY_VERSION}) or pass a newer version."
+    seal = seal or active_seal()
+    if version is not None and version != seal.tag:
+        raise SealMismatch(
+            f"this invisible-core is sealed to {seal.describe()}; it cannot install "
+            f"{version!r}.\n"
+            f"The prefs, the spoofed User-Agent and the protocol expectations in this "
+            f"package were generated for the sealed build, so pairing them with another "
+            f"engine would ship a browser whose claim contradicts itself.\n"
+            f"To drive {version!r}, install the invisible-core sealed to it."
         )
+    if seal.is_local:
+        raise SealError(
+            f"the active seal ({seal.origin}) is a LOCAL seal with no published assets, "
+            f"so there is nothing to download. Point binary_path= / INVPW_BINARY_PATH at "
+            f"the tree this seal was generated from.")
+
     plat = sys.platform
-    mach = platform.machine()
-    asset = ARCHIVE_NAME(plat, mach)
-    entry_rel = BINARY_ENTRY_REL.get(plat)
-    if entry_rel is None:
-        raise NotImplementedError(f"no binary entry for platform {plat}")
+    asset = seal.asset_for(plat, platform.machine())
+    version_dir = cache_dir_for_seal(seal)
+    entry = version_dir / asset.entry_rel
 
-    version_dir = cache_dir_for_version(version)
-    entry = version_dir / entry_rel
-    if entry.exists():
-        return entry
+    stamp = read_stamp(version_dir)
+    if stamp and stamp.get("seal_digest") == seal.digest and entry.exists():
+        return verify_engine(entry, seal, source=f"cache hit {version_dir.name}", asset=asset)
 
-    url_archive = _resolve_asset_url(version, asset)
-    url_sums = _resolve_asset_url(version, "checksums.txt")
+    adopted = _adopt_existing_cache(seal, asset, version_dir)
+    if adopted is not None:
+        return adopted
 
+    url_archive = _resolve_asset_url(seal.tag, asset.name)
+    tmp_dir = cache_root() / f".tmp-{seal.tag}-{os.getpid()}"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        archive_path = tmp / asset
+        archive_path = Path(td) / asset.name
         _phase("downloading")
         _download_file(url_archive, archive_path, progress=progress)
-        sums_path = tmp / "checksums.txt"
-        _download_file(url_sums, sums_path)
-        sums = _parse_checksums(sums_path.read_text())
-        expected = sums.get(asset)
-        if expected is None:
-            raise RuntimeError(f"no SHA256 for {asset} in checksums.txt")
         _phase("verifying")
         actual = _sha256_file(archive_path)
-        if actual.lower() != expected.lower():
+        if actual.lower() != asset.sha256.lower():
             raise RuntimeError(
-                f"SHA256 mismatch for {asset}: got {actual}, expected {expected}"
+                f"payload mismatch for {asset.name} under tag {seal.tag}:\n"
+                f"  got      {actual}\n"
+                f"  expected {asset.sha256}  (from the seal shipped inside invisible-core)\n"
+                f"The asset published under this tag is not the payload this core was "
+                f"sealed against: the tag was re-cut, or the download was corrupted. "
+                f"Refusing to use it."
             )
         _phase("extracting")
-        _extract(archive_path, version_dir)
+        _extract(archive_path, tmp_dir)
 
+    tmp_entry = tmp_dir / asset.entry_rel
     if plat == "darwin":
-        _post_extract_darwin(version_dir, entry)
+        _post_extract_darwin(tmp_dir, tmp_entry)
+    if not tmp_entry.exists():
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise RuntimeError(f"binary not found after extraction: {tmp_entry}")
 
-    if not entry.exists():
-        raise RuntimeError(f"binary not found after extraction: {entry}")
-    return entry
+    shutil.rmtree(version_dir, ignore_errors=True)
+    try:
+        os.replace(tmp_dir, version_dir)
+    except OSError as e:
+        # The tree in tmp_dir is ~250 MB that was just downloaded AND sha256
+        # verified. Decide before deleting anything: the previous order deleted
+        # it first and then tested `entry.exists()` against the directory it had
+        # just removed, so the softening branch could never be taken and every
+        # loss of the race cost a full re-download.
+        if entry.exists():
+            # Another process landed the same sealed tree first. Ours is
+            # redundant, and the one on disk is verified below like any other.
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        else:
+            raise RuntimeError(
+                f"could not move the verified download into place: {e}\n"
+                f"  from {tmp_dir}\n"
+                f"  to   {version_dir}\n"
+                f"The download is COMPLETE and its sha256 matches the seal, so it is "
+                f"kept where it is: move that directory onto the destination by hand, "
+                f"or re-run once whatever holds the destination has exited. Deleting it "
+                f"would cost another {asset.size / (1 << 20):.0f} MB for nothing."
+            ) from e
+    write_stamp(version_dir, seal, asset=asset.name, asset_sha256=asset.sha256, adopted=False)
+    return verify_engine(entry, seal, source=f"fresh download {version_dir.name}", asset=asset)
+
+
+def engine_status(seal: Seal | None = None) -> tuple:
+    """(ok, detail) for the sealed engine's cache. Never raises. For UIs."""
+    s = seal or active_seal()
+    try:
+        asset = s.asset_for(sys.platform, platform.machine())
+        entry = cache_dir_for_seal(s) / asset.entry_rel
+        if not entry.exists():
+            return (False, "not downloaded")
+        verify_engine(entry, s, source="status check", asset=asset)
+        return (True, s.describe())
+    except EngineMismatch as e:
+        # The manager renders this string next to a red dot. It must be the
+        # problem, carried as data, not whatever line the message layout happens
+        # to put at a fixed index.
+        return (False, e.summary)
+    except Exception as e:
+        return (False, str(e))
+
+
+def iter_cached_engines():
+    """Yield (dir, identity_or_None) for every engine tree in the cache root."""
+    root = cache_root()
+    if not root.exists():
+        return
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or d.name in {"geoip"} or d.name.startswith(".tmp-"):
+            continue
+        ident = None
+        for rel in set(BINARY_ENTRY_REL.values()):
+            if (d / rel).exists():
+                try:
+                    ident = read_engine_identity(d / rel)
+                except Exception:
+                    ident = None
+                break
+        yield d, ident
+
+
+def _tree_belongs_to_tag(name: str, tag: str) -> bool:
+    """Does cache directory `name` hold the engine of release `tag`?
+
+    Two layouts, one predicate: the legacy flat `<tag>` and the content-keyed
+    `<tag>_<version>_<buildid>`. The separator is REQUIRED, otherwise a bare
+    startswith makes `firefox-180_...` a match for a seal on `firefox-18` and
+    clear_cache deletes another release's engine.
+    """
+    return name == tag or name.startswith(tag + "_")
+
+
+def clear_cache(tag: str | None = None, *, everything: bool = False) -> list:
+    """Remove engine trees only. Never the cache root, never geoip/."""
+    want = None if everything else (tag if tag is not None else active_seal().tag)
+    removed = []
+    for d, _ident in iter_cached_engines():
+        if everything or _tree_belongs_to_tag(d.name, want):
+            shutil.rmtree(d, ignore_errors=True)
+            removed.append(d)
+    return removed
 
 
 # ─────────────────────────────────────────────────────────────────────────
 #  GeoIP mmdb (timezone="auto" → map egress IP → IANA zone)
 #
 #  daijro/geoip-all-in-one is rebuilt weekly and KEEPS ONLY the latest ~2
-#  releases — older tags are pruned and 404. So we NEVER pin a tag: on every
+#  releases - older tags are pruned and 404. So we NEVER pin a tag: on every
 #  launch we resolve the CURRENT latest tag from the `releases/latest/download`
-#  permalink (its 302 Location carries the tag — a plain CDN request, NOT the
+#  permalink (its 302 Location carries the tag - a plain CDN request, NOT the
 #  rate-limited GitHub API) and download it if it differs from the cached one.
 #  Offline → reuse the cached mmdb; cold cache + offline → raise (the caller can
 #  then fall back off timezone="auto"). No stale pinned tag to rot.
@@ -275,7 +462,7 @@ def _latest_geoip_tag_api() -> str:
 
 def _resolve_latest_geoip_tag() -> str | None:
     """Current latest release tag WITHOUT the rate-limited API: HEAD the
-    ``releases/latest/download`` permalink — GitHub answers 302 with
+    ``releases/latest/download`` permalink - GitHub answers 302 with
     ``Location: …/releases/download/<tag>/<asset>``. Falls back to the API,
     then to ``None`` (offline / unparseable)."""
     try:
@@ -329,7 +516,7 @@ def geoip_mmdb_path() -> Path | None:
 
 def ensure_geoip_mmdb() -> Path:
     """Return the geoip mmdb, always the latest daijro build. Checked on EVERY
-    call — a single cheap permalink HEAD (no GitHub API, so no rate limit).
+    call - a single cheap permalink HEAD (no GitHub API, so no rate limit).
 
     Resolution order:
       1. ``STEALTHFOX_GEOIP_MMDB`` env → use that file (user-supplied / test).

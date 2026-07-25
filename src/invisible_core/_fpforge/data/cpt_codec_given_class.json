@@ -5,11 +5,11 @@
     "children": ["av1_enabled", "webm_encoder_enabled", "mediasource_webm", "mediasource_mp4", "webspeech_synth"],
     "source": "5 JS-visible codec/media prefs, joint-sampled given gpu_class. Modern/workstation GPUs bias toward latest-Firefox-defaults (all-on). Integrated_old skews toward mixed/conservative states (older FF builds, AV1 adoption lower).",
     "rationale": {
-      "av1_enabled": "media.av1.enabled — JS-visible via HTMLVideoElement.canPlayType('video/webm; codecs=\"av01.0.05M.08\"').",
-      "webm_encoder_enabled": "media.encoder.webm.enabled — JS-visible via MediaRecorder.isTypeSupported('video/webm').",
-      "mediasource_webm": "media.mediasource.webm.enabled — JS-visible via MediaSource.isTypeSupported('video/webm; codecs=\"vp9\"').",
-      "mediasource_mp4": "media.mediasource.mp4.enabled — JS-visible via MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E\"').",
-      "webspeech_synth": "media.webspeech.synth.enabled — JS-visible via ('speechSynthesis' in window). Triggers CreepJS voices probe."
+      "av1_enabled": "media.av1.enabled - JS-visible via HTMLVideoElement.canPlayType('video/webm; codecs=\"av01.0.05M.08\"').",
+      "webm_encoder_enabled": "media.encoder.webm.enabled - JS-visible via MediaRecorder.isTypeSupported('video/webm').",
+      "mediasource_webm": "media.mediasource.webm.enabled - JS-visible via MediaSource.isTypeSupported('video/webm; codecs=\"vp9\"').",
+      "mediasource_mp4": "media.mediasource.mp4.enabled - JS-visible via MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E\"').",
+      "webspeech_synth": "media.webspeech.synth.enabled - JS-visible via ('speechSynthesis' in window). Triggers CreepJS voices probe."
     },
     "note": "Replaced hw_video_decoding/wmf_enabled/ffvpx_enabled (backend-only, invisible to JS fingerprinters) with these 3 JS-visible ones for actual media.$hash entropy gain."
   },

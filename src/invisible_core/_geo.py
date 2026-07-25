@@ -1,8 +1,8 @@
 """Resolve the session timezone from the egress IP (``timezone="auto"``).
 
-Approach B: discover the egress IP with one HTTP request — routed *through the
+Approach B: discover the egress IP with one HTTP request - routed *through the
 proxy* when one is set, otherwise a direct request that sees the host's own
-public IP — then map IP → IANA timezone with an offline mmdb
+public IP - then map IP → IANA timezone with an offline mmdb
 (``daijro/geoip-all-in-one``, downloaded + cached by ``download.py``).
 
 Precedence (see ``resolve_session_timezone``):
@@ -174,7 +174,7 @@ def resolve_session_locale(egress_ip: Optional[str], proxy: Optional[Dict[str, s
     """Resolve ``locale="auto"`` to a BCP-47 locale from the egress country. Behind a proxy
     it reuses the already-discovered ``egress_ip`` (no extra round-trip); without a proxy it
     discovers the host's public IP. On any failure it returns ``en-US`` (never breaks launch
-    — locale is cosmetic, unlike timezone which traps a foreign-proxy mismatch)."""
+    - locale is cosmetic, unlike timezone which traps a foreign-proxy mismatch)."""
     from .download import ensure_geoip_mmdb
 
     try:
@@ -191,7 +191,7 @@ class SessionGeo(NamedTuple):
 
     ``timezone`` follows the precedence in the module docstring.
     ``egress_ip`` is the proxy egress IP (the IP the *outside world* sees) when
-    a proxy is set, else ``None`` — it feeds the WebRTC srflx override, which is
+    a proxy is set, else ``None`` - it feeds the WebRTC srflx override, which is
     only meaningful behind a proxy (a direct connection's real STUN already
     reports the truthful public IP, so we leave it alone).
     """
@@ -209,7 +209,7 @@ def prepare_session_geo(
     (when ``timezone`` is ``""``/``"auto"``) and the WebRTC public-IP override.
     Timezone precedence is identical to :func:`resolve_session_timezone`; the
     egress IP is best-effort for the WebRTC side (a discovery failure that the
-    timezone path doesn't need won't break the launch — but if the timezone
+    timezone path doesn't need won't break the launch - but if the timezone
     path *does* need it behind a proxy, that path still fails loudly).
     """
     from .download import ensure_geoip_mmdb
@@ -227,7 +227,7 @@ def prepare_session_geo(
         except Exception as exc:  # noqa: BLE001
             egress_err = exc
 
-    # Timezone resolution — same precedence as resolve_session_timezone.
+    # Timezone resolution - same precedence as resolve_session_timezone.
     if tz and tz.lower() != "auto":
         return SessionGeo(tz, egress_ip)  # explicit IANA wins
     try:
@@ -255,7 +255,7 @@ def resolve_session_timezone(
     """
     tz = (timezone or "").strip()
     if tz and tz.lower() != "auto":
-        return tz  # explicit IANA wins — no egress lookup
+        return tz  # explicit IANA wins - no egress lookup
     from .download import ensure_geoip_mmdb
 
     proxy_set = _proxy_is_set(proxy)

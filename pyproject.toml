@@ -4,32 +4,66 @@ build-backend = "hatchling.build"
 
 [project]
 name = "invisible-core"
-version = "0.2.0"
-description = "Pure config for a patched Firefox stealth profile: seed -> fingerprint -> prefs, binary download, proxy, geo. Zero Playwright."
+# Derived from the seal (see src/invisible_core/_version.py): the tag number of
+# the engine this core is sealed to, so a binary bump always moves the version
+# string pip compares before it decides whether to reinstall. A core-only fix
+# against the same engine moves CORE_REVISION instead, by hand - and
+# scripts/version_gate.py refuses to publish content that changed under a
+# version string that did not.
+dynamic = ["version"]
+description = "Pure config for a stealth Firefox profile: seed -> fingerprint -> prefs, engine download, proxy, geo. Zero Playwright."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "feder-cr", email = "85809106+feder-cr@users.noreply.github.com" }]
-keywords = ["firefox", "stealth", "anti-detect", "fingerprint", "browser"]
+keywords = [
+    "firefox",
+    "stealth",
+    "anti-detect",
+    "fingerprint",
+    "browser",
+    "automation",
+    "privacy",
+]
+# No `License :: OSI Approved :: MIT License` classifier: PEP 639 says the
+# License-Expression field above is the declaration, and a build tool must not
+# add the classifier beside it.
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
 ]
+# No direct URL (`name @ git+https://...`) may appear here. A public index
+# rejects an upload whose Requires-Dist carries one, and a direct reference
+# carries no version specifier, so `pip check` has nothing to compare and
+# reports a definitively broken environment as healthy.
 dependencies = [
     "platformdirs>=4",
     "requests[socks]>=2.31",
     "maxminddb>=2.2",
     "tzdata>=2024.1",
-    "tqdm>=4.66",
-    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-mock>=3", "responses>=0.24", "build>=1"]
+
+[project.scripts]
+invisible-core = "invisible_core.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/feder-cr/invisible_core"
+Repository = "https://github.com/feder-cr/invisible_core"
+Issues = "https://github.com/feder-cr/invisible_core/issues"
 
 [tool.pytest.ini_options]
 markers = [
@@ -38,13 +72,17 @@ markers = [
 ]
 addopts = "-m 'not slow'"
 
-[project.urls]
-Homepage = "https://github.com/feder-cr/invisible_core"
-Issues = "https://github.com/feder-cr/invisible_core/issues"
+[tool.hatch.version]
+source = "code"
+path = "src/invisible_core/_version.py"
+expression = "__version__"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/invisible_core"]
 exclude = ["*.bak", "*-bak"]
 
+# PUBLISHED.json and scripts/ are deliberately absent from both targets. The
+# ledger records a digest of what ships, so it must never be part of what ships:
+# a self-referential ledger would invalidate its own digest on every release.
 [tool.hatch.build.targets.sdist]
 include = ["src/invisible_core", "tests", "README.md", "LICENSE", "pyproject.toml"]

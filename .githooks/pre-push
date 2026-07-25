@@ -1,0 +1,78 @@
+#!/bin/sh
+# Refuse to push a release tag whose publish gate is red.
+#
+# WHY A HOOK AT ALL
+# -----------------
+# scripts/version_gate.py used to be wired to nothing: the script existed, its
+# test existed, and every path to an actual upload went around it. A gate that
+# needs the operator to remember it is a runbook note.
+#
+# This is the first of three layers, and the earliest one. A release tag is what
+# starts .github/workflows/publish.yml, so refusing the tag here means the
+# release never even begins - no half-built artifact, no draft to clean up.
+# Layer two is the workflow, whose upload job cannot start without the gate job.
+# Layer three is `version_gate.py publish`, which runs the gate in-process and
+# never reaches twine on a refusal.
+#
+# Only release tags are gated. Ordinary branch pushes are left alone on purpose:
+# the gate builds the project twice, and a hook that costs a minute on every
+# push is a hook people delete.
+#
+# Install: python scripts/install_hooks.py   (sets core.hooksPath to .githooks)
+# tests/test_release_wiring.py fails in an uninstalled checkout, so nobody has
+# to remember to run it - the test suite says so.
+
+# No `set -e`: the gate's exit code has to be READ and explained, not turned
+# into a silent abort. Every other failure below is handled explicitly.
+repo_root=$(git rev-parse --show-toplevel)
+gate="$repo_root/scripts/version_gate.py"
+
+python_bin=""
+for candidate in "$INVISIBLE_GATE_PYTHON" python3 python py; do
+    [ -n "$candidate" ] || continue
+    if command -v "$candidate" >/dev/null 2>&1; then
+        python_bin="$candidate"
+        break
+    fi
+done
+
+release_tag=""
+# stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    case "$remote_ref" in
+        refs/tags/v*|refs/tags/release-*)
+            release_tag="$remote_ref"
+            ;;
+    esac
+done
+
+[ -n "$release_tag" ] || exit 0
+
+echo "pre-push: $release_tag is a release tag, running the publish gate."
+
+if [ -z "$python_bin" ]; then
+    echo "pre-push: REFUSED - no python on PATH, so the publish gate cannot run." >&2
+    echo "  A release tag must never be pushed past an ungated hook. Set" >&2
+    echo "  INVISIBLE_GATE_PYTHON to an interpreter and push again." >&2
+    exit 1
+fi
+if [ ! -f "$gate" ]; then
+    echo "pre-push: REFUSED - $gate is missing, so the gate cannot run." >&2
+    exit 1
+fi
+
+"$python_bin" "$gate" check || rc=$?
+rc=${rc:-0}
+
+# 0 is the only pass. 1 refused, 2 gate broken, 4 no usable ledger - none of
+# those is a green light, and a broken gate is not a reason to proceed either.
+if [ "$rc" -ne 0 ]; then
+    echo "" >&2
+    echo "pre-push: REFUSED - the publish gate exited $rc, so $release_tag is not" >&2
+    echo "  going anywhere. Pushing it would start the publish workflow." >&2
+    echo "  Read the gate output above; it names the file and the remedy." >&2
+    exit 1
+fi
+
+echo "pre-push: gate passed."
+exit 0

@@ -4,7 +4,7 @@
     "parents": ["gpu_class"],
     "child": "storage_quota_mb",
     "value_shape": "int megabytes (reported as navigator.storage.estimate().quota / (1024*1024))",
-    "description": "Storage quota override returned by navigator.storage.estimate(). Real Firefox computes quota from disk space, which is a fingerprinting signal (stable per host). We replace it with a realistic per-session value conditioned on gpu_class — modern/high-end users tend to have larger SSDs, integrated_old older/smaller disks.",
+    "description": "Storage quota override returned by navigator.storage.estimate(). Real Firefox computes quota from disk space, which is a fingerprinting signal (stable per host). We replace it with a realistic per-session value conditioned on gpu_class - modern/high-end users tend to have larger SSDs, integrated_old older/smaller disks.",
     "source": "Typical Windows 11 disk sizes 2024-2026 per segment: budget laptops 256-512GB SSD, mainstream 512GB-1TB SSD, gaming/workstation 1-4TB SSD. Firefox default storage quota is ~50% of available disk (capped). We simulate that computation per-tier.",
     "rationale": "Values are pre-quota-limit MB as Firefox would return to navigator.storage.estimate().quota. Probabilities cover realistic ranges centered on the segment median. A single session returns one value; fingerprinters that hash the exact quota get per-session variance, matching cross-user diversity."
   },

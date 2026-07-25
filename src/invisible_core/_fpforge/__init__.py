@@ -1,6 +1,6 @@
 """Internal Bayesian fingerprint generator used by invisible_playwright.
 
-Private module — do not import from user code. Use
+Private module - do not import from user code. Use
 invisible_playwright.InvisiblePlaywright(seed=..., pin=...) instead.
 """
 from .profile import (

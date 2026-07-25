@@ -41,7 +41,7 @@ def write_user_js(profile_dir: "str | os.PathLike[str]", prefs: Dict[str, Any]) 
     return out
 
 
-# IANA→POSIX TZ map — copied verbatim from the wrapper's launcher.py so the
+# IANA→POSIX TZ map - copied verbatim from the wrapper's launcher.py so the
 # libc TZ env matches Date/Intl exactly (Arizona/Hawaii have no DST).
 _IANA_TO_POSIX_TZ: Dict[str, str] = {
     "America/New_York":             "EST5EDT",

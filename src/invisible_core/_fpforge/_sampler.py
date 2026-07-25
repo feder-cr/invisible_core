@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""stealth_forge — Bayesian fingerprint generator for Firefox 150 Windows.
+"""stealth_forge - Bayesian fingerprint generator for Firefox 150 Windows.
 
 Everything the Firefox build exposes to JS (screen, hardwareConcurrency,
 WebGL, audio, MSAA, theme, media codecs) is sampled from a Bayesian network
@@ -15,7 +15,7 @@ Graph:
           ├─> screen (w/h/dpr/av)  (CPT per class)
           └─> msaa_samples         (CPT per class)
 
-    audio (root, joint rate+latency+channels — marginal)
+    audio (root, joint rate+latency+channels - marginal)
     dark_theme                     (marginal)
     av1_enabled                    (marginal)
     webm_encoder_enabled           (marginal)
@@ -42,7 +42,7 @@ def _load(filename: str) -> Any:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  LOCKED IDENTITY (compiled into our Firefox 150 build — never varies)
+#  LOCKED IDENTITY (compiled into our Firefox 150 build - never varies)
 # ═══════════════════════════════════════════════════════════════════════
 _LOCKED: Dict[str, Any] = {
     # Derived from FIREFOX_UPSTREAM_VERSION (constants.USER_AGENT). The old
@@ -69,7 +69,7 @@ _CPT_SCREEN = _load("cpt_screen_given_class_tier.json")["table"]
 _CPT_STORAGE = _load("cpt_storage_given_class_tier.json")["table"]
 # Hidden tier variable that makes hwc/screen/storage jointly coherent
 _CPT_INTRA_TIER = _load("cpt_intra_tier_given_class.json")["table"]
-# MSAA depends on (gpu_class, screen_tier) — 4K gaming → MSAA=0, 1080p+GPU → MSAA=4
+# MSAA depends on (gpu_class, screen_tier) - 4K gaming → MSAA=0, 1080p+GPU → MSAA=4
 _CPT_MSAA = _load("cpt_msaa_given_class_screen.json")["table"]
 # Codec unchanged
 _CPT_CODEC = _load("cpt_codec_given_class.json")["table"]
@@ -78,7 +78,7 @@ _CPT_AUDIO = _load("cpt_audio_given_class.json")["table"]
 _INDEP = _load("priors_independent.json")
 # hardwareConcurrency: grounded in the REAL Windows marginal (browserforge Windows UAs).
 # cores are OS-level, ~independent of GPU given the OS (browserforge confirms), so this is a
-# root marginal — NOT conditioned on gpu_class/intra_tier. Fixes the old CPT over-representing
+# root marginal - NOT conditioned on gpu_class/intra_tier. Fixes the old CPT over-representing
 # 6 cores (~28% vs real ~2%). NB: screen size + dpr are intentionally LEFT on their existing
 # nodes (user 2026-06-18: "non modificare dpr e le size degli screen, rompono sempre").
 _CORES_MARGINAL = [
@@ -106,7 +106,7 @@ _GPU_CLASSES = (
 def classify_gpu(gpu_value: Dict[str, str]) -> str:
     """Deterministic: maps (renderer, vendor) dict to one of 6 classes.
 
-    See data/cpt_*.json — each CPT table has an entry for every class.
+    See data/cpt_*.json - each CPT table has an entry for every class.
     """
     r = gpu_value.get("renderer", "")
 
@@ -147,7 +147,7 @@ def classify_gpu(gpu_value: Dict[str, str]) -> str:
     ):
         return "low_end"
 
-    # NVIDIA discrete (any other GeForce — should be rare after the pool was
+    # NVIDIA discrete (any other GeForce - should be rare after the pool was
     # collapsed to the 3 sanitize buckets, but kept as a safety net).
     m = re.search(r"GeForce\s+(?:GTX\s+|RTX\s+)?(\d{3,4})", r)
     if m:
@@ -176,7 +176,7 @@ def classify_gpu(gpu_value: Dict[str, str]) -> str:
 # ═══════════════════════════════════════════════════════════════════════
 #  NETWORK CONSTRUCTION
 # ═══════════════════════════════════════════════════════════════════════
-# Build once at import — the network is stateless, only the RNG varies.
+# Build once at import - the network is stateless, only the RNG varies.
 
 def _gpu_marginal():
     """Build marginal distribution over GPU pool (uniform for now)."""
@@ -211,12 +211,12 @@ _NETWORK = Network([
     Node("gpu", parents=[], cpt=_gpu_marginal()),
     Node("gpu_class", parents=["gpu"], classifier=lambda ctx: classify_gpu(ctx["gpu"])),
     # Hidden variable: within a gpu_class, user's OTHER components (RAM, SSD,
-    # cores, screen) correlate — a 'premium' mid_range user has more cores,
+    # cores, screen) correlate - a 'premium' mid_range user has more cores,
     # larger SSD, higher-res screen than a 'budget' mid_range user. Without
     # this, hwc/screen/storage would be independent given gpu_class (noisy).
     Node("intra_tier", parents=["gpu_class"], cpt=_cpt_from_table(_CPT_INTRA_TIER)),
     # hw_concurrency: REAL Windows marginal (root, OS-level, not GPU-conditioned). screen +
-    # storage stay jointly coherent via (gpu_class, intra_tier) — screen size deliberately
+    # storage stay jointly coherent via (gpu_class, intra_tier) - screen size deliberately
     # unchanged (user: dpr + screen sizes break things; leave them).
     Node("hw_concurrency", parents=[], cpt=_CORES_MARGINAL),
     Node("screen", parents=["gpu_class", "intra_tier"],
@@ -253,7 +253,7 @@ def derive_browsing_history(gpu_class: str, rng) -> list:
         [{"name": "github.com", "category": "dev", "cookie_profile": "ga_cf"}, ...]
 
     Sum of CPT probabilities per class is tuned to land ~15-30 visited sites
-    on average — an established-user signature. Sorted by name for stable
+    on average - an established-user signature. Sorted by name for stable
     output across runs of the same seed.
     """
     cpt = _CPT_BROWSING.get(gpu_class)
@@ -276,7 +276,7 @@ import random
 
 
 class Forge:
-    """Fingerprint forge — single seed → coherent bundle."""
+    """Fingerprint forge - single seed → coherent bundle."""
 
     def __init__(self, seed: int):
         self.seed = int(seed)
@@ -331,7 +331,7 @@ class Forge:
             "mediasource_webm": bool(codec["mediasource_webm"]),
             "mediasource_mp4": bool(codec["mediasource_mp4"]),
             "webspeech_synth": bool(codec["webspeech_synth"]),
-            # Storage quota MB (coherent with GPU class — workstation larger SSDs).
+            # Storage quota MB (coherent with GPU class - workstation larger SSDs).
             "storage_quota_mb": int(bundle["storage_quota_mb"]),
             # Independent marginals
             "dark_theme": int(bundle["dark_theme"]),

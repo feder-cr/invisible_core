@@ -1,0 +1,233 @@
+"""The publish gate is WIRED, and these tests are what keeps it wired.
+
+The gate itself was written first and connected to nothing: `grep -rn
+version_gate` over the whole workbench found the script, its own test file and a
+comment in pyproject.toml, and every path that could actually reach an upload
+went around it. There was no .github/ and no pre-push hook in the repo at all.
+A gate somebody has to remember is a runbook note wearing a gate's clothes.
+
+Three layers now stand between a working tree and the index, and each one is
+asserted here so it cannot quietly rot:
+
+  1. `version_gate.py publish` - the only supported upload path. It runs `check`
+     in-process and never reaches twine on a refusal (proved in
+     test_release_gate.py, which drives it against real known-bad trees).
+  2. .github/workflows/publish.yml - the index credential lives in a GitHub
+     Environment that only the upload job names, and that job declares
+     `needs: gate`. Without a green gate the job holding the credential never
+     starts. There is no step ordering to get wrong.
+  3. .githooks/pre-push - refuses to push a release tag whose gate is red, so
+     the tag that starts (2) never leaves the machine.
+
+These are structural assertions over files, deliberately: a test that spun up a
+real GitHub Actions run or pushed a real tag would not run anywhere, and a
+wiring check that does not run is the thing being fixed.
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+import invisible_core
+
+REPO_ROOT = Path(invisible_core.__file__).resolve().parents[2]
+GATE = REPO_ROOT / "scripts" / "version_gate.py"
+HOOK = REPO_ROOT / ".githooks" / "pre-push"
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish.yml"
+INSTALLER = REPO_ROOT / "scripts" / "install_hooks.py"
+
+pytestmark = pytest.mark.integration
+
+# These files are outside both build targets, so they are absent from an
+# installed copy and from the sdist. Skipping is correct there; failing would
+# make `pytest` red for a user who merely installed the package.
+_in_checkout = GATE.exists()
+requires_checkout = pytest.mark.skipif(
+    not _in_checkout, reason="not a source checkout - the release wiring does not ship")
+
+
+@requires_checkout
+def test_every_layer_of_the_wiring_exists():
+    missing = [str(p) for p in (GATE, HOOK, WORKFLOW, INSTALLER) if not p.exists()]
+    assert missing == [], (
+        "the publish gate is wired to nothing again:\n  " + "\n  ".join(missing))
+
+
+# ------------------------------------------------------------------ layer 2
+
+@requires_checkout
+def test_the_upload_job_cannot_start_without_the_gate_job():
+    """The load-bearing line of the workflow. `needs: gate` on the job that
+    holds the credential is what makes the gate unskippable in CI."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    upload = text.split("\n  upload:", 1)
+    assert len(upload) == 2, "the publish workflow has no `upload` job"
+    body = upload[1]
+    assert re.search(r"^\s+needs:\s*\[?\s*gate\s*\]?\s*$", body, re.M), \
+        "the upload job does not declare `needs: gate`, so it can run past a red gate"
+    assert re.search(r"^\s+environment:\s*pypi\b", body, re.M), \
+        "the upload job does not name the environment the credential lives in"
+    assert "version_gate.py publish" in body, \
+        "the upload job does not go through the gate's own publish path"
+
+
+@requires_checkout
+def test_no_job_uploads_without_going_through_the_gate():
+    """Any `twine upload` written directly into the workflow would be an upload
+    path the gate does not sit in front of."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        assert "twine upload" not in stripped, (
+            f"the workflow uploads directly, around the gate: {stripped!r}\n"
+            "  use `version_gate.py publish`, which runs the gate in-process first.")
+        assert "pypi-publish" not in stripped, (
+            f"a publish action bypasses the gate entirely: {stripped!r}")
+
+
+@requires_checkout
+def test_the_gate_job_runs_the_gate_and_the_checkout_brings_the_ledger():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    gate_job = text.split("\n  gate:", 1)[1].split("\n  upload:", 1)[0]
+    assert "version_gate.py check" in gate_job
+    # A shallow checkout that dropped PUBLISHED.json is one of the ways the gate
+    # used to disarm itself silently. It now exits 4, but not having the file at
+    # all in CI would just mean every release run fails.
+    assert "fetch-depth: 0" in gate_job
+
+
+# ------------------------------------------------------------------ layer 3
+
+@requires_checkout
+def test_the_pre_push_hook_runs_the_gate_and_refuses_on_any_non_zero():
+    text = HOOK.read_text(encoding="utf-8")
+    assert "version_gate.py" in text, "the hook does not invoke the gate"
+    assert "refs/tags/v*" in text, "the hook does not recognise a release tag"
+    assert re.search(r'\$rc"?\s*-ne\s*0', text), \
+        "the hook does not refuse on a non-zero gate exit"
+    # Exit 2 (gate broken) and exit 4 (no ledger) are not passes either, and a
+    # hook that only tested for 1 would let both through.
+    assert "-eq 1" not in text and "= 1 ]" not in text, \
+        "the hook singles out one exit code; only 0 is a pass"
+
+
+@requires_checkout
+@pytest.mark.parametrize("stdin,expect_gate", [
+    ("refs/heads/main aaaa refs/heads/main bbbb\n", False),
+    ("refs/tags/v1.0 aaaa refs/tags/v1.0 0000\n", True),
+    ("refs/tags/release-18 aaaa refs/tags/release-18 0000\n", True),
+])
+def test_the_hook_gates_release_tags_and_leaves_ordinary_pushes_alone(
+        tmp_path, stdin, expect_gate):
+    """Runs the real hook against a fake repo, with a fake gate that always
+    refuses. An ordinary branch push must stay fast and silent; a release tag
+    must be stopped."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "scripts" / "version_gate.py").write_text(
+        "import sys; print('FAKE GATE RAN'); sys.exit(1)\n", encoding="utf-8")
+    (repo / ".githooks").mkdir()
+    hook = repo / ".githooks" / "pre-push"
+    hook.write_text(HOOK.read_text(encoding="utf-8"), encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True,
+                   capture_output=True, text=True)
+
+    r = subprocess.run([sh, str(hook), "origin", "https://example.invalid/x.git"],
+                       cwd=str(repo), input=stdin, capture_output=True, text=True,
+                       env={**_env(), "INVISIBLE_GATE_PYTHON": sys.executable})
+    text = (r.stdout or "") + (r.stderr or "")
+
+    if expect_gate:
+        assert "FAKE GATE RAN" in text, text
+        assert r.returncode != 0, "a release tag went out past a red gate"
+        assert "REFUSED" in text
+    else:
+        assert "FAKE GATE RAN" not in text, "the hook gates ordinary pushes too"
+        assert r.returncode == 0, text
+
+
+@requires_checkout
+def test_the_hook_refuses_rather_than_skipping_when_it_cannot_run_the_gate(tmp_path):
+    """The failure that matters most: the gate could not run at all.
+
+    "The gate is not here" is the one condition under which skipping is most
+    tempting and least defensible - it is indistinguishable, from the outside,
+    from a gate that was deleted on purpose. Driven for real: a checkout with no
+    scripts/version_gate.py, pushing a release tag.
+    """
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+
+    repo = tmp_path / "repo"
+    (repo / ".githooks").mkdir(parents=True)
+    hook = repo / ".githooks" / "pre-push"
+    hook.write_text(HOOK.read_text(encoding="utf-8"), encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True,
+                   capture_output=True, text=True)
+
+    r = subprocess.run([sh, str(hook), "origin", "https://example.invalid/x.git"],
+                       cwd=str(repo), input="refs/tags/v1.0 a refs/tags/v1.0 0\n",
+                       capture_output=True, text=True,
+                       env={**_env(), "INVISIBLE_GATE_PYTHON": sys.executable})
+    text = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode != 0, "a release tag went out with no gate present at all"
+    assert "REFUSED" in text and "missing" in text
+
+    # And the no-interpreter branch refuses in the same direction.
+    src = HOOK.read_text(encoding="utf-8")
+    assert any("no python" in line.lower() for line in re.findall(r"REFUSED[^\n]*", src)), \
+        "the hook does not refuse when there is no interpreter to run the gate"
+
+
+# ---------------------------------------------- the hooks are actually armed
+
+@requires_checkout
+def test_the_hooks_are_installed_in_this_checkout():
+    """The reminder that does not depend on anybody remembering.
+
+    A checked-in hook directory does nothing until core.hooksPath points at it,
+    and git will not do that for you. Running the test suite is the one thing a
+    developer does constantly, so the test suite is where this belongs.
+
+    Skipped outside a git checkout: an sdist or a CI job that unpacked a
+    tarball has no hooks to install and no push to make.
+    """
+    if subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "--git-dir"],
+                      capture_output=True).returncode != 0:
+        pytest.skip("not a git checkout")
+
+    r = subprocess.run([sys.executable, str(INSTALLER), "--check"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, (
+        (r.stdout or "") + (r.stderr or "") +
+        "\n\nThe pre-push publish gate is not armed in this clone, so a release\n"
+        "tag could be pushed without the gate ever running. One command:\n"
+        "    python scripts/install_hooks.py")
+
+
+def _find_sh():
+    for name in ("sh", "bash"):
+        from shutil import which
+        p = which(name)
+        if p:
+            return p
+    for p in (r"C:\Program Files\Git\bin\sh.exe", r"C:\Program Files\Git\usr\bin\sh.exe"):
+        if Path(p).exists():
+            return p
+    return None
+
+
+def _env():
+    import os
+    return {k: v for k, v in os.environ.items() if k != "INVISIBLE_GATE_PYTHON"}

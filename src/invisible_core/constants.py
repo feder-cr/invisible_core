@@ -1,42 +1,51 @@
-"""Compile-time constants that pin the wrapper to a specific Firefox build.
+"""Constants. Everything that describes the engine is a projection of the seal.
 
-BINARY_VERSION is bumped every time new Firefox patches are released. It is
-deliberately decoupled from the Python package version so that pure-Python
-bugfixes don't force a multi-hour Firefox rebuild.
+No engine fact is hand-edited here. BINARY_VERSION and FIREFOX_UPSTREAM_VERSION
+used to be two literals that had to move together, which is how a tag and a base
+version could disagree inside one published commit. They, BUILD_ID, CONTRACT_N,
+SEAL_DIGEST, SOURCE_COMMIT and everything computed from them (BINARY_BASENAME,
+UA_VERSION, USER_AGENT, and ARCHIVE_NAME, which returns the sealed asset name
+verbatim whenever the seal has assets) come out of seal.json, which CI generated
+from the archives it published, so they cannot disagree with each other or with
+the engine.
+
+What IS hand-written, because no seal carries it: the "firefox-" / "-stealth"
+affixes and the per-platform archive suffixes that surround the sealed version
+in BINARY_BASENAME / ARCHIVE_NAME, RELEASE_URL_TEMPLATE (the repo that hosts the
+releases), BINARY_ENTRY_REL (seal.DEFAULT_ENTRY_REL, the executable path inside
+each archive), and the four GEOIP_* constants (a third-party repo, its asset
+name and its download URL). Those move only when the hosting repo, the archive
+layout or the upstream GeoIP project moves.
+
+The NAMES are the binary/wrapper contract and never change.
 """
 from __future__ import annotations
 
-# Bump this when a new patched Firefox build is released on GitHub.
-BINARY_VERSION: str = "firefox-18"
+from ._version import CORE_REVISION, __version__ as PKG_VERSION
+from .seal import DEFAULT_ENTRY_REL, active_seal, normalize_arch
 
-# Releases known to be broken — ensure_binary() refuses them with a clear error
-# instead of handing the user an unusable binary. firefox-8 was packaged without
-# the juggler automation layer, so Playwright cannot drive it (TargetClosedError);
-# fixed in firefox-9 (package-manifest.in now ships chrome/juggler). A cached
-# firefox-8 from before the bump would otherwise keep being used silently.
-BROKEN_VERSIONS: frozenset[str] = frozenset({"firefox-8"})
+_SEAL = active_seal()
 
-# Underlying Firefox version. Drives the spoofed UA below and the archive
-# basename, so it is NOT display-only: it must match the base the binary was
-# actually built from. A binary that behaves like 151 while claiming 150 is a
-# cross-check a detector can make (the FF151 PNG encoder signature is already
-# observable), so this moves in the same change that ships the binary.
-FIREFOX_UPSTREAM_VERSION: str = "151.0"
+BINARY_VERSION: str = _SEAL.tag
+FIREFOX_UPSTREAM_VERSION: str = _SEAL.upstream_version
+# The BuildID of the leg THIS host runs. The five published legs are five CI
+# builds with five BuildIDs, so there is no seal-wide value to export here; the
+# launch-time check compares against the per-asset one, not against this.
+BUILD_ID: str = _SEAL.build_id
+CONTRACT_N: int = _SEAL.contract_n
+SEAL_DIGEST: str = _SEAL.digest
+SOURCE_COMMIT: str = _SEAL.source_commit
 
-# The base filename prefix used inside archives.
+# Retired. A superseded build is now simply a build no seal points at, and
+# ensure_binary() refuses any tag but the sealed one, so there is nothing to
+# blacklist. Kept as an empty frozenset for import compatibility.
+BROKEN_VERSIONS: frozenset[str] = frozenset()
+
 BINARY_BASENAME: str = f"firefox-{FIREFOX_UPSTREAM_VERSION}-stealth"
 
-# ── Spoofed User-Agent ────────────────────────────────────────────────
-# Single source of truth, derived from FIREFOX_UPSTREAM_VERSION so it can
-# never drift from the binary we actually ship.
-#
-# Firefox puts only MAJOR.MINOR in the UA - a real 150.0.1 build reports
-# "Firefox/150.0", never "Firefox/150.0.1" (verified against the binary:
-# navigator.userAgent of the unpatched build ends in "Firefox/150.0").
-# Both call sites used to hardcode "Firefox/150.0.1", a string no real
-# Firefox ever emits - i.e. the spoof itself was the fingerprint. Deriving
-# it here keeps the form correct and makes the next base bump automatic.
-UA_VERSION: str = ".".join(FIREFOX_UPSTREAM_VERSION.split(".")[:2])  # e.g. "151.0"
+# Spoofed User-Agent. Firefox puts only MAJOR.MINOR in the UA (a real 150.0.1
+# build reports "Firefox/150.0"), so the truncation is part of the form.
+UA_VERSION: str = ".".join(FIREFOX_UPSTREAM_VERSION.split(".")[:2])
 USER_AGENT: str = (
     f"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:{UA_VERSION}) "
     f"Gecko/20100101 Firefox/{UA_VERSION}"
@@ -44,20 +53,13 @@ USER_AGENT: str = (
 
 
 def ARCHIVE_NAME(platform_key: str, machine: str) -> str:
-    """Return the platform-specific archive filename.
-
-    platform_key: sys.platform ("win32", "linux", "darwin")
-    machine:      platform.machine() ("AMD64", "x86_64", "arm64", "aarch64", ...)
-    """
+    """The platform-specific archive filename, taken from the seal when it has
+    assets (the sealed name is the published name, by construction) and
+    reconstructed only for a local seal."""
     pk = platform_key.lower()
-    m = machine.lower()
-    if m in {"amd64", "x86_64"}:
-        arch = "x86_64"
-    elif m in {"arm64", "aarch64"}:
-        arch = "arm64"
-    else:
-        raise NotImplementedError(f"unsupported arch: {machine}")
-
+    arch = normalize_arch(machine)
+    if not _SEAL.is_local:
+        return _SEAL.asset_for(pk, machine).name
     if pk == "win32":
         return f"{BINARY_BASENAME}-win-{arch}.zip"
     if pk == "linux":
@@ -67,17 +69,10 @@ def ARCHIVE_NAME(platform_key: str, machine: str) -> str:
     raise NotImplementedError(f"unsupported platform: {platform_key}")
 
 
-# Binary entry point relative path inside the extracted archive root.
-# macOS ships the .app bundle (renamed to a stable "Firefox.app" by release.yml);
-# the wrapper execs the inner binary directly, which sidesteps Gatekeeper.
-BINARY_ENTRY_REL = {
-    "win32": "firefox.exe",
-    "linux": "firefox",
-    "darwin": "Firefox.app/Contents/MacOS/firefox",
-}
+BINARY_ENTRY_REL = dict(DEFAULT_ENTRY_REL)
 
 # GitHub release URL template. Binaries are hosted on the source repo
-# (firefox_antidetect_patch) since firefox-14 — the same repo that builds them,
+# (firefox_antidetect_patch) since firefox-14 - the same repo that builds them,
 # so both the Playwright wrapper and the direct-launch profile-manager fetch
 # from one place. (firefox-13 and earlier lived on invisible_playwright.)
 RELEASE_URL_TEMPLATE = (

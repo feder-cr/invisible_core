@@ -8,11 +8,11 @@ namespace.
 
 The translation is split into:
 
-  * ``_BASELINE`` — global stealth policy (RFP off, WebRTC leaks blocked,
+  * ``_BASELINE`` - global stealth policy (RFP off, WebRTC leaks blocked,
     safebrowsing disabled, debugger detach, …) plus Windows-canonical
     constants that don't depend on the Profile (system colors palette,
     WebGL extensions whitelist, speech voices, navigator identity).
-  * ``translate_profile_to_prefs`` — overlays the Profile fields plus the
+  * ``translate_profile_to_prefs`` - overlays the Profile fields plus the
     user-supplied ``locale`` and ``timezone``.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from ._webgl_personas import render_noise_seed, select_persona
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  Navigator identity — locked to Firefox 150 Windows so the binary
+#  Navigator identity - locked to Firefox 150 Windows so the binary
 #  reports the same UA / platform / oscpu regardless of the host OS.
 # ──────────────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ _NAVIGATOR_OVERRIDES: Dict[str, str] = {
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  System colors — FP Pro probes getComputedStyle(div) with CSS system
+#  System colors - FP Pro probes getComputedStyle(div) with CSS system
 #  keywords (ButtonFace, Menu, Highlight, …) and hashes the result into
 #  signal s142. On Linux, Firefox resolves these via GTK theme → GTK
 #  RGB values diverge from Windows Win32 palette → server-side anomaly
@@ -102,7 +102,7 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  WebGL extensions — Windows ANGLE canonical lists. Empty string =
+#  WebGL extensions - Windows ANGLE canonical lists. Empty string =
 #  fall back to native Mesa/ANGLE; non-empty = `getSupportedExtensions`
 #  returns this list verbatim and `IsSupported()` rejects anything else.
 # ──────────────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ _WEBGL2_EXTENSIONS = ",".join([
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  Speech voices — Windows canonical "Microsoft *" set. Format:
+#  Speech voices - Windows canonical "Microsoft *" set. Format:
 #  "NAME|LANG|DEFAULT|LOCAL,...". Non-empty value drives the
 #  speechSynthesis.getVoices() patch; empty disables it.
 # ──────────────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ _WIN_VOICES = ",".join([
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  Baseline — applied to every session regardless of Profile.
+#  Baseline - applied to every session regardless of Profile.
 # ──────────────────────────────────────────────────────────────────────
 
 _BASELINE: Dict[str, Any] = {
@@ -181,7 +181,7 @@ _BASELINE: Dict[str, Any] = {
     "privacy.resistFingerprinting": False,
     "privacy.resistFingerprinting.letterboxing": False,
 
-    # FF150 fingerprintingProtection — enabled by default (or remotely via
+    # FF150 fingerprintingProtection - enabled by default (or remotely via
     # Mozilla webcompat overrides). FP Pro detects the side-effects and
     # flips `privacy_settings: true`. On FF146 these were all off → False.
     # Force off so FP Pro reports privacy_settings:false (matches FF146).
@@ -222,11 +222,11 @@ _BASELINE: Dict[str, Any] = {
     "media.peerconnection.ice.relay_only":                False,
     "media.peerconnection.use_document_iceservers":       True,
 
-    # Proxy — route DNS through SOCKS proxies to avoid local DNS leaks.
+    # Proxy - route DNS through SOCKS proxies to avoid local DNS leaks.
     "network.proxy.socks_remote_dns":                     True,
     "network.proxy.failover_direct":                      False,
 
-    # TLS ClientHello fingerprint — match stock Firefox byte-for-byte.
+    # TLS ClientHello fingerprint - match stock Firefox byte-for-byte.
     # The Playwright/Juggler Firefox build this binary derives from re-enables
     # cipher 0xC009 (TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA), which retail Firefox
     # 150 does NOT offer. That extra (17th) cipher shifts our JA3/JA4 away from
@@ -234,10 +234,10 @@ _BASELINE: Dict[str, Any] = {
     # matches no real browser is itself a consistency tell. Disabling it makes
     # JA3/JA4/peetprint byte-identical to retail FF150 (verified on tls.peet.ws).
     # Stock Firefox ships without 0xC009 and works on the whole web, so this only
-    # improves fingerprint consistency — it cannot break connectivity.
+    # improves fingerprint consistency - it cannot break connectivity.
     "security.ssl3.ecdhe_ecdsa_aes_128_sha":              False,
 
-    # Safebrowsing — chatty and fingerprintable.
+    # Safebrowsing - chatty and fingerprintable.
     "browser.safebrowsing.malware.enabled":               False,
     "browser.safebrowsing.phishing.enabled":              False,
     "browser.safebrowsing.downloads.enabled":             False,
@@ -250,7 +250,7 @@ _BASELINE: Dict[str, Any] = {
     "browser.startup.upgradeDialog.enabled":              False,
     "termsofuse.acceptedVersion":                         999,
 
-    # Disable about:newtab auto-load — TopSitesFeed.sys.mjs auto-fetches when
+    # Disable about:newtab auto-load - TopSitesFeed.sys.mjs auto-fetches when
     # a tab opens, triggering a cross-process BC swap that hijacks the first
     # page.goto() (NS_BINDING_ABORTED on creepjs/peet/sannysoft/fppro).
     "browser.newtabpage.enabled":                         False,
@@ -343,10 +343,10 @@ _BASELINE: Dict[str, Any] = {
     "media.webspeech.synth.enabled":                      True,
     "zoom.stealth.voices.list":                           _WIN_VOICES,
 
-    # WebGL extensions whitelist — non-empty pre-empts native enumeration.
+    # WebGL extensions whitelist - non-empty pre-empts native enumeration.
     "zoom.stealth.webgl.extensions":                      _WEBGL1_EXTENSIONS,
     "zoom.stealth.webgl2.extensions":                     _WEBGL2_EXTENSIONS,
-    # WebGL numeric param overrides — kept empty (A/B test 2026-04-22 showed
+    # WebGL numeric param overrides - kept empty (A/B test 2026-04-22 showed
     # mismatches between the values we shipped and ANGLE's real envelope
     # raised FP Pro's ML tampering score). Slot kept for future experiments.
     "zoom.stealth.webgl.int_params":                      "",
@@ -357,14 +357,14 @@ _BASELINE: Dict[str, Any] = {
     # DevTools anti-detection.
     "zoom.stealth.debugger.force_detach":                 True,
 
-    # Canvas substitution (Option B for canvas) — replace pixels with hash(seed,idx),
+    # Canvas substitution (Option B for canvas) - replace pixels with hash(seed,idx),
     # uniform-skip (red-box exact, masking-safe) + full overwrite. Makes the canvas
     # render a pure function of (seed) = HOST-INDEPENDENT (kills the DWrite-vs-FreeType
     # text-raster leak: Canvas Hash + Font hash were the residual Win!=Linux signals).
     # ON by default (paired with webgl.substitute_pixels).
     "zoom.stealth.canvas.substitute_pixels":              True,
 
-    # WebGL substitution (Option B) — replace readback/snapshot RGB with
+    # WebGL substitution (Option B) - replace readback/snapshot RGB with
     # hash(seed,idx), endpoint-preserving. Makes the WebGL render hash a pure
     # function of (seed, dims) = HOST-INDEPENDENT, so no per-host hw_seed
     # calibration is needed (the gamma path was per-host: NVIDIA/Arc-on-Win clean
@@ -382,10 +382,10 @@ _BASELINE: Dict[str, Any] = {
 
     # Audio fingerprint noise OFF. RE 2026-06-22: the per-session OfflineAudioContext
     # noise (gated by hw_seed) was THE dominant driver of FP Pro tampering_ml on Windows
-    # — b005 Win dropped 0.4349 -> 0.0564 with audio noise alone disabled (canvas_text/
+    # - b005 Win dropped 0.4349 -> 0.0564 with audio noise alone disabled (canvas_text/
     # emoji unchanged, so they were a red-herring). The audio value is already host-indep
     # AND identical to a real FF's canonical OfflineAudioContext sum, so a fixed (un-noised)
-    # audio is NOT a linking signal (every real FF has the same value) — removing the noise
+    # audio is NOT a linking signal (every real FF has the same value) - removing the noise
     # matches real Firefox and clears the tampering flag.
     "zoom.stealth.audio.fp_noise":                        False,
 
@@ -395,7 +395,7 @@ _BASELINE: Dict[str, Any] = {
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  Linux-only Xvfb workarounds — the Linux Firefox build under Xvfb
+#  Linux-only Xvfb workarounds - the Linux Firefox build under Xvfb
 #  cannot run WebRender (`ConnectToCompositor` retries forever). We
 #  disable WebRender + force WebGL through the GL software path so
 #  webgl_basics / webgl_extensions still report.
@@ -409,7 +409,7 @@ _LINUX_XVFB_WORKAROUNDS: Dict[str, Any] = {
 }
 
 # ──────────────────────────────────────────────────────────────────────
-#  Windows virtual-desktop workarounds — when headless=True on Windows,
+#  Windows virtual-desktop workarounds - when headless=True on Windows,
 #  Firefox runs on a CreateDesktop virtual desktop. The hardware GPU is
 #  inaccessible from the virtual desktop, so the GPU process crashes when
 #  it tries to initialize the D3D11 compositor with hardware acceleration.
@@ -431,7 +431,7 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
     # FF150 regression vs FF146 on CreateDesktop alt-desktop:
     # The GPU process sandbox (level=1, default since FF110) tries to parent
     # its compositor window to the parent process's window. Our worker spawns
-    # Firefox on a CreateDesktop-created alt desktop — parent and GPU process
+    # Firefox on a CreateDesktop-created alt desktop - parent and GPU process
     # do not share the same desktop/HWND namespace, so window parenting fails
     # silently. WebRender falls back to "Software D3D11" and OOP-WebGL never
     # publishes a hardware ANGLE renderer → getContext('webgl') returns a
@@ -452,7 +452,7 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
     # process exits cleanly (exitCode=0, signal=null) and Playwright fires
     # page.on('crash') ~10s after page load. Lowering content sandbox to 4
     # keeps content processes on the same desktop as the browser process,
-    # which is what we want here (still tight enough — level 4 blocks
+    # which is what we want here (still tight enough - level 4 blocks
     # file/registry write, network calls, hardware access).
     "security.sandbox.content.level": 4,
 }
@@ -463,11 +463,11 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
 # ──────────────────────────────────────────────────────────────────────
 
 def _accept_language(locale: str) -> str:
-    # "<locale>, <base>" — the desktop-default shape (e.g. "en-US, en"). Firefox expands it
+    # "<locale>, <base>" - the desktop-default shape (e.g. "en-US, en"). Firefox expands it
     # to navigator.languages=["en-US","en"] AND (via the patched binary) the q-valued header
     # "en-US,en;q=0.5". The patched nsHttpHandler (STEALTHFOX, RE 2026-06-23) builds the
     # Accept-Language header from THIS pref even when juggler sets a per-context locale
-    # override, so header and navigator.languages stay consistent 2/2 — the most authentic
+    # override, so header and navigator.languages stay consistent 2/2 - the most authentic
     # (real desktop) form. Supersedes the 2026-06-22 single-tag workaround.
     lang = locale.replace("_", "-")
     base = lang.split("-")[0]
@@ -498,11 +498,11 @@ def translate_profile_to_prefs(
     # GPU / WebGL renderer/vendor.
     # On Linux we spoof to a Windows ANGLE renderer string (profile.gpu.renderer)
     # so cross-platform sessions report a consistent Windows GPU identity.
-    # On Windows/mac, spoofing a renderer string ALONE is unsafe — the ~81
+    # On Windows/mac, spoofing a renderer string ALONE is unsafe - the ~81
     # getParameter values stay real, so a name↔params hash mismatch FP Pro flags
     # (setting GTX 980 over real Arc A750 params scored ~0.70). Instead we apply a
     # VALIDATED PERSONA (see _webgl_personas): a {renderer, vendor} whose params are
-    # the shared ANGLE D3D11 caps (vendor-independent — identical on any host, per the
+    # the shared ANGLE D3D11 caps (vendor-independent - identical on any host, per the
     # ANGLE source) and whose extension list is FORCED below. That is a coherent fake
     # GPU that passes FP Pro host-independently (the host's real GPU never leaks). If no
     # validated persona exists for the sampled gpu_class yet, fall back to the host-real
@@ -516,8 +516,8 @@ def translate_profile_to_prefs(
     _persona = select_persona(profile.seed)
     if _persona:
         # Apply the FULL coherent WebGL override (renderer + vendor + webgl1/webgl2 extensions
-        # + ~100 getParameter values + shader-precision formats). Setting ALL of them — not just
-        # the renderer string — keeps renderer<->params coherent (FP Pro cross-checks them); a
+        # + ~100 getParameter values + shader-precision formats). Setting ALL of them - not just
+        # the renderer string - keeps renderer<->params coherent (FP Pro cross-checks them); a
         # string-only spoof over the host's real params is the old ~0.85 mismatch.
         for _k, _v in _persona["prefs"].items():
             if _k == "zoom.stealth.webgl2.enabled":
@@ -527,7 +527,7 @@ def translate_profile_to_prefs(
     else:
         prefs["zoom.stealth.webgl.renderer"] = ""
         prefs["zoom.stealth.webgl.vendor"]   = ""
-    # Canvas-noise mask is calibrated to the REAL host GPU's rendering variance — the canvas is
+    # Canvas-noise mask is calibrated to the REAL host GPU's rendering variance - the canvas is
     # drawn by real hardware, NOT the persona's claimed GPU, so it must NOT follow the persona
     # (a non-Intel persona on an Intel host would over-noise). Dev/deployment host is Intel.
     _renderer_lo = "intel"
@@ -559,7 +559,7 @@ def translate_profile_to_prefs(
     prefs["zoom.stealth.screen.dpr"]          = profile.screen.dpr
     prefs["layout.css.devPixelsPerPx"]        = str(profile.screen.dpr)
 
-    # Hardware — coherent with the sampled gpu_class by construction (the forge
+    # Hardware - coherent with the sampled gpu_class by construction (the forge
     # draws hw_concurrency conditioned on the GPU class).
     prefs["zoom.stealth.hw_concurrency"]      = profile.hardware.concurrency
     prefs["zoom.stealth.storage.quota_mb"]    = profile.hardware.storage_quota_mb
@@ -597,7 +597,7 @@ def translate_profile_to_prefs(
     # juggler.locale.override seeds the BrowsingContext LanguageOverride FIELD in
     # the parent process (BrowsingContext::Attach), whose DidSet drives BOTH
     # navigator.languages (the full list) AND the realm Intl default locale (the
-    # primary tag it extracts) — so Intl.DateTimeFormat / NumberFormat /
+    # primary tag it extracts) - so Intl.DateTimeFormat / NumberFormat /
     # toLocaleString follow the locale, not just the Accept-Language header. Seed
     # it with the full Accept-Language list so navigator.languages stays the
     # desktop-default 2 elements (["fr-FR","fr"]); the C++ DidSet takes "fr-FR"
@@ -608,12 +608,12 @@ def translate_profile_to_prefs(
         # juggler.timezone.override is the SOLE source of truth read by the C++
         # timezone chain (BrowsingContext::Attach/DidSet, ContentChild). The old
         # zoom.stealth.timezone pref was declared in the yaml but read by NO
-        # code — dropped here on 2026-06-10 (see 20-our-patches.md §8).
+        # code - dropped here on 2026-06-10 (see 20-our-patches.md §8).
         prefs["juggler.timezone.override"] = timezone
 
     # Cross-process seed (canvas noise + DWrite gamma share this). Only
     # zoom.stealth.fpp.hw_seed is read by the C++; the old zoom.stealth.seed
-    # alias was never declared in the yaml and read by nothing — dropped
+    # alias was never declared in the yaml and read by nothing - dropped
     # 2026-06-10. The render-noise seed is DECOUPLED from the identity seed and
     # drawn from a calibrated CLEAN pool: the canvas/WebGL render HASH it drives
     # is the dominant FP Pro tampering_ml signal, and some hw_seeds yield a
@@ -621,7 +621,7 @@ def translate_profile_to_prefs(
     # keeping per-seed determinism + diversity. See _webgl_personas.
     prefs["zoom.stealth.fpp.hw_seed"] = render_noise_seed(profile.seed)
 
-    # Synthetic host ICE candidate — injected by C++ when addr_ct==0 (SOCKS5
+    # Synthetic host ICE candidate - injected by C++ when addr_ct==0 (SOCKS5
     # proxy suppresses all local addresses so Firefox can't gather host cands).
     # LAN IP is seed-derived so it's consistent per session and looks like a
     # real home router assignment (192.168.x.x range).
@@ -651,7 +651,7 @@ def translate_profile_to_prefs(
 
     # Caller overlay LAST so users can override anything we set. A value of
     # None is treated as a sentinel meaning "delete this pref entirely from
-    # the final dict" — useful for A/B harnesses that need to test what
+    # the final dict" - useful for A/B harnesses that need to test what
     # happens when an override is unset (vs set to empty string, which for
     # some prefs like general.useragent.override means literally empty UA).
     if extra_prefs:

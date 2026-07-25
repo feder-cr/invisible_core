@@ -80,5 +80,5 @@ def test_build_launch_env_no_proxy_no_webrtc_no_tz():
 
 
 def test_build_launch_env_caller_webrtc_wins():
-    env = build_launch_env({}, egress_ip="9.9.9.9", base_env={"STEALTHFOX_WEBRTC_PUBLIC_IP": "1.1.1.1"})
-    assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "1.1.1.1"
+    env = build_launch_env({}, egress_ip="203.0.113.9", base_env={"STEALTHFOX_WEBRTC_PUBLIC_IP": "198.51.100.1"})
+    assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.1"

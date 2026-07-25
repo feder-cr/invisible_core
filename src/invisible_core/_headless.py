@@ -1,14 +1,14 @@
 """Invisible-but-headed browser windows.
 
-Playwright's ``headless=True`` flips Firefox onto a different code path —
-no widget tree, software-only rendering, distinct timing — and anti-bot
+Playwright's ``headless=True`` flips Firefox onto a different code path -
+no widget tree, software-only rendering, distinct timing - and anti-bot
 systems can spot the divergence. Running the browser *headed* but hidden
 gives us the real rendering pipeline while keeping the windows off screen.
 
 Two mechanisms, by platform:
 
 - **Windows & macOS**: the patched binary cloaks its OWN chrome windows
-  when ``zoom.stealth.cloak_windows`` is set — ``DWMWA_CLOAK`` (Windows)
+  when ``zoom.stealth.cloak_windows`` is set - ``DWMWA_CLOAK`` (Windows)
   / ``NSWindow`` alpha-0 + pinned occlusion-ignore (macOS). The window
   renders on the real GPU but never appears on screen, in the taskbar or
   the Dock. The launcher injects the pref; nothing host-side is spawned.
@@ -54,7 +54,7 @@ class _LinuxVirtualDisplay:
             )
         # Retry: when many workers start in parallel they can pick the same
         # display number before any has created its lockfile. Xvfb on the
-        # losing side exits immediately — try again with a fresh number.
+        # losing side exits immediately - try again with a fresh number.
         last_err: Optional[Exception] = None
         for _ in range(10):
             display = self._pick_display()
@@ -91,11 +91,11 @@ class _LinuxVirtualDisplay:
         for n in range(99, 400):
             if not os.path.exists(f"/tmp/.X{n}-lock"):
                 return f":{n}"
-        raise RuntimeError("no free X display number in :99–:399")
+        raise RuntimeError("no free X display number in :99-:399")
 
     def _wait_until_ready(self, display: str) -> None:
         # We start Xvfb with -nolisten unix → no /tmp/.X11-unix socket appears.
-        # Xvfb creates /tmp/.X{n}-lock immediately though — wait for that.
+        # Xvfb creates /tmp/.X{n}-lock immediately though - wait for that.
         lockfile = f"/tmp/.X{display[1:]}-lock"
         deadline = time.monotonic() + 3.0
         assert self._proc is not None
@@ -160,7 +160,7 @@ def make_virtual_display():
     platform hides windows via the in-binary cloak pref instead.
 
     - Linux: a fresh ``Xvfb`` (the launcher start()s/stop()s it).
-    - Windows / macOS: ``None`` — the binary self-cloaks via ``cloak_prefs()``,
+    - Windows / macOS: ``None`` - the binary self-cloaks via ``cloak_prefs()``,
       injected by the launcher; nothing host-side needs spawning.
     """
     if sys.platform.startswith("linux"):

@@ -1,0 +1,101 @@
+name: publish
+
+# The publish path, and the reason the version gate cannot be skipped.
+#
+# The credential is not in this file and not in a repository secret: it is the
+# `pypi` GitHub Environment's OIDC trust relationship, and only the `upload` job
+# names that environment. `upload` declares `needs: gate`, so a red gate means
+# the only job that can authenticate never starts. That is the whole design -
+# there is no step ordering to get wrong and nothing for an operator to
+# remember, because the ordering is a dependency rather than a convention.
+#
+# The workflow is triggered by pushing a release tag, and .githooks/pre-push
+# already refuses to push one whose gate is red. Layers, not alternatives: the
+# hook is per-clone and can be missing, this cannot.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      first_release:
+        description: "Nothing has ever been published (only true once, ever)"
+        type: boolean
+        default: false
+      repository:
+        description: "twine repository alias"
+        type: choice
+        options: [pypi, testpypi]
+        default: pypi
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The gate's memory lives in PUBLISHED.json at the repo root and its
+          # history is how a lost ledger gets restored. A shallow checkout that
+          # dropped it is one of the failures the gate now exits 4 over instead
+          # of quietly calling it release 1.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build hatchling
+      - name: the hooks are installed for anyone who clones this
+        # The local pre-push layer is only real if .githooks is wired up. CI
+        # cannot check somebody else's clone, but it can check that the wiring
+        # this repo ships still works, so it cannot rot unnoticed.
+        run: python scripts/install_hooks.py --check || python scripts/install_hooks.py
+      - name: version gate
+        # Exit codes: 0 pass, 1 refused, 2 gate broken, 4 no usable ledger.
+        # Only 0 continues, and --verify-index makes the ledger's claim get
+        # checked against what the index actually serves.
+        run: >
+          python scripts/version_gate.py check --verify-index
+          ${{ (github.event_name == 'workflow_dispatch' && inputs.first_release) && '--first-release' || '' }}
+
+  upload:
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: pypi          # the credential lives HERE, behind `needs: gate`
+    permissions:
+      id-token: write          # trusted publishing, no long-lived token anywhere
+      contents: write          # to commit the ledger entry back
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build hatchling twine
+      - name: gate, upload, record
+        # Not `twine upload` directly: `publish` re-runs the gate in-process and
+        # returns its exit code without reaching twine on a refusal, and it
+        # uploads the artifacts it just digested rather than whatever is sitting
+        # in dist/. Belt and braces with `needs: gate` on purpose - this job is
+        # the one holding the credential.
+        run: >
+          python scripts/version_gate.py publish --verify-index
+          --repository ${{ (github.event_name == 'workflow_dispatch' && inputs.repository) || 'pypi' }}
+          ${{ (github.event_name == 'workflow_dispatch' && inputs.first_release) && '--first-release' || '' }}
+      - name: commit the ledger entry
+        # `publish` wrote PUBLISHED.json after a successful upload. If that never
+        # lands on the branch, the next release sees an empty or stale ledger and
+        # the gate has no memory of this one.
+        run: |
+          if git diff --quiet -- PUBLISHED.json; then
+            echo "no ledger change to commit"
+            exit 0
+          fi
+          git config user.name "feder-cr"
+          git config user.email "85809106+feder-cr@users.noreply.github.com"
+          git add PUBLISHED.json
+          git commit -m "record $(python -c "import json;print(json.load(open('PUBLISHED.json'))['released'][-1]['version'])") as published"
+          git push origin HEAD:${{ github.event.repository.default_branch }}

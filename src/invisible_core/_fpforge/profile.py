@@ -182,7 +182,7 @@ def generate_profile(
         are still sampled from the Bayesian network based on `seed`, so the
         same seed + same pin map always yields the same profile.
 
-        Example — force a specific GPU and screen while letting everything
+        Example - force a specific GPU and screen while letting everything
         else vary with the seed (via the public invisible_playwright API):
 
             from invisible_playwright import InvisiblePlaywright

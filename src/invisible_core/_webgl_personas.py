@@ -1,6 +1,6 @@
 """Empirically-calibrated WebGL GPU personas for Windows ANGLE D3D11.
 
-We expose a FALSE GPU (this is a multi-user tool — never leak each host's real GPU),
+We expose a FALSE GPU (this is a multi-user tool - never leak each host's real GPU),
 chosen deterministically per seed from a small set of renderer-string "buckets" that
 Firefox's SanitizeRenderer emits and that FP Pro's tampering_ml scores as CLEAN.
 
@@ -16,11 +16,11 @@ _gpu_sweep2.py / _gpu_persona_pure.py). Findings:
      carries a STABLE per-bucket penalty; the seed sets the floor it adds to.
   2. gpu_class is IRRELEVANT to tampering_ml (nv_980 scored identically on mid_range /
      high_end / premium / workstation). So pairing a fake GPU with a "matching" hardware
-     tier does NOT help the score (we still set a coherent class — see gpu_class below —
+     tier does NOT help the score (we still set a coherent class - see gpu_class below -
      for OTHER detectors that cross-check cores/screen, just not for this).
   3. It is NOT render-consistency: a cross-vendor AMD string is CLEAN on our Intel-Arc
      host. So the real silicon's pixels are not the dominant signal; falsifying to a
-     different vendor works — IF the string is one FP Pro scores low.
+     different vendor works - IF the string is one FP Pro scores low.
 
 Sweep over all 10 Windows SanitizeRenderer buckets x 10 seeds (clean = tml<=0.5 AND not
 anti_detect), on our Intel Arc A750 host:
@@ -44,7 +44,7 @@ single-GPU cluster. More names require lowering the seed floor first (see CAVEAT
     turns out host-dependent, add a pre-launch host-GPU-class probe and pick a bucket per
     detected class. Until then: safe for Arc hosts (incl. the dev's), unvalidated elsewhere.
  2. DIVERSITY CEILING = 2 names because "hard" seeds (high canvas/audio floor, e.g. seed 4
-    ~0.35) only stay clean on the 2 best buckets. Lowering that floor (an fpforge CPT fix —
+    ~0.35) only stay clean on the 2 best buckets. Lowering that floor (an fpforge CPT fix -
     candidate: 8-channel audio + 1TB storage emitted on a mid_range profile) would unlock
     amd_hd5850 / intel_hd for more seeds => up to ~5 names. Follow-up, not done yet.
 
@@ -53,7 +53,7 @@ single-GPU cluster. More names require lowering the seed floor first (see CAVEAT
    "Generic Renderer" (a tell). The C++ passes our string through SanitizeRenderer, which
    buckets "AMD Radeon R9 200 Series" -> "Radeon R9 200 Series" and "Arc A750" -> itself.
  - the forced extension list MUST be the EXACT NATIVE ORDER getSupportedExtensions returns.
-   The set+order is fixed by Firefox+ANGLE on D3D11 FL11_0 (VENDOR-INDEPENDENT — verified
+   The set+order is fixed by Firefox+ANGLE on D3D11 FL11_0 (VENDOR-INDEPENDENT - verified
    via 20-agent source study), so ONE list is correct for both personas. A reorder is caught
    (tampering_ml 0.34 -> 0.84). The lists below are the verbatim native-order Arc capture.
 
@@ -86,7 +86,7 @@ _EXT2 = (
 
 
 # ── Real-Firefox GPU pool (2026-06-18, supersedes the 2-bucket sweep above) ───────────────
-# The personas are now sourced from `_fpforge/data/webgl_gpu_pool.json` — an OFFLINE extract
+# The personas are now sourced from `_fpforge/data/webgl_gpu_pool.json` - an OFFLINE extract
 # of camoufox's real-Firefox WebGL telemetry DB (17 Windows GPUs with their REAL per-OS
 # prevalence AND the full coherent WebGL fingerprint: renderer + vendor + extensions +
 # ~100 getParameter values + shader-precision formats). prefs.py applies ALL of these, not
@@ -95,7 +95,7 @@ _EXT2 = (
 # FP Pro cross-checks renderer<->params, so a GTX 980 string over Arc params mismatched
 # (~0.7-0.85). Injecting camoufox's REAL GTX 980 params makes it coherent (tml median 0.333,
 # flags clean). So the params are NOT vendor-independent (the old assumption) and per-GPU
-# real data is what unlocks the full real GPU mix — including NVIDIA (~47% of real FF-Win),
+# real data is what unlocks the full real GPU mix - including NVIDIA (~47% of real FF-Win),
 # which we no longer gate.
 _ENABLED = True
 _POOL_PATH = __import__("pathlib").Path(__file__).parent / "_fpforge" / "data" / "webgl_gpu_pool.json"
@@ -131,7 +131,7 @@ def _gpu_pool() -> List[Dict]:
 
 
 def select_persona(seed: int) -> Optional[Dict]:
-    """Deterministic, prevalence-weighted GPU persona for this seed — on EVERY host.
+    """Deterministic, prevalence-weighted GPU persona for this seed - on EVERY host.
 
     Same seed -> same persona (fppro_consistency: identity stable per seed). Different seeds
     spread across the REAL Windows GPU mix by prevalence. Returns the Windows-ANGLE persona on
@@ -171,12 +171,12 @@ def forced_gpu_class(seed: int) -> Optional[str]:
 # seed from the identity seed and pick from a calibrated pool of hw_seeds that score
 # CLEAN even on the hardest attribute profile (sweep 1..30 vs the worst seed: these
 # 14 all gave tml<=0.285). Diversity is preserved (14 distinct render hashes spread
-# across the population — real GPUs cluster to few canvas hashes anyway); identity
+# across the population - real GPUs cluster to few canvas hashes anyway); identity
 # stays per-seed (the rest of the fingerprint differs). Same seed -> same render seed
 # (fppro_consistency holds).
 # CAVEAT: the render hash = f(host GPU render, gamma), so this pool is calibrated on
 # the Intel-Arc host. On other GPUs the clean set may differ (host-independence open,
-# same as the personas) — Option B (substitution = GPU-independent render hash) would
+# same as the personas) - Option B (substitution = GPU-independent render hash) would
 # remove that dependency. Validate per-host or move to B before trusting fleet-wide.
 # RECALIBRATED 2026-06-18 for the real-Firefox GPU mix (incl NVIDIA, which is more
 # consistency-sensitive than the old amd/arc personas). Swept hw_seed 0..30 on the hottest
@@ -187,7 +187,7 @@ def forced_gpu_class(seed: int) -> Optional[str]:
 # driver); host-calibrated.
 # 2026-06-21: with WebGL Option B (zoom.stealth.webgl.substitute_pixels, ON in prefs.py) the WebGL
 # render hash is hash(seed,idx) = HOST-INDEPENDENT, so this list NO LONGER needs per-host calibration
-# — it only supplies per-session diversity. A 2026-06-21 attempt to re-calibrate it per-host FAILED
+# - it only supplies per-session diversity. A 2026-06-21 attempt to re-calibrate it per-host FAILED
 # cross-OS: hw_seed clean on Windows went dirty on the Linux GL backend (b008 0.034->0.839; Win-dirty
 # {7,11,20,27} = Linux-clean and vice-versa; + identity×hw_seed interaction on Linux). That proved
 # calibration can't work cross-host → substitution replaces it. Kept the original diverse 9-set.

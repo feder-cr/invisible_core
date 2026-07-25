@@ -11,7 +11,7 @@
       "ultrawide": "width > 3840 OR non-16:9"
     },
     "rationale": "Prima: msaa conditional su solo gpu_class. Ora: joint su (gpu_class, screen_tier). Reale: 4K + high_end GPU → MSAA=0 (troppo costoso), 1080p + high_end → MSAA=4 common. 1080p + integrated → MSAA=0 (no headroom). Break dependent di coppie implausibili.",
-    "key_format": "JSON array [gpu_class, screen_tier] serialized sort_keys=True — matches network.py _parent_key"
+    "key_format": "JSON array [gpu_class, screen_tier] serialized sort_keys=True - matches network.py _parent_key"
   },
   "table": {
     "[\"integrated_old\", \"1080p\"]":    [{"value": 0, "prob": 0.85}, {"value": 2, "prob": 0.13}, {"value": 4, "prob": 0.02}],
