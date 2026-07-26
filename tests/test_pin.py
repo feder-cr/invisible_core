@@ -683,11 +683,21 @@ def test_something_unparseable_falls_back_to_collapsing_not_to_a_match():
         _pin.canonical_requirement("invisible-core==19.0.0")
 
 
-def test_pin_declaration_is_a_thin_shell_over_the_shared_parser():
+def test_pin_declaration_is_a_thin_shell_over_the_shared_parser(monkeypatch):
     """Identity, not similarity: the metadata reader must not grow its own
     acceptance set. Everything that decides WHICH requirement is the pin has to
     be inside pin_from_requirements, where the doctor and the sync script can
-    reach it."""
+    reach it.
+
+    THE RECORD IS SUPPLIED BY THE TEST, and that is the fix. This used to call
+    `pin_declaration("invisible-playwright")` and assert the spy fired - but
+    pin_declaration returns `no_record` WITHOUT calling anything when the named
+    distribution has no install record. So it passed only on a machine that
+    happened to have the wrapper installed beside the core, and was red in every
+    clean CI. Naming the core instead is no better: in a source checkout on
+    PYTHONPATH the core has no record either. A test of delegation must not
+    depend on what is installed at all.
+    """
     seen = {}
 
     def spy(requires, *, dist_name):
@@ -695,14 +705,32 @@ def test_pin_declaration_is_a_thin_shell_over_the_shared_parser():
         seen["dist_name"] = dist_name
         return _pin.PinDeclaration("9.9.9", "pinned", None)
 
-    real = _pin.pin_from_requirements
-    _pin.pin_from_requirements = spy
-    try:
-        got = _pin.pin_declaration("invisible-playwright")
-    finally:
-        _pin.pin_from_requirements = real
+    monkeypatch.setattr(_pin, "_requires",
+                        lambda name: ["platformdirs>=4", "invisible-core==1.2.3"])
+    monkeypatch.setattr(_pin, "pin_from_requirements", spy)
+
+    got = _pin.pin_declaration("some-consumer")
     assert got.version == "9.9.9", got
-    assert seen["dist_name"] == "invisible-playwright"
+    assert seen["dist_name"] == "some-consumer"
+    assert "invisible-core==1.2.3" in seen["requires"], (
+        "pin_declaration filtered the requirement list before handing it over, "
+        "which is the acceptance logic that has to live in one place")
+
+
+def test_pin_declaration_reports_no_record_rather_than_inventing_a_version(
+        monkeypatch):
+    """The other half, and the one that decides whether a missing record is
+    safe. Answering None with status `no_record` lets the caller distinguish
+    "nothing to enforce" from "healthy"; answering a version would make a
+    source checkout look like a satisfied pin."""
+    def missing(name):
+        raise _pin.PackageNotFoundError(name)
+
+    monkeypatch.setattr(_pin, "_requires", missing)
+    got = _pin.pin_declaration("not-installed-anywhere")
+    assert got.version is None
+    assert got.status == "no_record"
+    assert "no install record" in (got.detail or "")
 
 
 def test_pin_from_requirements_takes_a_plain_list_so_every_caller_can_use_it():
