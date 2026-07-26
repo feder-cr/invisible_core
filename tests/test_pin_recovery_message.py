@@ -22,6 +22,7 @@ checked by actually reverting each one, not by reading the assertion.
 from __future__ import annotations
 
 import os
+import pathlib
 import shlex
 import subprocess
 import sys
@@ -71,50 +72,41 @@ def test_the_repair_message_quotes_a_spaced_editable_path():
     assert tokens[3].strip('"') == SPACED
 
 
-def test_repair_core_hands_back_a_reattach_command_that_survives_a_space():
+def test_repair_core_builds_its_reattach_command_through_format_command():
     """The SECOND call site, and the one that matters most.
 
-    ``pin_problem`` only warns; ``repair_core`` has already detached the
+    `pin_problem` only warns; `repair_core` has already detached the
     environment from the user's checkout by the time it prints this, so the
-    string is the entire handed-over undo. Covering only ``pin_problem`` left
-    this one free: reverting it to an f-string kept the suite green, which is
-    how it got here in the first place.
+    string is the entire handed-over undo.
+
+    THE FIRST VERSION OF THIS TEST HAD A DEAD PRIMARY PATH. It called a helper
+    that checked `repair_core` for parameters {editable, execute, out}; the real
+    signature is (dist_name, want, core_preimported, stream), so that condition
+    was ALWAYS false, `repair_core` was never invoked, and the test silently
+    degraded to the AST fallback below. The commit message claimed each
+    assertion had been proved by reverting the fix - the mutation did go red,
+    but through the fallback, not the path the test appeared to exercise. The
+    dead branch is gone; what is left is the check that actually ran.
+
+    Reading the construction rather than calling the function is deliberate:
+    `repair_core` runs pip and mutates the environment, and this assertion is
+    about how one string is built. The AST is the real expression, not a
+    re-implementation of it.
     """
-    result = _pin.repair_core(
-        dist_name="invisible-playwright", want="18.2.0",
-        editable=SPACED, execute=False, out=[],
-    ) if _repair_takes_editable() else None
-    if result is None:
-        # Signature differs; assert on the module's own construction instead,
-        # which is still the real expression rather than a re-implementation.
-        import ast
+    import ast
 
-        src = _pin.__file__
-        tree = ast.parse(open(src, encoding="utf-8").read())
-        assigns = [
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.Assign)
-            and any(getattr(t, "id", "") == "recovery" for t in n.targets)
-        ]
-        assert assigns, "no `recovery = ...` left in the module"
-        rendered = ast.unparse(assigns[0].value)
-        assert "format_command" in rendered, (
-            "repair_core builds its reattach command by interpolation again: "
-            f"{rendered}")
-        return
-    assert result.recovery is not None
-    tokens = shlex.split(result.recovery, posix=False)
-    assert len(tokens) == 4, f"{result.recovery!r} splits into {len(tokens)}"
-
-
-def _repair_takes_editable() -> bool:
-    import inspect
-
-    try:
-        params = inspect.signature(_pin.repair_core).parameters
-    except (TypeError, ValueError):  # pragma: no cover
-        return False
-    return {"editable", "execute", "out"} <= set(params)
+    tree = ast.parse(pathlib.Path(_pin.__file__).read_text(encoding="utf-8"))
+    assigns = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(getattr(target, "id", "") == "recovery" for target in node.targets)
+    ]
+    assert assigns, "no `recovery = ...` left in the module"
+    rendered = ast.unparse(assigns[0].value)
+    assert "format_command" in rendered, (
+        f"repair_core builds its reattach command by interpolation again: "
+        f"{rendered}. A checkout whose path contains a space then tokenises "
+        f"to six arguments and pip refuses it.")
 
 
 def test_a_path_without_spaces_is_left_unquoted():

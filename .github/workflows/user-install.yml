@@ -1,0 +1,128 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# user-install.yml - can a person who has never seen this repo install it and
+# drive a browser, on the two operating systems we claim to support?
+#
+# WHY THIS EXISTS, SEPARATELY FROM e2e.yml.
+# e2e.yml installs the wrapper FROM THE CHECKOUT and then pins Playwright by
+# hand. That is the right shape for testing a change: it exercises the code in
+# the PR. It is the wrong shape for answering "does the published thing work",
+# and the difference is not academic:
+#
+#   * a checkout install never resolves `invisible-core==X.Y.Z` from the index,
+#     so the entire pin mechanism - the part most likely to break a release,
+#     and the reason a binary bump is now a three-package release - is outside
+#     what that job can see;
+#   * installing a blessed `playwright==<pin>` afterwards REPAIRS the venv. If
+#     the declared range resolves to a client the shipped Juggler cannot speak,
+#     that manual line turns the job green while every fresh install is broken.
+#     What a user gets is what pip resolves from the declaration, and that is
+#     what has to be under test.
+#
+# So this workflow installs nothing from the checkout except the test files. It
+# takes `pip install invisible-core` from the index, in an empty venv, and
+# runs it the way somebody's first script would.
+#
+# WHY IT MUST NOT BE MADE TOLERANT.
+# There is a real window in which this cannot pass: between publishing the core
+# and publishing the consumers. The tempting fixes - `|| true`, `--no-deps`, a
+# git fallback - all produce a GREEN job that installed nothing, and that lie
+# outlives the window by months. A red run during a publish is correct and
+# readable. See core-on-index.yml, which makes the same argument at length.
+#
+# WHY BOTH OPERATING SYSTEMS.
+# The entry point here is a gui-script, which is built differently on Windows
+# (no console attached) than on Linux, and the install itself resolves a
+# platform-dependent dependency tree. Neither is visible from one runner.
+#
+# THE MISTAKE THIS EXISTS TO CATCH: this is the package BOTH consumers pin with
+# an exact `invisible-core==X.Y.Z`. A core broken on the index breaks both of
+# them at once, and neither consumer's own test would say the cause is upstream
+# - it would look like two unrelated failures. Its tests existed since
+# 2026-07-26 and named this workflow, which did not exist in this repository.
+# ─────────────────────────────────────────────────────────────────────────────
+name: user-install
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "index (what users get) or git (an unpublished commit)"
+        required: false
+        default: index
+        type: choice
+        options: [index, git]
+  schedule:
+    # Daily. The published artifacts do not change on their own, but everything
+    # around them does: pip resolves a new Playwright, GitHub moves a release
+    # asset, an index mirror lags. Those break users without any commit here,
+    # so a run triggered only by pushes would never see them.
+    - cron: "05 6 * * *"   # first of the three: the consumers pin this package, so if it is broken on the index their runs are noise
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: user-install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: ${{ matrix.os }} - install from ${{ github.event.inputs.source || 'index' }} and launch
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false      # one OS failing must not hide the other's result
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      # Only what the TEST needs. The package under test is installed by the
+      # test itself, into a venv it creates, from the index - installing it
+      # here as well would put a second copy on the path and the assertions
+      # would be reading the wrong one.
+      - name: Test harness only
+        run: python -m pip install --upgrade pip pytest packaging
+
+      - name: The user path, end to end
+        env:
+          INVPW_E2E_SOURCE: ${{ github.event.inputs.source || 'index' }}
+        shell: bash
+        run: |
+          set -o pipefail   # or the tee below would swallow pytest's exit code
+          # No display needed and no xvfb installed: nothing here opens the UI.
+          # The manager's browser-driving tests are marked `integration` and
+          # live elsewhere; this job is about the install path only.
+          python -m pytest tests/test_user_install_e2e.py -m e2e \
+            -o addopts="" -v -rs | tee e2e-report.txt
+
+      # A run whose tests all SKIPPED is not a pass, and it is the failure this
+      # suite is most exposed to: every test here is gated on `-m e2e` and
+      # several on a platform. `-rs` above prints the skips; this turns "nothing
+      # ran" into a refusal rather than a green tick.
+      - name: Refuse a run in which nothing actually ran
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+          # pytest's own exit code cannot distinguish "all passed" from "all
+          # skipped", so the count is read back from the report it wrote.
+          report = pathlib.Path("e2e-report.txt")
+          if not report.is_file():
+              print("no report written; the step above did not run", file=sys.stderr)
+              sys.exit(1)
+          text = report.read_text(encoding="utf-8", errors="ignore")
+          m = re.search(r"(\d+) passed", text)
+          passed = int(m.group(1)) if m else 0
+          if passed < 5:
+              print(f"only {passed} test(s) actually ran (expected at least 5) - a suite that skipped "
+                    f"itself is not a pass", file=sys.stderr)
+              sys.exit(1)
+          print(f"{passed} tests ran")
+          PY
