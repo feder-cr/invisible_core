@@ -773,7 +773,7 @@ def cmd_check(args) -> int:
     if prior is None:
         print(f"\nVERSION {version} HAS NEVER BEEN PUBLISHED - it moved since the last release.")
         if getattr(args, "verify_index", False):
-            rc = _verify_index(version, _index_url_for(args))
+            rc = _verify_index(version, _index_url_for(args), _ledger_path_for(args))
             if rc != EXIT_OK:
                 return rc
         print("\nPUBLISH ALLOWED")
@@ -968,7 +968,7 @@ def _index_versions(url: str) -> list[str]:
     return sorted(data.get("releases", {}))
 
 
-def _verify_index(version: str, url: str) -> int:
+def _verify_index(version: str, url: str, ledger: Path | None = None) -> int:
     """Optional ONLINE cross-check. The ledger is a claim; the index is the fact."""
     try:
         published = _index_versions(url)
@@ -981,6 +981,35 @@ def _verify_index(version: str, url: str) -> int:
         return EXIT_REFUSED
     print(f"  index cross-check: {DIST_NAME} {version} is not on the index "
           f"({len(published)} versions published)")
+
+    # And the other direction, which nothing asked until 2026-07-26: does the
+    # ledger cover everything the index serves? 18.1.0 was uploaded on
+    # 2026-07-25 and has no entry - `git log -S18.1.0 -- PUBLISHED.json` finds
+    # nothing, ever. The ledger's own header claims one entry per version that
+    # reached the index, so the claim was already false and the gate could not
+    # see it: every check compares the CURRENT version against the entries that
+    # happen to exist, and a missing entry simply is not consulted.
+    #
+    # It matters because the entry is what a later release is compared against.
+    # A version with no entry can be re-released with different bytes and
+    # nothing here would object.
+    try:
+        recorded = ({e.get("version") for e in load_ledger(ledger).get("released", [])}
+                    if ledger is not None else None)
+    except Exception:
+        recorded = None
+    if recorded is not None:
+        gaps = sorted(v for v in published if v not in recorded)
+        if gaps:
+            print()
+            print(f"RELEASE REFUSED: the index serves {len(gaps)} version(s) of "
+                  f"{DIST_NAME} that the ledger does not record:")
+            print("    " + ", ".join(gaps))
+            print("  Those were published outside this gate, so there is no record of")
+            print("  what shipped under them and a re-release with different bytes")
+            print("  would go unnoticed. Back-fill them from the artifacts the index")
+            print("  actually serves - not from today's tree, which has moved on.")
+            return EXIT_REFUSED
     return EXIT_OK
 
 
