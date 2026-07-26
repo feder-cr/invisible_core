@@ -60,6 +60,16 @@ def test_every_layer_of_the_wiring_exists():
         "the publish gate is wired to nothing again:\n  " + "\n  ".join(missing))
 
 
+@requires_checkout
+def test_the_hook_is_tracked_as_executable():
+    """The claim and its measurement live in the helper, which all three repos
+    call - this hook was tracked 100644 in every one of them, so a per-repo copy
+    of the assertion would have been a third copy of one finding."""
+    from invisible_core.testing import assert_hook_is_executable
+
+    assert_hook_is_executable(REPO_ROOT)
+
+
 # ------------------------------------------------------------------ layer 2
 
 @requires_checkout
