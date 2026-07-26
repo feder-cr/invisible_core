@@ -22,6 +22,7 @@ On failure:
 from __future__ import annotations
 
 import ipaddress
+import time
 from typing import Any, Dict, NamedTuple, Optional
 from urllib.parse import quote
 
@@ -79,7 +80,10 @@ def _proxies_for_requests(proxy: Dict[str, str]) -> Dict[str, str]:
 
 
 def discover_egress_ip(
-    proxy: Optional[Dict[str, str]] = None, *, timeout: float = 10.0
+    proxy: Optional[Dict[str, str]] = None,
+    *,
+    timeout: float = 10.0,
+    budget: float = 15.0,
 ) -> str:
     """Return the public egress IP.
 
@@ -87,12 +91,30 @@ def discover_egress_ip(
     ``requests[socks]`` / PySocks); with ``proxy=None`` it makes a direct
     request that sees the host's own public IP. Tries each echo endpoint in
     turn; raises :class:`GeoTimezoneError` if none return a valid IP.
+
+    ``timeout`` bounds ONE request; ``budget`` bounds the whole step. Both are
+    needed, and having only the first is what made this the slowest thing in a
+    launch: three endpoints tried in sequence at ten seconds each is a
+    thirty-second worst case that nothing capped, and one launch in six spent
+    35s here. A per-request timeout says how long to wait for a server; it
+    cannot say how long the caller is willing to wait in total. The remaining
+    budget is now handed to each request, so a slow first endpoint shortens the
+    second rather than adding to it, and the step returns or raises within
+    ``budget`` however many endpoints the list grows to.
     """
     proxies = _proxies_for_requests(proxy) if proxy else None
     last_err: Optional[Exception] = None
+    deadline = time.monotonic() + budget
+    tried = 0
     for url in _IP_ECHO_ENDPOINTS:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        tried += 1
         try:
-            resp = requests.get(url, proxies=proxies, timeout=timeout)
+            resp = requests.get(
+                url, proxies=proxies, timeout=min(timeout, remaining)
+            )
             resp.raise_for_status()
             ip = resp.text.strip()
             ipaddress.ip_address(ip)  # validate (raises ValueError if not an IP)
@@ -100,10 +122,17 @@ def discover_egress_ip(
         except Exception as exc:  # noqa: BLE001 - try the next endpoint
             last_err = exc
             continue
+    spent = budget - (deadline - time.monotonic())
+    exhausted = (
+        f" The {budget:g}s budget ran out after {tried} of "
+        f"{len(_IP_ECHO_ENDPOINTS)} endpoints."
+        if tried < len(_IP_ECHO_ENDPOINTS)
+        else ""
+    )
     raise GeoTimezoneError(
-        f"could not discover the proxy egress IP via {len(_IP_ECHO_ENDPOINTS)} "
-        f"endpoints (last error: {last_err!r}). For SOCKS proxies make sure "
-        f"requests[socks] / PySocks is installed."
+        f"could not discover the proxy egress IP via {tried} "
+        f"endpoint(s) in {spent:.1f}s (last error: {last_err!r}). For SOCKS "
+        f"proxies make sure requests[socks] / PySocks is installed.{exhausted}"
     )
 
 
