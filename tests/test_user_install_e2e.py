@@ -30,6 +30,7 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 DIST = "invisible-core"
+REPO = "invisible_core"
 
 
 def _run(cmd: list[str], *, timeout: int = 600,
@@ -153,3 +154,54 @@ def test_the_packaged_seal_is_actually_in_the_wheel(clean_venv: Path):
     present, size = out.split()
     assert present == "True", "seal.json is not inside the installed package"
     assert int(size) > 0, "seal.json shipped empty"
+
+
+# ── PyPI and GitHub Releases must not drift apart ──────
+
+def test_the_published_version_has_a_github_release():
+    """Every version on the index needs a tag and a release carrying it.
+
+    Added 2026-07-26, when the three packages had been on PyPI for a day with
+    ZERO tags and ZERO releases between them. Not cosmetic: the release page is
+    where a reader looks for what changed, `git describe` has nothing to say,
+    and there is no commit anybody can point at as "this is the source of the
+    version you have".
+
+    NO VENV, deliberately. The first version of this took `clean_venv` and read
+    the version out of the installed package, which made it depend on ANOTHER
+    test in the same file having installed it first - it passed alone in the one
+    repository whose fixture installs, and failed in the two whose fixture does
+    not. A test whose result depends on what ran before it is not measuring what
+    it claims. Both facts here are public: the index says what the latest
+    version is, and the releases API says whether it has one.
+
+    One-directional on purpose. A release for a version not yet on the index is
+    a normal intermediate state during a publish; an index version with no
+    release is the thing that gets forgotten, because nothing downstream breaks.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    with urllib.request.urlopen(
+            f"https://pypi.org/pypi/{DIST}/json", timeout=30) as resp:
+        version = json.load(resp)["info"]["version"]
+
+    url = f"https://api.github.com/repos/feder-cr/{REPO}/releases/tags/v{version}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            payload = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            pytest.fail(
+                f"the index serves {DIST} {version} and there is no GitHub "
+                f"release tagged v{version}. Create it at the commit that built "
+                f"that version - not at HEAD, which has moved on")
+        if exc.code in (403, 429):
+            pytest.skip(f"GitHub API rate-limited this check ({exc.code})")
+        raise
+    assert payload.get("draft") is False, (
+        f"the release for v{version} is still a DRAFT, so nobody can see it")
+    assert (payload.get("body") or "").strip(), (
+        f"the release for v{version} has an empty body - a release page with no "
+        f"notes is a tag with extra steps")

@@ -73,8 +73,32 @@ def get_default_stealth_prefs(
             / ``resolve_session_timezone(timezone, proxy)`` for ``"auto"``.
         extra_prefs: Optional dict overlaid LAST onto the generated prefs.
         humanize: When True (default), every mouse move is expanded into
-            a Bezier trajectory by the patched Juggler. A float caps the
+            a Bezier trajectory BY THE PATCHED BINARY. A float caps the
             motion in seconds. False disables the behavior.
+
+            READ THIS BEFORE RELYING ON IT. The binary's generator builds
+            every stroke from constants compiled into it: a fixed knot-box
+            padding, exactly two control knots, one easing, one step-count
+            law, one jitter probability. Constants are shared by every
+            install, so the shape is the same for every movement of every
+            session of every user - which makes it an identity rather than a
+            detail. Measured over 1.94M points: the across-travel jitter mean
+            is +0.4976 px with EVERY path biased, and the along-travel
+            residual's distinct-value set is literally {0.0}, so four events
+            solve the control polygon in closed form.
+
+            For a single account that is imperfect realism. For a fleet it is
+            a LINKAGE KEY: it does not say "an automation", it says "that
+            automation, and these accounts are one operator".
+
+            ``invisible-playwright`` no longer uses this path - since 0.4.0 it
+            generates the motion itself, per session seed, and sets this pref
+            to False. That option is not available to a caller driving the
+            binary with their own Playwright, which is who this function is
+            for. The default is kept at True because changing it would
+            silently change behaviour for existing integrations; the choice
+            between a shared-shape trajectory and no trajectory at all is
+            yours, and it is a real one.
         virtual_display: When True on Windows, apply GPU-disabling prefs
             to prevent GPU process crashes on virtual desktops without
             D3D11 backend.
