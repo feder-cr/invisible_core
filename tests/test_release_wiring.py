@@ -152,7 +152,15 @@ def test_the_gate_job_runs_the_gate_and_the_checkout_brings_the_ledger():
 def test_the_pre_push_hook_runs_the_gate_and_refuses_on_any_non_zero():
     text = HOOK.read_text(encoding="utf-8")
     assert "version_gate.py" in text, "the hook does not invoke the gate"
-    assert "refs/tags/v*" in text, "the hook does not recognise a release tag"
+    # There was an `assert "refs/tags/v*" in text` here. It encoded ONE spelling
+    # of the tag match - the shell `case` glob - and went red on 2026-07-27 when
+    # the hook started deriving the pushed range with awk and matched the same
+    # tags with a regex instead. The behaviour was unchanged and correct; the
+    # assertion was reading the implementation. The parametrized test directly
+    # below already makes this claim properly, by running the real hook against
+    # both `refs/tags/v1.0` and `refs/tags/release-18` and checking the gate
+    # fires - so the text match was a second, weaker copy of a check that
+    # already existed.
     assert re.search(r'\$rc"?\s*-ne\s*0', text), \
         "the hook does not refuse on a non-zero gate exit"
     # Exit 2 (gate broken) and exit 4 (no ledger) are not passes either, and a

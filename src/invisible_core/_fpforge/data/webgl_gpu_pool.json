@@ -81,15 +81,15 @@
    }
   },
   {
-   "vendor": "Google Inc. (Microsoft)",
-   "renderer_out": "ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0), or similar",
+   "vendor": "Google Inc. (Intel)",
+   "renderer_out": "ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), or similar",
    "prob": 0.012766,
    "prefs": {
-    "zoom.stealth.webgl.renderer": "ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0, D3D11)",
-    "zoom.stealth.webgl.vendor": "Google Inc. (Microsoft)",
+    "zoom.stealth.webgl.renderer": "ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "zoom.stealth.webgl.vendor": "Google Inc. (Intel)",
     "zoom.stealth.webgl.extensions": "ANGLE_instanced_arrays,EXT_blend_minmax,EXT_color_buffer_half_float,EXT_float_blend,EXT_frag_depth,EXT_shader_texture_lod,EXT_sRGB,EXT_texture_compression_bptc,EXT_texture_compression_rgtc,EXT_texture_filter_anisotropic,OES_element_index_uint,OES_fbo_render_mipmap,OES_standard_derivatives,OES_texture_float,OES_texture_float_linear,OES_texture_half_float,OES_texture_half_float_linear,OES_vertex_array_object,WEBGL_color_buffer_float,WEBGL_compressed_texture_s3tc,WEBGL_compressed_texture_s3tc_srgb,WEBGL_debug_renderer_info,WEBGL_debug_shaders,WEBGL_depth_texture,WEBGL_draw_buffers,WEBGL_lose_context,WEBGL_provoking_vertex",
     "zoom.stealth.webgl2.extensions": "EXT_color_buffer_float,EXT_float_blend,EXT_texture_compression_bptc,EXT_texture_compression_rgtc,EXT_texture_filter_anisotropic,OES_draw_buffers_indexed,OES_texture_float_linear,OVR_multiview2,WEBGL_compressed_texture_s3tc,WEBGL_compressed_texture_s3tc_srgb,WEBGL_debug_renderer_info,WEBGL_debug_shaders,WEBGL_lose_context,WEBGL_provoking_vertex",
-    "zoom.stealth.webgl.int_params": "2849|1,2885|1029,2886|2305,2931|1,2932|513,2961|0,2962|519,2963|2147483647,2964|7680,2965|7680,2966|7680,2967|0,2968|2147483647,3074|1029,3314|0,3315|0,3316|0,3317|4,3330|0,3331|0,3332|0,3333|4,3379|16384,3408|4,3410|8,3411|8,3412|8,3413|8,3414|24,3415|0,10752|0,32777|32774,32824|0,32877|0,32878|0,32883|2048,32936|0,32937|0,32938|1,32968|0,32969|1,32970|0,32971|1,33000|2147483647,33001|2147483647,33170|4352,34016|33984,34024|16384,34045|2,34076|16384,34816|519,34817|7680,34818|7680,34819|7680,34852|8,34853|1029,34854|0,34855|0,34856|0,34857|0,34858|0,34859|0,34860|0,34877|32774,34921|16,34930|16,35071|2048,35076|-8,35077|7,35371|12,35373|12,35374|24,35375|24,35376|65536,35377|212992,35379|200704,35380|256,35657|4096,35658|16384,35659|120,35660|16,35661|32,35723|4352,35738|5121,35739|6408,35968|4,35978|120,35979|4,36003|0,36004|2147483647,36005|2147483647,36063|8,36183|16,36203|4294967294,36347|4096,36348|30,36349|1024,37137|0,37154|120,37157|120,37443|37444,37447|1000000000",
+    "zoom.stealth.webgl.int_params": "2849|1,2885|1029,2886|2305,2931|1,2932|513,2961|0,2962|519,2963|2147483647,2964|7680,2965|7680,2966|7680,2967|0,2968|2147483647,3074|1029,3314|0,3315|0,3316|0,3317|4,3330|0,3331|0,3332|0,3333|4,3379|16384,3408|4,3410|8,3411|8,3412|8,3413|8,3414|24,3415|0,10752|0,32777|32774,32824|0,32877|0,32878|0,32883|2048,32936|1,32937|4,32938|1,32968|0,32969|1,32970|0,32971|1,33000|2147483647,33001|2147483647,33170|4352,34016|33984,34024|16384,34045|2,34076|16384,34816|519,34817|7680,34818|7680,34819|7680,34852|8,34853|1029,34854|0,34855|0,34856|0,34857|0,34858|0,34859|0,34860|0,34877|32774,34921|16,34930|16,35071|2048,35076|-8,35077|7,35371|12,35373|12,35374|24,35375|24,35376|65536,35377|212992,35379|200704,35380|256,35657|4096,35658|16384,35659|120,35660|16,35661|32,35723|4352,35738|5121,35739|6408,35968|4,35978|120,35979|4,36003|0,36004|2147483647,36005|2147483647,36063|8,36183|8,36203|4294967294,36347|4096,36348|30,36349|1024,37137|0,37154|120,37157|120,37443|37444,37447|1000000000",
     "zoom.stealth.webgl.int2_params": "2928|0:1,3386|32767:32767,33901|1:1024,33902|1:1",
     "zoom.stealth.webgl.float_params": "",
     "zoom.stealth.webgl.shader_precisions": "35633*36336|127:127:23,35633*36337|127:127:23,35633*36338|127:127:23,35633*36339|31:30:0,35633*36340|31:30:0,35633*36341|31:30:0,35632*36336|127:127:23,35632*36337|127:127:23,35632*36338|127:127:23,35632*36339|31:30:0,35632*36340|31:30:0,35632*36341|31:30:0",
@@ -471,6 +471,7 @@
  ],
  "_meta": {
   "source": "camoufox webgl_data.db (offline extract; real Firefox WebGL telemetry)",
-  "note": "prefs are zoom.stealth.webgl.* override values; prob normalized per-OS"
+  "note": "prefs are zoom.stealth.webgl.* override values; prob normalized per-OS",
+  "win_slot_5": "2026-07-27: this slot held 'ANGLE (Microsoft, Microsoft Basic Render Driver ...)', the string Windows reports when there is NO GPU driver - a datacenter tell, and one detectors weigh directly. It drew on 1.4% of seeds including 42, the seed in our own quickstart. Replaced in place with the pool's Intel HD persona rather than deleted: the probability mass and every other slot's cumulative boundary are unchanged, so only the seeds that drew the rasterizer move. The 444-row browserforge telemetry pool (webgl_renderer_pool.json) contains ZERO software renderers, which is the evidence that this persona never belonged in a desktop pool. The WHOLE prefs dict is copied, not just the two name strings: vendor, renderer and int_params all differed, and a real GPU name over a rasterizer's parameter limits is a worse tell than the honest rasterizer was."
  }
 }
