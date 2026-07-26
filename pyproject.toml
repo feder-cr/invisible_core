@@ -69,8 +69,17 @@ Issues = "https://github.com/feder-cr/invisible_core/issues"
 markers = [
     "unit: pure-logic tests, no I/O or external deps",
     "integration: multi-module tests, no browser",
+    # Builds a venv and installs THIS package from the index. Excluded by
+    # default because it needs the network and takes ~40s: the pre-push hook
+    # would otherwise make every push depend on PyPI being reachable, and a
+    # gate that fails for somebody else's outage is a gate people switch off.
+    # Run by .github/workflows/user-install.yml and before a release, with
+    # `pytest -m e2e -o addopts=""`.
+    "e2e: installs the published package into a clean venv",
 ]
-addopts = "-m 'not slow'"
+# Both exclusions in ONE addopts: declaring the key twice is a TOML error, not
+# a merge, and pytest then sees neither value.
+addopts = "-m 'not slow and not e2e'"
 
 [tool.hatch.version]
 source = "code"

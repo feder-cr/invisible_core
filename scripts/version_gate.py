@@ -221,6 +221,15 @@ PKG_NAME = "invisible_core"
 
 EXIT_OK, EXIT_REFUSED, EXIT_BROKEN, EXIT_USAGE, EXIT_NO_LEDGER = 0, 1, 2, 3, 4
 
+#: Already published, and byte-identical to what was published. NOT a refusal,
+#: and giving it its own code is what lets a caller tell the two apart. They
+#: used to share EXIT_REFUSED, which meant a release tag pointing at a version
+#: already on the index - backfilling tags for releases published by hand, or
+#: simply re-pushing a tag - produced a red run indistinguishable from "the
+#: content changed under an unmoved version", which must stay a hard failure.
+#: Here there is nothing to do and nothing wrong.
+EXIT_ALREADY_PUBLISHED = 5
+
 # The JSON API of the index this project publishes to. Overridable so that the
 # cross-check can follow a `--repository testpypi` upload to the index that
 # upload actually lands on, and so the tests can state what the index holds
@@ -786,7 +795,10 @@ def cmd_check(args) -> int:
         print("  byte-identical to what was published. There is nothing to release,")
         print("  and the index refuses a filename it has already served.")
         print(f"  published {prior.get('published_at', 'at an unrecorded time')}")
-        return EXIT_REFUSED
+        print("  (exit 5, not 1: a no-op, not a refusal. A caller that treats")
+        print("   every non-zero alike reports a red release for a tag that is")
+        print("   simply pointing at something already shipped.)")
+        return EXIT_ALREADY_PUBLISHED
 
     print("\nRELEASE REFUSED: the content changed but the version did not.")
     print(f"  version    {version}  (published {prior.get('published_at', '?')})")
