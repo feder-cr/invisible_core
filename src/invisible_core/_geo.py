@@ -209,10 +209,40 @@ def resolve_session_locale(egress_ip: Optional[str], proxy: Optional[Dict[str, s
     try:
         ip = egress_ip if _proxy_is_set(proxy) else discover_egress_ip(None)
         if ip is None:
+            _warn_locale_fallback(proxy, "no egress IP was resolved")
             return "en-US"
         return ip_to_locale(ip, ensure_geoip_mmdb())
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _warn_locale_fallback(proxy, f"{type(exc).__name__}: {exc}")
         return "en-US"
+
+
+def _warn_locale_fallback(proxy: Optional[Dict[str, str]], why: str) -> None:
+    """Say that the locale was NOT resolved, on stderr, every time.
+
+    This used to be two bare returns. The docstring called locale "cosmetic",
+    and for a lone session it nearly is - but the timezone is resolved from the
+    SAME egress IP and does not fall back, so a failure here produces a session
+    whose timezone says one country and whose language says the United States.
+    That pairing is a cross-field inconsistency of exactly the kind the
+    timezone trap exists to prevent, and it was reaching users with no signal
+    at all.
+
+    The OUTCOME is deliberately unchanged: raising here would break launches
+    that work today, on a field that is recoverable by passing `locale=`
+    explicitly. What changes is that it stops being invisible - an absent
+    signal must be loud, never silent.
+    """
+    import sys
+
+    where = "behind a proxy" if _proxy_is_set(proxy) else "with no proxy"
+    print(
+        f"invisible-core: could not resolve the session locale {where} ({why}); "
+        f"falling back to en-US. The timezone is still resolved from the egress "
+        f"IP, so this session may pair a non-US timezone with a US language - "
+        f"pass locale=\"xx-XX\" to set it explicitly.",
+        file=sys.stderr,
+    )
 
 
 class SessionGeo(NamedTuple):

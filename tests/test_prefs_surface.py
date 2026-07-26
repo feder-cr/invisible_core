@@ -166,3 +166,47 @@ def test_every_stealth_pref_emitted_is_one_the_binary_reads():
     assert not missing, (
         "these prefs are emitted but appear nowhere in the engine source, so "
         f"they are no-ops that look like working spoofs: {missing}")
+
+
+# ── hw_seed doubles as an off-switch, so it must never be zero ──────────────
+
+def test_no_seed_ever_produces_a_zero_hardware_seed():
+    """`zoom.stealth.fpp.hw_seed` is not only a seed - it is a gate.
+
+    Three C++ sites read it and act only when it is > 0: maxTouchPoints
+    (Navigator.cpp), pointer/hover (nsMediaFeatures.cpp) and the audio noise
+    (AnalyserNode.cpp). A session whose value is 0 therefore keeps a clean
+    render hash AND silently reverts to the host's real touch, pointer and
+    audio behaviour - on touch-capable Windows hardware, a capability appearing
+    where the persona says there is none.
+
+    0 used to be in CLEAN_RENDER_SEEDS because it is genuinely clean for the
+    render hash. Measured before it was removed: 223 of 2000 seeds, 11.2% of
+    identities. A value cannot be both a seed and an off-switch.
+    """
+    from invisible_core._webgl_personas import CLEAN_RENDER_SEEDS, render_noise_seed
+
+    assert 0 not in CLEAN_RENDER_SEEDS, (
+        "0 is back in the pool; every seed mapping to it loses touch, pointer "
+        "and audio spoofing while looking perfectly configured")
+    zeros = [s for s in range(3000) if render_noise_seed(s) == 0]
+    assert not zeros, f"{len(zeros)} seeds still produce hw_seed 0, e.g. {zeros[:5]}"
+
+
+def test_the_emitted_hardware_seed_is_positive_for_every_seed():
+    """Asserted on the PREF, not on the pool, so a future indirection that
+    reintroduces zero on the way out is caught too."""
+    for seed in (0, 1, 42, 777, 123456):
+        value = _prefs(seed)["zoom.stealth.fpp.hw_seed"]
+        assert isinstance(value, int) and value > 0, (
+            f"seed {seed} emits hw_seed {value!r}; the C++ guards read that as "
+            f"'spoofing off' for touch, pointer and audio")
+
+
+def test_the_pool_still_offers_real_per_session_diversity():
+    """Removing a value must not collapse the pool to something that stops
+    separating sessions."""
+    from invisible_core._webgl_personas import render_noise_seed
+
+    seen = {render_noise_seed(s) for s in range(3000)}
+    assert len(seen) >= 6, f"only {len(seen)} distinct hardware seeds: {sorted(seen)}"

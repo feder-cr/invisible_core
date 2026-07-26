@@ -191,7 +191,19 @@ def forced_gpu_class(seed: int) -> Optional[str]:
 # cross-OS: hw_seed clean on Windows went dirty on the Linux GL backend (b008 0.034->0.839; Win-dirty
 # {7,11,20,27} = Linux-clean and vice-versa; + identity×hw_seed interaction on Linux). That proved
 # calibration can't work cross-host → substitution replaces it. Kept the original diverse 9-set.
-CLEAN_RENDER_SEEDS = [0, 5, 6, 9, 11, 16, 19, 20, 28]
+# 2026-07-26: 0 REMOVED. It is genuinely clean for the render hash - that is not
+# in dispute - but this value does not only seed the canvas noise: it is written
+# to zoom.stealth.fpp.hw_seed, and three C++ sites gate on it being > 0.
+#   dom/base/Navigator.cpp:917            maxTouchPoints
+#   layout/style/nsMediaFeatures.cpp:423  pointer / hover
+#   dom/media/webaudio/AnalyserNode.cpp:228,273  audio noise
+# So a session mapping to 0 got a clean render AND silently reverted to the
+# host's real touch, pointer and audio behaviour. Measured before the change:
+# 223 of 2000 seeds, 11.2% of identities, and on touch-capable Windows hardware
+# that is a visible capability appearing where the persona says it should not.
+# A value cannot be both a seed and an off-switch; the pool keeps the eight that
+# are only seeds.
+CLEAN_RENDER_SEEDS = [5, 6, 9, 11, 16, 19, 20, 28]
 
 
 def render_noise_seed(seed: int) -> int:

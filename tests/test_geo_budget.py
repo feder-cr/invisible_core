@@ -160,3 +160,50 @@ def test_the_default_budget_is_smaller_than_trying_every_endpoint(monkeypatch):
         f"default budget {budget}s does not bound the {timeout}s x "
         f"{len(_geo._IP_ECHO_ENDPOINTS)} worst case it exists to cap"
     )
+
+
+# ── a locale that could not be resolved must not be silent ─────────────────
+
+def test_a_failed_locale_lookup_says_so_instead_of_returning_en_US_quietly(
+        monkeypatch, capsys):
+    """The mismatch this prevents is the one the timezone trap exists for.
+
+    Locale and timezone are resolved from the SAME egress IP, but only the
+    locale falls back. So a failure here produced a session whose timezone said
+    one country and whose language said the United States - a cross-field
+    inconsistency a detector checks for, reaching users with no signal at all.
+
+    The outcome is deliberately unchanged: raising would break launches that
+    work today, on a field a caller can set explicitly. Only the silence is
+    fixed.
+    """
+    def boom(*a, **kw):
+        raise RuntimeError("geoip unavailable")
+
+    monkeypatch.setattr(_geo, "discover_egress_ip", boom)
+    got = _geo.resolve_session_locale(None, None)
+    assert got == "en-US", "the fallback outcome must not change"
+
+    err = capsys.readouterr().err
+    assert "could not resolve the session locale" in err
+    assert "geoip unavailable" in err, "the cause must be named, not swallowed"
+    assert "locale=" in err, "the message must name the way out"
+
+
+def test_the_warning_distinguishes_the_proxy_case(monkeypatch, capsys):
+    """Behind a proxy the mismatch is worse - the timezone follows the exit
+    country while the language does not - so the message has to say which
+    situation the reader is in."""
+    monkeypatch.setattr(_geo, "ip_to_locale",
+                        lambda *a, **kw: (_ for _ in ()).throw(ValueError("no record")))
+    monkeypatch.setattr(_geo, "_proxy_is_set", lambda proxy: True)
+    _geo.resolve_session_locale("203.0.113.7", {"server": "socks5://x:1"})
+    assert "behind a proxy" in capsys.readouterr().err
+
+
+def test_a_resolved_locale_stays_quiet(monkeypatch, capsys):
+    """A warning on the happy path would train people to ignore it."""
+    monkeypatch.setattr(_geo, "_proxy_is_set", lambda proxy: True)
+    monkeypatch.setattr(_geo, "ip_to_locale", lambda *a, **kw: "it-IT")
+    assert _geo.resolve_session_locale("203.0.113.7", {"server": "s"}) == "it-IT"
+    assert capsys.readouterr().err == ""
