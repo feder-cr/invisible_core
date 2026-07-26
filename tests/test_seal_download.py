@@ -52,6 +52,7 @@ from invisible_core.download import (
 from invisible_core.seal import (
     DEFAULT_ENTRY_REL,
     JUGGLER_ENTRIES,
+    resource_root,
     STAMP_NAME,
     active_seal,
     load_seal,
@@ -148,7 +149,8 @@ def pack(tree_root: Path, dst: Path) -> bytes:
 
 
 def write_seal(path: Path, *, tag: str = "firefox-18", version: str = SEALED_VERSION,
-               sha_for: dict | None = None, build_ids: dict | None = None) -> Path:
+               sha_for: dict | None = None, build_ids: dict | None = None,
+               omni_sha_for: dict | None = None) -> Path:
     """A five-leg release seal. `sha_for` overrides the sha256 of individual legs
     (by (platform, arch)); every other leg gets a placeholder, exactly like a
     real seal where only the leg you run is ever compared."""
@@ -158,7 +160,14 @@ def write_seal(path: Path, *, tag: str = "firefox-18", version: str = SEALED_VER
         assets[asset_name(plat, arch, version)] = {
             "platform": plat, "arch": arch, "build_id": build_id,
             "sha256": (sha_for or {}).get((plat, arch), "00" * 32),
-            "size": 1, "entry_rel": DEFAULT_ENTRY_REL[plat], "omni_sha256": "",
+            "size": 1, "entry_rel": DEFAULT_ENTRY_REL[plat],
+            # Empty by default, which is what every leg of a Linux seal carries
+            # (that archive tars the unpacked layout and has no omni.ja). It
+            # also means the ADOPTION digest check is never entered by default -
+            # `if asset.omni_sha256:` is falsy - which is exactly why disabling
+            # that check left all 23 tests in this file green. Pass
+            # `omni_sha_for` to reach it.
+            "omni_sha256": (omni_sha_for or {}).get((plat, arch), ""),
         }
     path.write_text(json.dumps({
         "schema": 2, "tag": tag, "upstream_version": version,
