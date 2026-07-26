@@ -91,8 +91,56 @@ elif [ ! -f "$NAME_CHECK" ]; then
     echo "[pre-push] (that scan is a maintainer gate; it lives outside this repo.)"
     NAME_SKIPPED=yes
 else
-    echo "[pre-push] scanning shipped files for names we do not publish..."
-    if ! python "$NAME_CHECK" .; then
+    # git feeds the refs being pushed on stdin, one line per ref:
+    #   "<local ref> <local sha> <remote ref> <remote sha>"
+    # Read here because this is the only gate that needs it, and guarded on a
+    # tty so that running the hook by hand does not hang waiting for input.
+    if [ -t 0 ]; then
+        PUSH_REFS=""
+    else
+        PUSH_REFS="$(cat)"
+    fi
+
+    # An all-zero REMOTE sha means the remote has never seen this branch, so
+    # there is no old..new to take: everything not already on a remote is new.
+    # An all-zero LOCAL sha is a branch deletion, which pushes no content.
+    RANGE=""
+    if [ -n "$PUSH_REFS" ]; then
+        RANGE=$(printf '%s
+' "$PUSH_REFS" | awk '
+            $2 ~ /^0+$/ { next }
+            $4 ~ /^0+$/ { print $2 " --not --remotes"; exit }
+                        { print $4 ".." $2; exit }')
+    fi
+
+    run_name_check() {
+        if [ -n "$RANGE" ]; then
+            python "$NAME_CHECK" . --range "$RANGE"
+        else
+            python "$NAME_CHECK" .
+        fi
+    }
+
+    # The gate on the gate. Nothing tested the scanner until 2026-07-27, and it
+    # was returning a clean verdict over three of the four surfaces a public
+    # repo actually publishes - commit messages among them, which is where ten
+    # of our own names went out.
+    NAME_TEST="$(dirname "$NAME_CHECK")/test_check_forbidden_names.py"
+    if [ -f "$NAME_TEST" ] && ! python "$NAME_TEST"; then
+        echo "" >&2
+        echo "[pre-push] REFUSED - the name scanner's own cases are red, so its" >&2
+        echo "[pre-push] verdict on this push would mean nothing." >&2
+        exit 1
+    fi
+
+    if [ -n "$RANGE" ]; then
+        echo "[pre-push] scanning files + the commit messages in $RANGE ..."
+    else
+        echo "[pre-push] scanning files for names we do not publish."
+        echo "[pre-push] NOTE: no push range on stdin, so COMMIT MESSAGES were not"
+        echo "[pre-push] scanned. A message cannot be reworded once it is pushed."
+    fi
+    if ! run_name_check; then
         echo "" >&2
         echo "[pre-push] REFUSED - see above. The offending files are named; the" >&2
         echo "[pre-push] tokens are not, so this log is safe to paste." >&2
