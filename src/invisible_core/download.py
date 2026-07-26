@@ -274,7 +274,17 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
             f"The prefs, the spoofed User-Agent and the protocol expectations in this "
             f"package were generated for the sealed build, so pairing them with another "
             f"engine would ship a browser whose claim contradicts itself.\n"
-            f"To drive {version!r}, install the invisible-core sealed to it."
+            f"\n"
+            f"To drive {version!r} anyway, generate a seal for that build and point this "
+            f"package at it:\n"
+            f"  python -m invisible_core seal --binary <path to that firefox> -o my.seal.json\n"
+            f"  set INVISIBLE_SEAL_FILE=my.seal.json\n"
+            f"The User-Agent and the prefs then move with the seal, so the pair stays "
+            f"coherent.\n"
+            f"\n"
+            f"(A release of invisible-core sealed to {version!r} would also work, if one "
+            f"exists. It does not for tags that predate the seal, which is why the route "
+            f"above is given first: it works for any build you have on disk.)"
         )
     if seal.is_local:
         raise SealError(
