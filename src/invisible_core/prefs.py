@@ -537,7 +537,8 @@ def translate_profile_to_prefs(
     # parameters hashes even with the same renderer → detectable variation.
     # Vanilla Intel Arc A750 parameters hash (66544db8) verified at msaa=4.
     _msaa = profile.webgl.msaa_samples if sys.platform.startswith("linux") else 4
-    prefs["zoom.stealth.webgl.msaa"]        = _msaa
+    # DEAD: appears in NO file of the engine source; MSAA sample counts come from the real GL driver.
+    # prefs["zoom.stealth.webgl.msaa"]        = _msaa
     prefs["webgl.msaa-samples"]             = _msaa
     prefs["webgl.msaa-force"]               = _msaa > 0
 
@@ -554,9 +555,15 @@ def translate_profile_to_prefs(
     # Screen
     prefs["zoom.stealth.screen.width"]        = profile.screen.width
     prefs["zoom.stealth.screen.height"]       = profile.screen.height
-    prefs["zoom.stealth.screen.avail_width"]  = profile.screen.avail_width
-    prefs["zoom.stealth.screen.avail_height"] = profile.screen.avail_height
-    prefs["zoom.stealth.screen.dpr"]          = profile.screen.dpr
+    # DEAD, and kept only so the next reader does not re-add them. Neither name
+    # is declared in StaticPrefList.yaml, and nsScreen::GetAvailRect ignores
+    # them outright: it reads zoom_stealth_screen_width/height and subtracts a
+    # fixed 48px taskbar (dom/base/nsScreen.cpp:112-115). Writing them changes
+    # nothing; the available rect is already derived from the two above.
+    #   prefs["zoom.stealth.screen.avail_width"]  = profile.screen.avail_width
+    #   prefs["zoom.stealth.screen.avail_height"] = profile.screen.avail_height
+    # DEAD: appears in NO file of the engine source; the DPR that reaches a page comes from layout.css.devPixelsPerPx on the line below.
+    # prefs["zoom.stealth.screen.dpr"]          = profile.screen.dpr
     prefs["layout.css.devPixelsPerPx"]        = str(profile.screen.dpr)
 
     # Hardware - coherent with the sampled gpu_class by construction (the forge
@@ -572,8 +579,16 @@ def translate_profile_to_prefs(
     # Codec
     prefs["media.av1.enabled"]                = profile.codec.av1_enabled
     prefs["media.encoder.webm.enabled"]       = profile.codec.webm_encoder_enabled
-    prefs["media.mediasource.webm.enabled"]   = profile.codec.mediasource_webm
-    prefs["media.mediasource.mp4.enabled"]    = profile.codec.mediasource_mp4
+    # NOT media.mediasource.{webm,mp4}.enabled. Those two names do not exist in
+    # Firefox - verified against modules/libpref/init/StaticPrefList.yaml, which
+    # declares only media.mediasource.enabled / .vp9.enabled / .experimental.
+    # Setting a name the binary never reads is a no-op, so the per-seed codec
+    # diversity this samples was fictional: every identity we shipped reported
+    # the SAME codec surface to canPlayType and MediaSource.isTypeSupported,
+    # which is an invariant across the fleet rather than the variation intended.
+    # The real switches are media.webm.enabled and media.mp4.enabled.
+    prefs["media.webm.enabled"]               = profile.codec.mediasource_webm
+    prefs["media.mp4.enabled"]                = profile.codec.mediasource_mp4
 
     # Fonts - NOTHING to configure here. The patched binary is self-contained:
     # it is always bundle-only (host system fonts never enter the font list),
