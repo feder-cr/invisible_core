@@ -64,18 +64,59 @@ def test_every_layer_of_the_wiring_exists():
 
 @requires_checkout
 def test_the_upload_job_cannot_start_without_the_gate_job():
-    """The load-bearing line of the workflow. `needs: gate` on the job that
-    holds the credential is what makes the gate unskippable in CI."""
-    text = WORKFLOW.read_text(encoding="utf-8")
-    upload = text.split("\n  upload:", 1)
-    assert len(upload) == 2, "the publish workflow has no `upload` job"
-    body = upload[1]
-    assert re.search(r"^\s+needs:\s*\[?\s*gate\s*\]?\s*$", body, re.M), \
-        "the upload job does not declare `needs: gate`, so it can run past a red gate"
-    assert re.search(r"^\s+environment:\s*pypi\b", body, re.M), \
+    """The load-bearing property of the workflow: the job holding the credential
+    cannot start unless the gate job succeeded.
+
+    Parsed as YAML, not matched as a string. The first version required the
+    literal `needs: gate` and went red the moment a second dependency was added
+    (`needs: [already-published, gate]`) even though the property it exists to
+    protect was untouched. A test that fails on a formatting change it does not
+    care about is a test people edit without reading.
+    """
+    import yaml
+
+    spec = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    jobs = spec.get("jobs") or {}
+    assert "upload" in jobs, "the publish workflow has no `upload` job"
+    upload = jobs["upload"]
+
+    needs = upload.get("needs")
+    needs = [needs] if isinstance(needs, str) else list(needs or [])
+    assert "gate" in needs, (
+        f"the upload job declares needs={needs!r}, which does not include the "
+        f"gate, so it can run past a red one")
+
+    assert str(upload.get("environment", "")).startswith("pypi"), \
         "the upload job does not name the environment the credential lives in"
-    assert "version_gate.py publish" in body, \
+
+    steps = " ".join(str(s.get("run", "")) for s in upload.get("steps", []))
+    assert "version_gate.py publish" in steps, \
         "the upload job does not go through the gate's own publish path"
+
+
+@requires_checkout
+def test_the_index_probe_gates_both_other_jobs():
+    """The guard added on 2026-07-26 is only a guard if BOTH jobs honour it.
+
+    It exists so a tag naming a version already on the index is a no-op rather
+    than a failed upload. If `upload` kept running when the probe says the
+    version is present, the guard would be decoration and the upload would fail
+    on a filename the index has already served.
+    """
+    import yaml
+
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    assert "already-published" in jobs, "the index probe job is gone"
+    for name in ("gate", "upload"):
+        job = jobs[name]
+        needs = job.get("needs")
+        needs = [needs] if isinstance(needs, str) else list(needs or [])
+        assert "already-published" in needs, (
+            f"`{name}` does not depend on the index probe, so it runs even when "
+            f"the version is already published")
+        cond = str(job.get("if", ""))
+        assert "already-published" in cond and "present" in cond, (
+            f"`{name}` has no condition on the probe's answer: {cond!r}")
 
 
 @requires_checkout

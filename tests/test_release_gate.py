@@ -90,6 +90,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Every expectation in this file is written against a <tag>.0.0 baseline.
 BASELINE_REVISION = 0
+
+#: "already published and byte-identical" - a NO-OP, not a refusal.
+#: It shared exit 1 with "the content changed under an unmoved version" until
+#: 2026-07-26, and the two must not look alike to a caller: the second has to
+#: stay a hard failure, while the first is what a re-pushed or backfilled
+#: release tag legitimately produces. See scripts/version_gate.py.
+NOTHING_TO_RELEASE = 5
 GATE = REPO_ROOT / "scripts" / "version_gate.py"
 
 pytestmark = pytest.mark.integration
@@ -320,8 +327,8 @@ def test_an_unchanged_tree_at_a_published_version_is_refused(core):
     simply nothing to release."""
     r = run_gate(core)
     text = out_of(r)
-    assert r.returncode == 1, text
-    assert "nothing to release" in text
+    assert r.returncode == NOTHING_TO_RELEASE, text
+    assert "nothing to release" in text.lower()
     assert "the content changed but the version did not" not in text
 
 
@@ -471,11 +478,19 @@ def test_fo5_a_missing_ledger_is_not_rescued_by_first_release(core):
     assert "NO LEDGER" in text
 
 
-def test_the_four_exit_codes_are_all_distinct(core):
-    """0 / 1 / 2 / 4 have to mean four different things to a CI step, and the
-    fail-open bug was exactly a 4-shaped situation reported as 0."""
+def test_the_exit_codes_are_all_distinct(core):
+    """Each has to mean a different thing to a CI step, and the fail-open bug
+    was exactly a 4-shaped situation reported as 0.
+
+    Five now, not four: "already published and byte-identical" was split out of
+    the refusal code on 2026-07-26. A release tag pointing at something already
+    on the index is a no-op, and a caller that cannot tell it from a content
+    violation reports a red release for it.
+    """
     assert run_gate(core, "show").returncode == 0
-    assert run_gate(core).returncode == 1                       # nothing to release
+    assert run_gate(core).returncode == NOTHING_TO_RELEASE      # nothing to do
+    touch_content(core)
+    assert run_gate(core).returncode == 1                       # content drift
     (core / "PUBLISHED.json").unlink()
     assert run_gate(core).returncode == 4                       # no memory
 
@@ -507,8 +522,8 @@ def test_cw1_a_gitignore_at_the_repo_root_is_not_a_content_change(core):
     assert ".gitignore" not in text
     # The tree is otherwise identical to what was published, so the only verdict
     # left is "there is nothing to release".
-    assert r.returncode == 1, text
-    assert "nothing to release" in text
+    assert r.returncode == NOTHING_TO_RELEASE, text
+    assert "nothing to release" in text.lower()
 
 
 def test_cw2_a_line_ending_flip_is_not_a_content_change(core):
@@ -537,8 +552,8 @@ def test_cw2_a_line_ending_flip_is_not_a_content_change(core):
     r = run_gate(core)
     text = out_of(r)
     assert "the content changed but the version did not" not in text, text
-    assert r.returncode == 1, text
-    assert "nothing to release" in text
+    assert r.returncode == NOTHING_TO_RELEASE, text
+    assert "nothing to release" in text.lower()
 
 
 def test_cw2b_a_real_change_still_survives_the_line_ending_normalisation(core):
@@ -892,8 +907,8 @@ def test_d6b_a_build_whose_only_change_is_a_content_cr_reads_as_identical(core):
     p.write_bytes(p.read_bytes().replace(b'"a\rb"', b'"a\nb"'))
     r = run_gate(core)
     text = out_of(r)
-    assert r.returncode == 1, text
-    assert "nothing to release" in text
+    assert r.returncode == NOTHING_TO_RELEASE, text
+    assert "nothing to release" in text.lower()
     assert "the content changed but the version did not" not in text
 
 
@@ -959,8 +974,8 @@ def test_none_of_the_eight_ordinary_afternoons_makes_the_gate_fire(core, name, n
     assert "GATE BROKEN" not in text, text
     # The tree is otherwise what was published, so the only verdict left is that
     # there is nothing to release.
-    assert r.returncode == 1, text
-    assert "nothing to release" in text
+    assert r.returncode == NOTHING_TO_RELEASE, text
+    assert "nothing to release" in text.lower()
 
 
 def test_the_default_run_builds_twice_and_the_build_is_reproducible(published_baseline, tmp_path):
