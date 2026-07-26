@@ -80,7 +80,16 @@ pytest.importorskip("hatchling", reason="offline build needs the backend install
 
 import invisible_core  # noqa: E402
 
-REPO_ROOT = Path(invisible_core.__file__).resolve().parents[2]
+# The repo, taken from THIS FILE rather than from where the module happens to
+# be installed. `Path(invisible_core.__file__).parents[2]` is the repo under an
+# editable install and `.../Lib` under a regular one, so the same expression
+# silently means two different things depending on how the developer installed
+# the package - and under the regular one the fixtures below fail copying a
+# pyproject.toml that is simply not there.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Every expectation in this file is written against a <tag>.0.0 baseline.
+BASELINE_REVISION = 0
 GATE = REPO_ROOT / "scripts" / "version_gate.py"
 
 pytestmark = pytest.mark.integration
@@ -94,6 +103,15 @@ _IGNORE = shutil.ignore_patterns(
 EMPTY_LEDGER = '{"schema": 1, "released": []}'
 
 
+def set_core_revision(root: Path, value: int) -> None:
+    p = root / "src" / "invisible_core" / "_version.py"
+    src = p.read_text(encoding="utf-8")
+    out = "\n".join(f"CORE_REVISION = {value}" if line.startswith("CORE_REVISION")
+                    else line for line in src.splitlines()) + "\n"
+    assert f"CORE_REVISION = {value}" in out
+    p.write_text(out, encoding="utf-8")
+
+
 def _copy_repo(dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     for name in ("pyproject.toml", "README.md", "LICENSE"):
@@ -105,6 +123,16 @@ def _copy_repo(dest: Path) -> Path:
     # absent either: an absent ledger is now its own hard failure, which is the
     # point of FO2 below.
     (dest / "PUBLISHED.json").write_text(EMPTY_LEDGER, encoding="utf-8")
+    # Neither is the revision. Every expectation below is written against a
+    # baseline of <tag>.0.0, so leaving the copy at whatever the repo happens
+    # to hold today makes those literals wrong the first time the core ships a
+    # normal release: bumping CORE_REVISION 1 -> 2 for 18.2.0 turned nine of
+    # these red at once, each one asserting a version string that had simply
+    # moved on. A test that has to be re-edited whenever an expected thing
+    # happens is a test that eventually gets re-edited without being read.
+    # Pinning it here is the arrange step these cases were relying on ambient
+    # state for.
+    set_core_revision(dest, BASELINE_REVISION)
     return dest
 
 
@@ -183,13 +211,6 @@ def edit_seal(root: Path, **fields) -> None:
                  encoding="utf-8")
 
 
-def set_core_revision(root: Path, value: int) -> None:
-    p = root / "src" / "invisible_core" / "_version.py"
-    src = p.read_text(encoding="utf-8")
-    out = "\n".join(f"CORE_REVISION = {value}" if line.startswith("CORE_REVISION")
-                    else line for line in src.splitlines()) + "\n"
-    assert f"CORE_REVISION = {value}" in out
-    p.write_text(out, encoding="utf-8")
 
 
 # --------------------------------------------------------------- known bad

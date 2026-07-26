@@ -34,7 +34,10 @@ import pytest
 
 import invisible_core
 
-REPO_ROOT = Path(invisible_core.__file__).resolve().parents[2]
+# From THIS FILE, not from where the module is installed: the latter is the
+# repo under an editable install and .../Lib under a regular one, so the same
+# expression means two different things depending on how it was installed.
+REPO_ROOT = Path(__file__).resolve().parents[1]
 GATE = REPO_ROOT / "scripts" / "version_gate.py"
 HOOK = REPO_ROOT / ".githooks" / "pre-push"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "publish.yml"
@@ -152,8 +155,100 @@ def test_the_hook_gates_release_tags_and_leaves_ordinary_pushes_alone(
         assert r.returncode != 0, "a release tag went out past a red gate"
         assert "REFUSED" in text
     else:
+        # "Alone" is about the PUBLISH gate, which builds the project twice and
+        # is the reason ordinary pushes were left untouched in the first place -
+        # a hook that costs a minute on every push is a hook people delete. The
+        # forbidden-name scan is a different animal: sub-second, and a name is
+        # public the moment the branch lands, so it runs here too.
         assert "FAKE GATE RAN" not in text, "the hook gates ordinary pushes too"
         assert r.returncode == 0, text
+
+
+# ------------------------------------------------- the forbidden-name scan
+
+def _fake_repo_with_hook(tmp_path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / ".githooks").mkdir(parents=True)
+    (repo / ".githooks" / "pre-push").write_text(
+        HOOK.read_text(encoding="utf-8"), encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True,
+                   capture_output=True, text=True)
+    return repo
+
+
+def _push_ordinary(repo: Path, sh: str, **env) -> tuple[int, str]:
+    r = subprocess.run(
+        [sh, str(repo / ".githooks" / "pre-push"), "origin",
+         "https://example.invalid/x.git"],
+        cwd=str(repo), input="refs/heads/main a refs/heads/main b\n",
+        capture_output=True, text=True,
+        env={**_env(), "INVISIBLE_GATE_PYTHON": sys.executable, **env})
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+@requires_checkout
+def test_a_clone_with_no_word_list_is_told_so_and_is_not_blocked(tmp_path):
+    """The failure the first cut of this gate shipped.
+
+    It refused whenever the scanner was not at the workbench path, so every
+    clone of the PUBLIC repo was stopped on every push with no way to comply -
+    the word list deliberately does not exist outside the workbench. A gate
+    that is red by default is one people switch off, and switching this one off
+    disarms every other gate in the same hook.
+
+    Not blocked, and not silent either: silence is indistinguishable from a
+    scan that ran and passed.
+    """
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    code, text = _push_ordinary(_fake_repo_with_hook(tmp_path), sh)
+    assert code == 0, text
+    assert "no forbidden-name word list here" in text, text
+
+
+@requires_checkout
+def test_a_scanner_that_was_configured_and_is_missing_is_a_refusal(tmp_path):
+    """Setting the variable is someone saying "run this". Not finding it then
+    is a broken gate, not an absent one, and the two must not look alike."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    code, text = _push_ordinary(_fake_repo_with_hook(tmp_path), sh,
+                                INVISIBLE_NAME_CHECK="/nowhere/at/all.py")
+    assert code != 0, "a configured-but-missing scanner was waved through"
+    assert "REFUSED" in text and "points at nothing" in text
+
+
+@requires_checkout
+def test_a_scanner_that_refuses_stops_an_ordinary_push(tmp_path):
+    """The scan is not release-tag-only, unlike the publish gate: a forbidden
+    name is public as soon as the BRANCH lands, and a force-push does not take
+    it back - GitHub keeps the object."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    repo = _fake_repo_with_hook(tmp_path)
+    scanner = tmp_path / "scanner.py"
+    scanner.write_text("import sys; print('SCAN RAN'); sys.exit(1)\n",
+                       encoding="utf-8")
+    code, text = _push_ordinary(repo, sh, INVISIBLE_NAME_CHECK=str(scanner))
+    assert "SCAN RAN" in text, text
+    assert code != 0, "an ordinary push went out past a red name scan"
+
+
+@requires_checkout
+def test_switching_the_scan_off_is_possible_and_says_so_loudly(tmp_path):
+    """There has to be an escape hatch or people reach for --no-verify, which
+    turns off everything. It must leave a mark that a reader cannot miss."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    code, text = _push_ordinary(_fake_repo_with_hook(tmp_path), sh,
+                                INVISIBLE_NAME_CHECK="skip")
+    assert code == 0, text
+    assert "WARNING: INVISIBLE_NAME_CHECK=skip" in text
+    assert "force-push does not remove it" in text
 
 
 @requires_checkout
