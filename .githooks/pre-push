@@ -36,15 +36,24 @@ for candidate in "$INVISIBLE_GATE_PYTHON" python3 python py; do
     fi
 done
 
-release_tag=""
 # stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
-while read -r _local_ref _local_sha remote_ref _remote_sha; do
-    case "$remote_ref" in
-        refs/tags/v*|refs/tags/release-*)
-            release_tag="$remote_ref"
-            ;;
-    esac
-done
+# Captured ONCE into a variable, because stdin can only be read once and TWO
+# gates below need it. Until 2026-07-27 the release-tag loop drained it with a
+# `while read`, so the forbidden-name scan further down found nothing and
+# reported "no commit messages scanned" on every push - correctly, and with no
+# coverage. Guarded on a tty so running the hook by hand does not hang.
+if [ -t 0 ]; then
+    PUSH_REFS=""
+else
+    PUSH_REFS="$(cat)"
+fi
+
+release_tag=""
+if [ -n "$PUSH_REFS" ]; then
+    release_tag=$(printf '%s
+' "$PUSH_REFS" | awk '
+        $3 ~ /^refs\/tags\/(v|release-)/ { print $3; exit }')
+fi
 
 # ── forbidden names ────────────────────────────────────────────────────
 # Naming a protection vendor or a target site in a public repo is a legal and
@@ -91,16 +100,7 @@ elif [ ! -f "$NAME_CHECK" ]; then
     echo "[pre-push] (that scan is a maintainer gate; it lives outside this repo.)"
     NAME_SKIPPED=yes
 else
-    # git feeds the refs being pushed on stdin, one line per ref:
-    #   "<local ref> <local sha> <remote ref> <remote sha>"
-    # Read here because this is the only gate that needs it, and guarded on a
-    # tty so that running the hook by hand does not hang waiting for input.
-    if [ -t 0 ]; then
-        PUSH_REFS=""
-    else
-        PUSH_REFS="$(cat)"
-    fi
-
+    # PUSH_REFS was captured at the top of this hook; see the note there.
     # An all-zero REMOTE sha means the remote has never seen this branch, so
     # there is no old..new to take: everything not already on a remote is new.
     # An all-zero LOCAL sha is a branch deletion, which pushes no content.
