@@ -99,7 +99,25 @@ BASELINE_REVISION = 0
 NOTHING_TO_RELEASE = 5
 GATE = REPO_ROOT / "scripts" / "version_gate.py"
 
-pytestmark = pytest.mark.integration
+# The whole file drives scripts/version_gate.py, and `scripts/` is NOT in the
+# sdist include list - deliberately, since the ledger and the gate are not
+# something users receive. But `tests/` IS, so unpacking the sdist and running
+# pytest gave 43 hard errors on a missing file, for a gate that is none of the
+# user's business. The `integration` marker does not save them either: this
+# project's addopts filter `slow` and `e2e`, not `integration`.
+#
+# The sibling file test_release_wiring.py already had exactly this guard. This
+# one is the same shape as the defect invisible_playwright records having fixed
+# once already: a maintainer-only test shipped to users who cannot make it pass.
+_in_checkout = (REPO_ROOT / "scripts" / "version_gate.py").exists()
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not _in_checkout,
+        reason=("not a source checkout - the publish gate lives in scripts/, "
+                "which the sdist does not ship"),
+    ),
+]
 
 _IGNORE = shutil.ignore_patterns(
     "__pycache__", "*.pyc", ".git", ".pytest_cache", ".venv", "venv",
