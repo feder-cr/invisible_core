@@ -186,6 +186,14 @@ def test_no_seed_ever_produces_a_zero_hardware_seed():
     """
     from invisible_core._webgl_personas import CLEAN_RENDER_SEEDS, render_noise_seed
 
+    # The pool length is part of the contract too: render_noise_seed indexes
+    # with `% len(...)`, so changing the LENGTH remaps every identity. The
+    # first fix removed 0 outright and moved 445 of 500 seeds - an 89% change
+    # in canvas render hash to repair an 11% defect. Replacing the slot keeps
+    # every other index where it was.
+    assert len(CLEAN_RENDER_SEEDS) == 9, (
+        f"the pool is {len(CLEAN_RENDER_SEEDS)} long, not 9; changing the "
+        f"length remaps every seed's render hash, not just the broken ones")
     assert 0 not in CLEAN_RENDER_SEEDS, (
         "0 is back in the pool; every seed mapping to it loses touch, pointer "
         "and audio spoofing while looking perfectly configured")

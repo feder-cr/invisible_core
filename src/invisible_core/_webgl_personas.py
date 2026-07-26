@@ -203,7 +203,14 @@ def forced_gpu_class(seed: int) -> Optional[str]:
 # that is a visible capability appearing where the persona says it should not.
 # A value cannot be both a seed and an off-switch; the pool keeps the eight that
 # are only seeds.
-CLEAN_RENDER_SEEDS = [5, 6, 9, 11, 16, 19, 20, 28]
+# The 0 slot is REPLACED, not removed, and the length stays 9 on purpose.
+# render_noise_seed indexes with `% len(...)`, so shrinking the list to 8
+# remaps EVERY identity: measured, 445 of 500 seeds got a different hw_seed and
+# therefore a different canvas render hash, for a defect that affected 11%.
+# Duplicating an existing calibrated value keeps every other index exactly where
+# it was, so only the seeds that used to draw 0 move - which is the whole
+# intended blast radius.
+CLEAN_RENDER_SEEDS = [5, 5, 6, 9, 11, 16, 19, 20, 28]
 
 
 def render_noise_seed(seed: int) -> int:
