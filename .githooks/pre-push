@@ -46,6 +46,52 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
     esac
 done
 
+# ── forbidden names ────────────────────────────────────────────────────
+# Naming a commercial protection product, a proxy vendor or a target site in a
+# public repo is a legal and credibility problem, and no test in this package
+# covers it. It cannot be a test here either: the scanner needs a word list
+# that deliberately lives outside every public repo, so a shipped test would
+# fail closed on every user's clone with a failure they cannot fix - and a
+# suite that is red by default gets pushed with --no-verify, which disarms
+# every other gate in this file at the same time.
+#
+# So it is a workbench gate, resolved exactly like the pin check above: a gate
+# that cannot be reached is a REFUSAL, never a silent pass.
+NAME_CHECK="${INVISIBLE_NAME_CHECK:-../../scripts/check_forbidden_names.py}"
+NAME_SKIPPED=""
+
+if [ "$INVISIBLE_NAME_CHECK" = "skip" ]; then
+    echo ""
+    echo "[pre-push] ###################################################################"
+    echo "[pre-push] # WARNING: INVISIBLE_NAME_CHECK=skip                              #"
+    echo "[pre-push] # Nothing checked this push for vendor or target-site names. If   #"
+    echo "[pre-push] # one is in the diff it is public the moment this lands, and a    #"
+    echo "[pre-push] # force-push does not remove it - GitHub keeps the object.        #"
+    echo "[pre-push] ###################################################################"
+    echo ""
+    NAME_SKIPPED=yes
+elif [ ! -f "$NAME_CHECK" ]; then
+    echo "" >&2
+    echo "[pre-push] REFUSED - the forbidden-name gate is not reachable." >&2
+    echo "[pre-push]   looked for: $NAME_CHECK" >&2
+    echo "[pre-push]   from:       $(pwd)" >&2
+    echo "[pre-push] Point INVISIBLE_NAME_CHECK at check_forbidden_names.py, or push" >&2
+    echo "[pre-push] with INVISIBLE_NAME_CHECK=skip to state on the record that this" >&2
+    echo "[pre-push] push is going out unscanned." >&2
+    exit 1
+else
+    echo "[pre-push] scanning shipped files for names we do not publish..."
+    # The script self-tests its matcher against a known-bad input built from
+    # the live word list before it reports anything, and exits 2 rather than 0
+    # whenever it could not do that. Any non-zero is a refusal here.
+    if ! python "$NAME_CHECK" .; then
+        echo "" >&2
+        echo "[pre-push] REFUSED - see above. The offending files are named; the" >&2
+        echo "[pre-push] tokens are not, so this log is safe to paste." >&2
+        exit 1
+    fi
+fi
+
 [ -n "$release_tag" ] || exit 0
 
 echo "pre-push: $release_tag is a release tag, running the publish gate."
