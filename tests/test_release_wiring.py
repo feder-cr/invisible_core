@@ -367,3 +367,37 @@ def _find_sh():
 def _env():
     import os
     return {k: v for k, v in os.environ.items() if k != "INVISIBLE_GATE_PYTHON"}
+
+
+@requires_checkout
+def test_the_hook_and_the_workflow_agree_on_what_a_release_tag_means(tmp_path):
+    """Both layers ask the INDEX, so neither can block what the other allows.
+
+    They did not always. The first release tag ever pushed here was refused by
+    this hook and would have been waved through by the workflow: the hook ran
+    the gate against the WORKING TREE, which has legitimately moved on since the
+    tagged version was published, so it read as "the content changed under an
+    unmoved version" - for a tag that was simply marking something already
+    shipped. A local layer that blocks what CI would accept is a layer people
+    switch off, and switching this one off disables the rest of it too.
+
+    Structural, because the alternative is a test that talks to PyPI on every
+    run: both files must consult the index for the version being tagged, before
+    anything else decides.
+    """
+    hook = HOOK.read_text(encoding="utf-8")
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    for name, text in (("the hook", hook), ("the workflow", workflow)):
+        assert "pypi.org/pypi/invisible-core/" in text, (
+            f"{name} does not ask the index whether the version is already "
+            f"published, so the two layers can disagree about a tag again")
+        assert '200)' in text or "'200'" in text or '"200"' in text, (
+            f"{name} does not branch on the index answering 200 (published)")
+
+    # And an unreachable index must not read as "not published" in either: that
+    # is the direction that authorises an upload nobody checked.
+    assert "cannot tell whether it is published" in hook, (
+        "the hook treats an unreachable index as a definite answer")
+    assert "neither" in workflow and "guessing" in workflow, (
+        "the workflow treats an unreachable index as a definite answer")

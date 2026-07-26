@@ -102,6 +102,42 @@ fi
 
 [ -n "$release_tag" ] || exit 0
 
+# Is there anything to publish at all? Asked of the INDEX, which is the same
+# authority .github/workflows/publish.yml uses, so the two layers cannot
+# disagree about what a tag means.
+#
+# They did disagree, and it showed up the first time a tag was ever pushed here.
+# This hook ran the gate against the WORKING TREE, which has legitimately moved
+# on since the version being tagged was published, so it read as "the content
+# changed under an unmoved version" and refused - for a tag that was simply
+# marking something already shipped. The workflow, asking the index, would have
+# said "nothing to do" and gone green. A local layer that blocks what CI would
+# wave through is a layer people disable.
+tag_version="${release_tag##*/}"
+tag_version="${tag_version#v}"
+if [ -n "$tag_version" ]; then
+    index_code=$(curl -s -o /dev/null -w '%{http_code}'         "https://pypi.org/pypi/invisible-core/$tag_version/json" 2>/dev/null || echo 000)
+    case "$index_code" in
+        200)
+            echo "pre-push: invisible-core $tag_version is already on the index."
+            echo "  Nothing to publish; this tag is a marker for a release that"
+            echo "  already shipped. The publish workflow will no-op the same way."
+            exit 0
+            ;;
+        404)
+            echo "pre-push: invisible-core $tag_version is not on the index yet;"
+            echo "  running the publish gate."
+            ;;
+        *)
+            # Unreachable index is NOT "not published". Guessing either way is
+            # wrong, so fall through to the gate, which is the conservative
+            # answer: it can refuse, it cannot authorise an upload by itself.
+            echo "pre-push: the index answered $index_code for $tag_version;" >&2
+            echo "  cannot tell whether it is published. Running the gate anyway." >&2
+            ;;
+    esac
+fi
+
 echo "pre-push: $release_tag is a release tag, running the publish gate."
 
 if [ -z "$python_bin" ]; then
