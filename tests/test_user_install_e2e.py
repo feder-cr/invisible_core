@@ -94,15 +94,30 @@ def test_the_version_the_index_serves_matches_this_checkout(clean_venv: Path):
         f"install, which means the seal that shipped is not the one the version "
         f"was computed from")
 
-    import tomllib
     here = Path(__file__).resolve().parents[1]
     # The checkout's version is derived too, so it is read by executing the
     # same derivation rather than parsed out of pyproject (which declares it
     # dynamic and carries no literal).
+    #
+    # Loaded BY FILE PATH, not as `invisible_core._version`. Importing it as a
+    # submodule runs the package `__init__` first, which imports `download`,
+    # which imports `platformdirs` - and this runs on the RUNNER's interpreter,
+    # which deliberately has no dependencies installed: the whole job is a clean
+    # environment where only the venv has the package.
+    #
+    # Measured on CI 2026-07-27: `ModuleNotFoundError: No module named
+    # 'platformdirs'` on both legs, so THIS test - the forgotten-publish check -
+    # was red on main and inert. It passed locally forever, because a dev
+    # machine has the dependencies. `_version.py` imports nothing but json and
+    # pathlib and reads `seal.json` beside itself, so the derivation under test
+    # needs none of that machinery.
     local = _run([sys.executable, "-c",
-                  "import sys; sys.path.insert(0, r'%s'); "
-                  "from invisible_core._version import __version__; print(__version__)"
-                  % str(here / "src")], timeout=60).stdout.strip()
+                  "import importlib.util as u; "
+                  "s = u.spec_from_file_location('_v', r'%s'); "
+                  "m = u.module_from_spec(s); s.loader.exec_module(m); "
+                  "print(m.__version__)"
+                  % str(here / "src" / REPO / "_version.py")],
+                 timeout=60).stdout.strip()
     assert served == local, (
         f"the index serves {DIST} {served} while this checkout derives {local}. "
         f"Either the publish was forgotten or the checkout is ahead - and both "
