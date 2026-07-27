@@ -1,31 +1,27 @@
 #!/bin/sh
-# Refuse to push a release tag whose publish gate is red.
+# Pre-push gate. THE POLICY IS NOT IN THIS FILE - it is `invisible_core.hooks`,
+# and this stub exists only to find an interpreter and hand over stdin.
 #
-# WHY A HOOK AT ALL
-# -----------------
-# scripts/version_gate.py used to be wired to nothing: the script existed, its
-# test existed, and every path to an actual upload went around it. A gate that
-# needs the operator to remember it is a runbook note.
+# It used to be here, in three repositories, as 743 lines of shell that were 207
+# identical lines out of 211 between two of them. Nine of the eleven differences
+# were accidental: the core ran no pytest, the core set a variable three times
+# that only the other two ever read, the core resolved an interpreter and then
+# called bare `python` anyway. Every fix landed in whichever copy was open.
 #
-# This is the first of three layers, and the earliest one. A release tag is what
-# starts .github/workflows/publish.yml, so refusing the tag here means the
-# release never even begins - no half-built artifact, no draft to clean up.
-# Layer two is the workflow, whose upload job cannot start without the gate job.
-# Layer three is `version_gate.py publish`, which runs the gate in-process and
-# never reaches twine on a refusal.
+# What this repository wants gated is declared in its own pyproject, under
+# [tool.invisible.hooks]. That is the only per-repo part, and it is data.
 #
-# Only release tags are gated. Ordinary branch pushes are left alone on purpose:
-# the gate builds the project twice, and a hook that costs a minute on every
-# push is a hook people delete.
-#
-# Install: python scripts/install_hooks.py   (sets core.hooksPath to .githooks)
-# tests/test_release_wiring.py fails in an uninstalled checkout, so nobody has
-# to remember to run it - the test suite says so.
+# Install once with:
+#   git config core.hooksPath .githooks
+# A test in this repo fails in an uninstalled checkout, so nobody has to
+# remember. Bypass a known-broken WIP push with `git push --no-verify`; that is
+# the only escape hatch, and never for a branch that feeds a release.
 
-# No `set -e`: the gate's exit code has to be READ and explained, not turned
-# into a silent abort. Every other failure below is handled explicitly.
-repo_root=$(git rev-parse --show-toplevel)
-gate="$repo_root/scripts/version_gate.py"
+# No `set -e`: exit codes here have to be READ and explained, not turned into a
+# silent abort. A gate that dies without a message is the worst shape of all.
+
+# Run from the repository root regardless of where `git push` was invoked.
+cd "$(dirname "$0")/.." || exit 1
 
 python_bin=""
 for candidate in "$INVISIBLE_GATE_PYTHON" python3 python py; do
@@ -35,182 +31,25 @@ for candidate in "$INVISIBLE_GATE_PYTHON" python3 python py; do
         break
     fi
 done
-
-# stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
-# Captured ONCE into a variable, because stdin can only be read once and TWO
-# gates below need it. Until 2026-07-27 the release-tag loop drained it with a
-# `while read`, so the forbidden-name scan further down found nothing and
-# reported "no commit messages scanned" on every push - correctly, and with no
-# coverage. Guarded on a tty so running the hook by hand does not hang.
-if [ -t 0 ]; then
-    PUSH_REFS=""
-else
-    PUSH_REFS="$(cat)"
-fi
-
-release_tag=""
-if [ -n "$PUSH_REFS" ]; then
-    release_tag=$(printf '%s
-' "$PUSH_REFS" | awk '
-        $3 ~ /^refs\/tags\/(v|release-)/ { print $3; exit }')
-fi
-
-# ── forbidden names ────────────────────────────────────────────────────
-# Naming a protection vendor or a target site in a public repo is a legal and
-# credibility problem, and no test in this package covers it. It cannot be a
-# test here either: the scanner needs a word list that deliberately lives
-# outside every public repo.
-#
-# THREE cases, kept apart on purpose. The first cut of this had only two and
-# refused whenever the script was not at the default path - which meant every
-# clone of the PUBLIC repo was blocked on every push with no way to comply
-# except switching the gate off. That is the same "red by default, so people
-# route around it" failure the guard was moved out of the test suite to avoid.
-#
-#   configured (INVISIBLE_NAME_CHECK set) but unreachable -> REFUSE. Somebody
-#       meant this to run and it did not.
-#   present at the default path                           -> RUN, refuse on any
-#       non-zero: the script exits 2 rather than 0 when it could not scan.
-#   neither                                               -> this is not the
-#       workbench; there is no word list here and nothing to enforce. Say so in
-#       one line and carry on. Silence would be the actual failure.
-NAME_CHECK="${INVISIBLE_NAME_CHECK:-../../scripts/check_forbidden_names.py}"
-NAME_SKIPPED=""
-
-if [ "$INVISIBLE_NAME_CHECK" = "skip" ]; then
-    echo ""
-    echo "[pre-push] ###################################################################"
-    echo "[pre-push] # WARNING: INVISIBLE_NAME_CHECK=skip                              #"
-    echo "[pre-push] # Nothing checked this push for vendor or target-site names. If   #"
-    echo "[pre-push] # one is in the diff it is public the moment this lands, and a    #"
-    echo "[pre-push] # force-push does not remove it - GitHub keeps the object.        #"
-    echo "[pre-push] ###################################################################"
-    echo ""
-    NAME_SKIPPED=yes
-elif [ -n "$INVISIBLE_NAME_CHECK" ] && [ ! -f "$NAME_CHECK" ]; then
-    echo "" >&2
-    echo "[pre-push] REFUSED - INVISIBLE_NAME_CHECK is set but points at nothing." >&2
-    echo "[pre-push]   looked for: $NAME_CHECK" >&2
-    echo "[pre-push]   from:       $(pwd)" >&2
-    echo "[pre-push] Fix the path, or set INVISIBLE_NAME_CHECK=skip to state on the" >&2
-    echo "[pre-push] record that this push is going out unscanned." >&2
-    exit 1
-elif [ ! -f "$NAME_CHECK" ]; then
-    echo "[pre-push] no forbidden-name word list here, so nothing scanned this push."
-    echo "[pre-push] (that scan is a maintainer gate; it lives outside this repo.)"
-    NAME_SKIPPED=yes
-else
-    # PUSH_REFS was captured at the top of this hook; see the note there.
-    # An all-zero REMOTE sha means the remote has never seen this branch, so
-    # there is no old..new to take: everything not already on a remote is new.
-    # An all-zero LOCAL sha is a branch deletion, which pushes no content.
-    RANGE=""
-    if [ -n "$PUSH_REFS" ]; then
-        RANGE=$(printf '%s
-' "$PUSH_REFS" | awk '
-            $2 ~ /^0+$/ { next }
-            $4 ~ /^0+$/ { print $2 " --not --remotes"; exit }
-                        { print $4 ".." $2; exit }')
-    fi
-
-    run_name_check() {
-        if [ -n "$RANGE" ]; then
-            python "$NAME_CHECK" . --range "$RANGE"
-        else
-            python "$NAME_CHECK" .
-        fi
-    }
-
-    # The gate on the gate. Nothing tested the scanner until 2026-07-27, and it
-    # was returning a clean verdict over three of the four surfaces a public
-    # repo actually publishes - commit messages among them, which is where ten
-    # of our own names went out.
-    NAME_TEST="$(dirname "$NAME_CHECK")/test_check_forbidden_names.py"
-    if [ -f "$NAME_TEST" ] && ! python "$NAME_TEST"; then
-        echo "" >&2
-        echo "[pre-push] REFUSED - the name scanner's own cases are red, so its" >&2
-        echo "[pre-push] verdict on this push would mean nothing." >&2
-        exit 1
-    fi
-
-    if [ -n "$RANGE" ]; then
-        echo "[pre-push] scanning files + the commit messages in $RANGE ..."
-    else
-        echo "[pre-push] scanning files for names we do not publish."
-        echo "[pre-push] NOTE: no push range on stdin, so COMMIT MESSAGES were not"
-        echo "[pre-push] scanned. A message cannot be reworded once it is pushed."
-    fi
-    if ! run_name_check; then
-        echo "" >&2
-        echo "[pre-push] REFUSED - see above. The offending files are named; the" >&2
-        echo "[pre-push] tokens are not, so this log is safe to paste." >&2
-        exit 1
-    fi
-fi
-
-[ -n "$release_tag" ] || exit 0
-
-# Is there anything to publish at all? Asked of the INDEX, which is the same
-# authority .github/workflows/publish.yml uses, so the two layers cannot
-# disagree about what a tag means.
-#
-# They did disagree, and it showed up the first time a tag was ever pushed here.
-# This hook ran the gate against the WORKING TREE, which has legitimately moved
-# on since the version being tagged was published, so it read as "the content
-# changed under an unmoved version" and refused - for a tag that was simply
-# marking something already shipped. The workflow, asking the index, would have
-# said "nothing to do" and gone green. A local layer that blocks what CI would
-# wave through is a layer people disable.
-tag_version="${release_tag##*/}"
-tag_version="${tag_version#v}"
-if [ -n "$tag_version" ]; then
-    index_code=$(curl -s -o /dev/null -w '%{http_code}'         "https://pypi.org/pypi/invisible-core/$tag_version/json" 2>/dev/null || echo 000)
-    case "$index_code" in
-        200)
-            echo "pre-push: invisible-core $tag_version is already on the index."
-            echo "  Nothing to publish; this tag is a marker for a release that"
-            echo "  already shipped. The publish workflow will no-op the same way."
-            exit 0
-            ;;
-        404)
-            echo "pre-push: invisible-core $tag_version is not on the index yet;"
-            echo "  running the publish gate."
-            ;;
-        *)
-            # Unreachable index is NOT "not published". Guessing either way is
-            # wrong, so fall through to the gate, which is the conservative
-            # answer: it can refuse, it cannot authorise an upload by itself.
-            echo "pre-push: the index answered $index_code for $tag_version;" >&2
-            echo "  cannot tell whether it is published. Running the gate anyway." >&2
-            ;;
-    esac
-fi
-
-echo "pre-push: $release_tag is a release tag, running the publish gate."
-
 if [ -z "$python_bin" ]; then
-    echo "pre-push: REFUSED - no python on PATH, so the publish gate cannot run." >&2
-    echo "  A release tag must never be pushed past an ungated hook. Set" >&2
-    echo "  INVISIBLE_GATE_PYTHON to an interpreter and push again." >&2
-    exit 1
-fi
-if [ ! -f "$gate" ]; then
-    echo "pre-push: REFUSED - $gate is missing, so the gate cannot run." >&2
+    echo "[pre-push] REFUSED - no python on PATH, so no gate can run." >&2
+    echo "[pre-push] Nothing must be pushed past a hook that could not check it." >&2
+    echo "[pre-push] Set INVISIBLE_GATE_PYTHON to an interpreter and push again." >&2
     exit 1
 fi
 
-"$python_bin" "$gate" check || rc=$?
-rc=${rc:-0}
-
-# 0 is the only pass. 1 refused, 2 gate broken, 4 no usable ledger - none of
-# those is a green light, and a broken gate is not a reason to proceed either.
-if [ "$rc" -ne 0 ]; then
-    echo "" >&2
-    echo "pre-push: REFUSED - the publish gate exited $rc, so $release_tag is not" >&2
-    echo "  going anywhere. Pushing it would start the publish workflow." >&2
-    echo "  Read the gate output above; it names the file and the remedy." >&2
-    exit 1
-fi
-
-echo "pre-push: gate passed."
-exit 0
+# `src` first so a checkout gates itself with the policy in the tree being
+# pushed. os.getcwd() rather than $PWD on purpose: under git-bash on Windows
+# $PWD is /c/... and Python does not resolve that mount.
+# exec, so stdin (the refs git is pushing) reaches the policy untouched.
+exec "$python_bin" -c 'import os, sys
+sys.path.insert(0, os.path.join(os.getcwd(), "src"))
+try:
+    from invisible_core.hooks import main
+except ImportError as exc:
+    sys.exit("[pre-push] REFUSED - cannot import invisible_core.hooks (%s).\n"
+             "[pre-push] The pre-push policy lives in invisible-core. This repo is\n"
+             "[pre-push] either that package (so src/ is not where it should be) or\n"
+             "[pre-push] pins it exactly (so install it). Either way, nothing is\n"
+             "[pre-push] pushed past a hook that could not check it." % exc)
+sys.exit(main())'

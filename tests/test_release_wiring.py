@@ -157,217 +157,175 @@ def test_the_gate_job_runs_the_gate_and_the_checkout_brings_the_ledger():
 
 
 # ------------------------------------------------------------------ layer 3
-
-@requires_checkout
-def test_the_pre_push_hook_runs_the_gate_and_refuses_on_any_non_zero():
-    text = HOOK.read_text(encoding="utf-8")
-    assert "version_gate.py" in text, "the hook does not invoke the gate"
-    # There was an `assert "refs/tags/v*" in text` here. It encoded ONE spelling
-    # of the tag match - the shell `case` glob - and went red on 2026-07-27 when
-    # the hook started deriving the pushed range with awk and matched the same
-    # tags with a regex instead. The behaviour was unchanged and correct; the
-    # assertion was reading the implementation. The parametrized test directly
-    # below already makes this claim properly, by running the real hook against
-    # both `refs/tags/v1.0` and `refs/tags/release-18` and checking the gate
-    # fires - so the text match was a second, weaker copy of a check that
-    # already existed.
-    assert re.search(r'\$rc"?\s*-ne\s*0', text), \
-        "the hook does not refuse on a non-zero gate exit"
-    # Exit 2 (gate broken) and exit 4 (no ledger) are not passes either, and a
-    # hook that only tested for 1 would let both through.
-    assert "-eq 1" not in text and "= 1 ]" not in text, \
-        "the hook singles out one exit code; only 0 is a pass"
+#
+# The hook is a STUB now. The policy it hands over to is `invisible_core.hooks`,
+# driven against its own known-bad inputs in test_hook_policy.py - forty-odd
+# cases, none of which spawn a shell. What is left to check here is the handover
+# itself, which is real code and has its own ways of failing silently: finding
+# an interpreter, reaching the policy at all, and passing stdin through. git
+# feeds the refs being pushed on stdin, and a stub that swallowed them would
+# leave every range-dependent gate reporting "nothing to scan" - correctly, and
+# with no coverage. That happened, in the shell version, for a day.
+#
+# So these run the REAL stub, through a real shell, against fake repositories.
 
 
-@requires_checkout
-@pytest.mark.parametrize("stdin,expect_gate", [
-    ("refs/heads/main aaaa refs/heads/main bbbb\n", False),
-    ("refs/tags/v1.0 aaaa refs/tags/v1.0 0000\n", True),
-    ("refs/tags/release-18 aaaa refs/tags/release-18 0000\n", True),
-])
-def test_the_hook_gates_release_tags_and_leaves_ordinary_pushes_alone(
-        tmp_path, stdin, expect_gate):
-    """Runs the real hook against a fake repo, with a fake gate that always
-    refuses. An ordinary branch push must stay fast and silent; a release tag
-    must be stopped."""
-    sh = _find_sh()
-    if sh is None:
-        pytest.skip("no POSIX shell available to run the hook")
-
-    repo = tmp_path / "repo"
-    (repo / "scripts").mkdir(parents=True)
-    (repo / "scripts" / "version_gate.py").write_text(
-        "import sys; print('FAKE GATE RAN'); sys.exit(1)\n", encoding="utf-8")
-    (repo / ".githooks").mkdir()
-    hook = repo / ".githooks" / "pre-push"
-    hook.write_text(HOOK.read_text(encoding="utf-8"), encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repo)], check=True,
-                   capture_output=True, text=True)
-
-    r = subprocess.run([sh, str(hook), "origin", "https://example.invalid/x.git"],
-                       cwd=str(repo), input=stdin, capture_output=True, text=True,
-                       env={**_env(), "INVISIBLE_GATE_PYTHON": sys.executable})
-    text = (r.stdout or "") + (r.stderr or "")
-
-    if expect_gate:
-        assert "FAKE GATE RAN" in text, text
-        assert r.returncode != 0, "a release tag went out past a red gate"
-        assert "REFUSED" in text
-    else:
-        # "Alone" is about the PUBLISH gate, which builds the project twice and
-        # is the reason ordinary pushes were left untouched in the first place -
-        # a hook that costs a minute on every push is a hook people delete. The
-        # forbidden-name scan is a different animal: sub-second, and a name is
-        # public the moment the branch lands, so it runs here too.
-        assert "FAKE GATE RAN" not in text, "the hook gates ordinary pushes too"
-        assert r.returncode == 0, text
-
-
-# ------------------------------------------------- the forbidden-name scan
-
-def _fake_repo_with_hook(tmp_path) -> Path:
+def _fake_repo(tmp_path, *, block="pytest = false\npin = false") -> Path:
+    """A checkout carrying the real stub and a policy declaration."""
     repo = tmp_path / "repo"
     (repo / ".githooks").mkdir(parents=True)
     (repo / ".githooks" / "pre-push").write_text(
         HOOK.read_text(encoding="utf-8"), encoding="utf-8")
+    body = '[project]\nname = "pkg"\nversion = "1.0"\n'
+    if block is not None:
+        body += "\n[tool.invisible.hooks]\n" + block + "\n"
+    (repo / "pyproject.toml").write_text(body, encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(repo)], check=True,
                    capture_output=True, text=True)
     return repo
 
 
-def _push_ordinary(repo: Path, sh: str, **env) -> tuple[int, str]:
+def _push(repo: Path, sh: str, stdin: str, **env) -> tuple[int, str]:
     r = subprocess.run(
         [sh, str(repo / ".githooks" / "pre-push"), "origin",
          "https://example.invalid/x.git"],
-        cwd=str(repo), input="refs/heads/main a refs/heads/main b\n",
-        capture_output=True, text=True,
+        cwd=str(repo), input=stdin, capture_output=True, text=True,
         env={**_env(), "INVISIBLE_GATE_PYTHON": sys.executable, **env})
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
 @requires_checkout
-def test_a_clone_with_no_word_list_is_told_so_and_is_not_blocked(tmp_path):
-    """The failure the first cut of this gate shipped.
+def test_the_stub_reaches_the_shared_policy_and_says_what_ran(tmp_path):
+    """End to end: the real stub, a real shell, the real policy module."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    code, text = _push(_fake_repo(tmp_path), sh,
+                       "refs/heads/main a refs/heads/main b\n")
+    assert code == 0, text
+    assert "push proceeding" in text, text
 
-    It refused whenever the scanner was not at the workbench path, so every
-    clone of the PUBLIC repo was stopped on every push with no way to comply -
-    the word list deliberately does not exist outside the workbench. A gate
-    that is red by default is one people switch off, and switching this one off
-    disarms every other gate in the same hook.
 
-    Not blocked, and not silent either: silence is indistinguishable from a
-    scan that ran and passed.
+@requires_checkout
+def test_the_stub_passes_the_pushed_refs_through(tmp_path):
+    """The failure that hid for a day in the shell version.
+
+    A `while read` in the first gate drained stdin, so the second one found no
+    range and reported "no commit messages scanned" on every push - a true
+    statement, printed by a gate covering nothing. Nothing downstream can tell
+    "there was no range" from "the range never arrived", so it is asserted here,
+    at the only place that can: a release tag is visible ONLY through stdin.
     """
     sh = _find_sh()
     if sh is None:
         pytest.skip("no POSIX shell available to run the hook")
-    code, text = _push_ordinary(_fake_repo_with_hook(tmp_path), sh)
+    repo = _fake_repo(tmp_path)
+    code, text = _push(repo, sh, "refs/tags/v1.0 aaaa refs/tags/v1.0 0000\n")
+    assert "release tag" in text, (
+        "the refs did not survive the handover, so no range-dependent gate "
+        "could have run:\n" + text)
+    # And the gate it starts is the publish gate, which refuses here: this
+    # throwaway repo is not a publishable project.
+    assert code != 0, text
+
+
+@requires_checkout
+def test_an_ordinary_push_never_starts_the_publish_gate(tmp_path):
+    """It builds the project twice. A hook that costs a minute on every push is
+    a hook people delete, and deleting it takes every other gate with it."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    code, text = _push(_fake_repo(tmp_path), sh,
+                       "refs/heads/main a refs/heads/main b\n")
     assert code == 0, text
-    assert "no forbidden-name word list here" in text, text
+    assert "release tag" not in text
+    assert "publish gate" not in text
 
 
 @requires_checkout
-def test_a_scanner_that_was_configured_and_is_missing_is_a_refusal(tmp_path):
-    """Setting the variable is someone saying "run this". Not finding it then
-    is a broken gate, not an absent one, and the two must not look alike."""
-    sh = _find_sh()
-    if sh is None:
-        pytest.skip("no POSIX shell available to run the hook")
-    code, text = _push_ordinary(_fake_repo_with_hook(tmp_path), sh,
-                                INVISIBLE_NAME_CHECK="/nowhere/at/all.py")
-    assert code != 0, "a configured-but-missing scanner was waved through"
-    assert "REFUSED" in text and "points at nothing" in text
+def test_the_stub_refuses_when_it_cannot_reach_the_policy(tmp_path):
+    """"The gate is not here" is the condition under which skipping is most
+    tempting and least defensible: from the outside it is indistinguishable
+    from a gate that was deleted on purpose.
 
-
-@requires_checkout
-def test_a_scanner_that_refuses_stops_an_ordinary_push(tmp_path):
-    """The scan is not release-tag-only, unlike the publish gate: a forbidden
-    name is public as soon as the BRANCH lands, and a force-push does not take
-    it back - GitHub keeps the object."""
-    sh = _find_sh()
-    if sh is None:
-        pytest.skip("no POSIX shell available to run the hook")
-    repo = _fake_repo_with_hook(tmp_path)
-    scanner = tmp_path / "scanner.py"
-    scanner.write_text("import sys; print('SCAN RAN'); sys.exit(1)\n",
-                       encoding="utf-8")
-    code, text = _push_ordinary(repo, sh, INVISIBLE_NAME_CHECK=str(scanner))
-    assert "SCAN RAN" in text, text
-    assert code != 0, "an ordinary push went out past a red name scan"
-
-
-@requires_checkout
-def test_switching_the_scan_off_is_possible_and_says_so_loudly(tmp_path):
-    """There has to be an escape hatch or people reach for --no-verify, which
-    turns off everything. It must leave a mark that a reader cannot miss."""
-    sh = _find_sh()
-    if sh is None:
-        pytest.skip("no POSIX shell available to run the hook")
-    code, text = _push_ordinary(_fake_repo_with_hook(tmp_path), sh,
-                                INVISIBLE_NAME_CHECK="skip")
-    assert code == 0, text
-    assert "WARNING: INVISIBLE_NAME_CHECK=skip" in text
-    assert "force-push does not remove it" in text
-
-
-@requires_checkout
-def test_the_hook_refuses_rather_than_skipping_when_it_cannot_run_the_gate(tmp_path):
-    """The failure that matters most: the gate could not run at all.
-
-    "The gate is not here" is the one condition under which skipping is most
-    tempting and least defensible - it is indistinguishable, from the outside,
-    from a gate that was deleted on purpose. Driven for real: a checkout with no
-    scripts/version_gate.py, pushing a release tag.
+    Driven for real, against a checkout whose own `src/` shadows the installed
+    core with one that has no policy in it. That is the shape this actually
+    takes: the stub puts `src` FIRST on purpose, so a checkout gates itself with
+    the tree being pushed, and a half-written tree therefore wins over whatever
+    is installed. Emptying PYTHONPATH instead proved nothing here - the core is
+    installed, so it stayed importable and the test skipped itself.
     """
     sh = _find_sh()
     if sh is None:
         pytest.skip("no POSIX shell available to run the hook")
+    repo = _fake_repo(tmp_path)
+    (repo / "src" / "invisible_core").mkdir(parents=True)
+    (repo / "src" / "invisible_core" / "__init__.py").write_text("", encoding="utf-8")
+    code, text = _push(repo, sh, "refs/heads/main a refs/heads/main b\n")
+    assert code != 0, "a push went out past a hook that could not check it"
+    assert "REFUSED" in text and "cannot import" in text, text
 
-    repo = tmp_path / "repo"
-    (repo / ".githooks").mkdir(parents=True)
-    hook = repo / ".githooks" / "pre-push"
-    hook.write_text(HOOK.read_text(encoding="utf-8"), encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(repo)], check=True,
-                   capture_output=True, text=True)
 
-    r = subprocess.run([sh, str(hook), "origin", "https://example.invalid/x.git"],
-                       cwd=str(repo), input="refs/tags/v1.0 a refs/tags/v1.0 0\n",
-                       capture_output=True, text=True,
-                       env={**_env(), "INVISIBLE_GATE_PYTHON": sys.executable})
+@requires_checkout
+def test_the_stub_refuses_when_there_is_no_interpreter_at_all(tmp_path):
+    """No python means no gate can run, in either direction. The shell version
+    resolved an interpreter into a variable and then called bare `python`
+    anyway, in one of the three copies."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    repo = _fake_repo(tmp_path)
+    empty = str(tmp_path / "empty-bin")
+    (tmp_path / "empty-bin").mkdir()
+    r = subprocess.run(
+        [sh, str(repo / ".githooks" / "pre-push"), "origin", "https://x.invalid/y"],
+        cwd=str(repo), input="refs/tags/v1.0 a refs/tags/v1.0 0\n",
+        capture_output=True, text=True,
+        env={"PATH": empty, "SYSTEMROOT": _env().get("SYSTEMROOT", "")})
     text = (r.stdout or "") + (r.stderr or "")
-    assert r.returncode != 0, "a release tag went out with no gate present at all"
-    assert "REFUSED" in text and "missing" in text
+    assert r.returncode != 0, "a release tag went out with no interpreter to gate it"
+    assert "REFUSED" in text and "no python" in text.lower()
 
-    # And the no-interpreter branch refuses in the same direction.
-    src = HOOK.read_text(encoding="utf-8")
-    assert any("no python" in line.lower() for line in re.findall(r"REFUSED[^\n]*", src)), \
-        "the hook does not refuse when there is no interpreter to run the gate"
+
+@requires_checkout
+def test_the_stub_works_from_any_directory(tmp_path):
+    """git runs a hook from the top level, but a worktree, a submodule or a
+    human running it by hand does not. The stub cd's to its own parent, and the
+    policy reads the repo from there."""
+    sh = _find_sh()
+    if sh is None:
+        pytest.skip("no POSIX shell available to run the hook")
+    repo = _fake_repo(tmp_path)
+    (repo / "deep" / "deeper").mkdir(parents=True)
+    r = subprocess.run(
+        [sh, str(repo / ".githooks" / "pre-push"), "origin", "https://x.invalid/y"],
+        cwd=str(repo / "deep" / "deeper"),
+        input="refs/heads/main a refs/heads/main b\n",
+        capture_output=True, text=True,
+        env={**_env(), "INVISIBLE_GATE_PYTHON": sys.executable})
+    text = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, text
+    assert "push proceeding" in text
 
 
 # ---------------------------------------------- the hooks are actually armed
 
 @requires_checkout
-def test_the_hooks_are_installed_in_this_checkout():
+def test_the_hooks_are_armed_in_this_clone():
     """The reminder that does not depend on anybody remembering.
 
     A checked-in hook directory does nothing until core.hooksPath points at it,
     and git will not do that for you. Running the test suite is the one thing a
-    developer does constantly, so the test suite is where this belongs.
+    developer does constantly, so the suite is where this belongs.
 
-    Skipped outside a git checkout: an sdist or a CI job that unpacked a
-    tarball has no hooks to install and no push to make.
+    The claim and its measurement live once, in the helper, because all three
+    repos make it - until 2026-07-27 only this one did, and the other two
+    shipped a hook that nothing armed and nothing checked was armed.
     """
-    if subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "--git-dir"],
-                      capture_output=True).returncode != 0:
-        pytest.skip("not a git checkout")
+    from invisible_core.testing import assert_hooks_are_armed
 
-    r = subprocess.run([sys.executable, str(INSTALLER), "--check"],
-                       capture_output=True, text=True)
-    assert r.returncode == 0, (
-        (r.stdout or "") + (r.stderr or "") +
-        "\n\nThe pre-push publish gate is not armed in this clone, so a release\n"
-        "tag could be pushed without the gate ever running. One command:\n"
-        "    python scripts/install_hooks.py")
+    assert_hooks_are_armed(REPO_ROOT)
 
 
 def _find_sh():
@@ -399,23 +357,36 @@ def test_the_hook_and_the_workflow_agree_on_what_a_release_tag_means(tmp_path):
     shipped. A local layer that blocks what CI would accept is a layer people
     switch off, and switching this one off disables the rest of it too.
 
-    Structural, because the alternative is a test that talks to PyPI on every
-    run: both files must consult the index for the version being tagged, before
-    anything else decides.
+    THE HOOK'S HALF MOVED. It used to curl the index itself and exit 0 on a
+    200, which answers a weaker question than the gate does - present on the
+    index, versus present AND byte-identical - and answers it from a second
+    source of truth. It now runs the gate with `--verify-index` and reads the
+    answer: exit 5 is the no-op, exit 2 is an index it could not reach, and
+    only the first of those lets the tag through. Those two branches are
+    asserted directly, against a policy driven with each code in turn, in
+    test_hook_policy.py. Asserting them here as well would be a second, weaker
+    copy - which is what the deleted half of this test had become.
+
+    What is left here is the workflow, which still asks the index itself, and
+    the claim that the two layers cannot disagree.
     """
-    hook = HOOK.read_text(encoding="utf-8")
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    for name, text in (("the hook", hook), ("the workflow", workflow)):
-        assert "pypi.org/pypi/invisible-core/" in text, (
-            f"{name} does not ask the index whether the version is already "
-            f"published, so the two layers can disagree about a tag again")
-        assert '200)' in text or "'200'" in text or '"200"' in text, (
-            f"{name} does not branch on the index answering 200 (published)")
+    assert "pypi.org/pypi/invisible-core/" in workflow, (
+        "the workflow does not ask the index whether the version is already "
+        "published, so the two layers can disagree about a tag again")
+    assert '200' in workflow, (
+        "the workflow does not branch on the index answering 200 (published)")
 
-    # And an unreachable index must not read as "not published" in either: that
-    # is the direction that authorises an upload nobody checked.
-    assert "cannot tell whether it is published" in hook, (
-        "the hook treats an unreachable index as a definite answer")
+    # An unreachable index must not read as "not published": that is the
+    # direction that authorises an upload nobody checked.
     assert "neither" in workflow and "guessing" in workflow, (
         "the workflow treats an unreachable index as a definite answer")
+
+    # The hook's side of the same claim, read from the policy rather than from
+    # its prose: an already-published tag is a no-op, a broken gate is not.
+    from invisible_core import hooks
+
+    assert hooks.GATE_NOTHING_TO_DO == 5, (
+        "the no-op code moved; the hook and the gate now disagree about what a "
+        "re-pushed release tag means")

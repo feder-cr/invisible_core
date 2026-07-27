@@ -101,3 +101,21 @@ exclude = ["*.bak", "*-bak"]
 # a self-referential ledger would invalidate its own digest on every release.
 [tool.hatch.build.targets.sdist]
 include = ["src/invisible_core", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+# Which pre-push gates this repository wants. `.githooks/pre-push` is a stub;
+# the policy is invisible_core.hooks, and this block is the only per-repo part
+# of it. Declared rather than defaulted on purpose: the wrong default silently
+# skips a gate, and a skipped gate reads exactly like a passed one.
+#
+# `pin = false` because this IS the package the other two pin. There is nothing
+# here to compare against.
+#
+# `pytest = true` is new as of 2026-07-27. This repo's hook ran no tests at all,
+# which is why it is the one that pushed red (56b2af2, fourteen tests red on
+# main for two hours) while the two repos that depend on it could not.
+#
+# `release-` is accepted alongside `v` because this repo's tag history has both.
+[tool.invisible.hooks]
+pytest = true
+pin = false
+release_tags = ["v", "release-"]
