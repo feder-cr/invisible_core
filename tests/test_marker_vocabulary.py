@@ -87,3 +87,46 @@ def test_strict_markers_is_on_so_a_typo_cannot_be_silent():
     registered."""
     for repo in _REPOS:
         assert "--strict-markers" in _pytest_config(repo)["addopts"], repo
+
+
+# ---------------------------------------------- the suite-collapse tripwire
+
+def test_every_repo_refuses_a_run_in_which_nothing_ran():
+    """A selection that collapses is a green tick, and pytest cannot see it.
+
+    `-m` with a typo'd marker, a `norecursedirs` that swallowed the tests, an
+    addopts edit - all of them exit 0 having run almost nothing. Each repo's CI
+    therefore reads the count back out of the report and refuses below a floor.
+
+    THIS repo did not have one. Found 2026-07-28 while fixing the wrapper's,
+    which fired correctly when 322 tests moved out and the floor stayed at 600.
+    The core - the package both consumers pin - was the only one of the three
+    without the guard, which is the same asymmetry that had left it as the only
+    one whose pre-push hook ran no tests at all.
+
+    Asserted on the CI workflow that runs the DEFAULT selection, not on every
+    workflow: an e2e or install job legitimately runs a handful.
+    """
+    import re
+
+    wanted = {
+        "invisible_core": ".github/workflows/ci.yml",
+        "invisible_playwright": ".github/workflows/tests.yml",
+        "invisible_firefox": ".github/workflows/ci.yml",
+    }
+    missing = []
+    for repo, rel in wanted.items():
+        path = _RELEASE / repo / rel
+        if not path.is_file():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        text = path.read_text(encoding="utf-8")
+        m = re.search(r"if passed < (\d+)", text)
+        if not m:
+            missing.append(f"{repo}: {rel} never compares the count")
+            continue
+        floor = int(m.group(1))
+        if floor < 1:
+            missing.append(f"{repo}: floor is {floor}, which refuses nothing")
+    assert not missing, (
+        "a repository's CI cannot tell a collapsed selection from a pass:\n  "
+        + "\n  ".join(missing))
