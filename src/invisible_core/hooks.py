@@ -239,9 +239,15 @@ def main(
     # --- the suite -----------------------------------------------------
     if cfg["pytest"]:
         _say("running the test suite before push...")
-        # The default addopts deselect the integration marker (it launches the
-        # real patched binary). That is the gate wanted on every push: fast
-        # feedback, with integration reserved for explicit release runs.
+        # The default selection is `not slow and not e2e`, identical in all
+        # three repos since 2026-07-27. `integration` deliberately RUNS: it is
+        # in-process and fast, and it is what covers the release wiring.
+        #
+        # This comment said the opposite when it was written, hours earlier -
+        # copied from the manager's hook, where `integration` meant "launches
+        # the real binary" while meaning "no browser" in the other two. Same
+        # word, two contracts, and the copy carried the wrong one into a file
+        # that now speaks for all three.
         if run([py, "-m", "pytest", "-q", "--tb=short"], root):
             _say("", err=True)
             _say("TESTS FAILED - push aborted.", err=True)

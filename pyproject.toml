@@ -73,19 +73,34 @@ Issues = "https://github.com/feder-cr/invisible_core/issues"
 
 [tool.pytest.ini_options]
 markers = [
-    "unit: pure-logic tests, no I/O or external deps",
-    "integration: multi-module tests, no browser",
-    # Builds a venv and installs THIS package from the index. Excluded by
-    # default because it needs the network and takes ~40s: the pre-push hook
-    # would otherwise make every push depend on PyPI being reachable, and a
-    # gate that fails for somebody else's outage is a gate people switch off.
-    # Run by .github/workflows/user-install.yml and before a release, with
-    # `pytest -m e2e -o addopts=""`.
-    "e2e: installs the published package into a clean venv",
+    # ONE VOCABULARY FOR ALL THREE REPOSITORIES. Aligned 2026-07-27; before
+    # that the same word meant different things and selected different sets.
+    #
+    #   `integration` was "multi-module tests, no browser" in invisible_core and
+    #   invisible_playwright, and "launches the real patched Firefox binary" in
+    #   invisible_firefox - which is what `e2e` means. So the manager excluded
+    #   `integration` by default while the other two ran it, and CLAUDE.md's
+    #   "integration is reserved for explicit release runs" was true in one repo
+    #   and wrong in the other two, where it names 57 structural tests that must
+    #   run on every push.
+    #
+    #   invisible_core's addopts said `not slow` while never declaring `slow`,
+    #   so the exclusion matched nothing and the word meant nothing.
+    #
+    # The blocks are byte-identical on purpose, and
+    # invisible_core/tests/test_marker_vocabulary.py fails when they drift.
+    "unit: pure logic - no I/O, no network, no subprocess, no browser",
+    "integration: several modules together, in process - no network, no browser",
+    "e2e: needs something outside this process - the network, the real patched binary, or a display",
+    "slow: builds a wheel or an sdist - opt-in only",
+    "linux_only: requires Linux",
 ]
 # Both exclusions in ONE addopts: declaring the key twice is a TOML error, not
 # a merge, and pytest then sees neither value.
-addopts = "-m 'not slow and not e2e'"
+#
+# `integration` is NOT excluded. It is in-process and fast, it is what covers
+# the release wiring, and it is the selection a push most needs.
+addopts = "-m 'not slow and not e2e' --strict-markers"
 
 [tool.hatch.version]
 source = "code"

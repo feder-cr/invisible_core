@@ -18,14 +18,12 @@ release.
 """
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
+
+from invisible_core.testing import run_checked, throwaway_venv
 
 pytestmark = pytest.mark.e2e
 
@@ -33,35 +31,20 @@ DIST = "invisible-core"
 REPO = "invisible_core"
 
 
-def _run(cmd: list[str], *, timeout: int = 600,
-         check: bool = True) -> subprocess.CompletedProcess:
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if check and r.returncode != 0:
-        raise AssertionError(
-            f"{' '.join(cmd)} exited {r.returncode}\n"
-            f"--- stdout ---\n{r.stdout[-3000:]}\n--- stderr ---\n{r.stderr[-3000:]}")
-    return r
-
-
-def _venv_python(venv: Path) -> Path:
-    return venv / ("Scripts" if os.name == "nt" else "bin") / (
-        "python.exe" if os.name == "nt" else "python")
+# The venv mechanics live in invisible_core.testing: `_run` and `_venv_python`
+# were byte-identical here and in the other consumer, and the two fixtures had
+# already drifted on whether the install happens in the fixture or in the test -
+# same name, two meanings.
+_run = run_checked
 
 
 @pytest.fixture(scope="module")
 def clean_venv():
-    root = Path(tempfile.mkdtemp(prefix="invcore-e2e-"))
-    try:
-        _run([sys.executable, "-m", "venv", str(root / "venv")], timeout=300)
-        py = _venv_python(root / "venv")
-        assert py.exists(), f"no venv python at {py}"
-        _run([str(py), "-m", "pip", "install", "--upgrade", "pip", "--quiet"],
-             timeout=300)
-        _run([str(py), "-m", "pip", "install", "--no-cache-dir", DIST],
-             timeout=900)
+    """An empty venv with nothing but pip, plus this distribution.
+
+    Module-scoped: the install pulls the whole dependency tree."""
+    with throwaway_venv("invcore-e2e-", install=DIST) as py:
         yield py
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_it_installs_from_the_index_with_nothing_else_present(clean_venv: Path):

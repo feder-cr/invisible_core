@@ -2,11 +2,28 @@
 
 WHY IT SHIPS. `invisible_playwright` and `invisible_firefox` are released
 independently and both pin `invisible-core==` exactly, so this is the only place
-they can share anything. Before it existed the same helpers were written four
-times: the throwaway-venv harness twice byte-identically (`invisible_core` and
-`invisible_firefox` `test_user_install_e2e.py`), and the stub-core subprocess
-harness four times, twice inside one repo. Four copies means four acceptance
-sets, which is the defect the pin parser had already been through.
+they can share anything. Without it, a helper the three suites all need has
+nowhere to live except in three copies, and three copies means three acceptance
+sets - the defect the requirement parser had already been through.
+
+MEASURED, 2026-07-27, rather than assumed. An earlier note here claimed "four
+copies" of two harnesses; the real counts are smaller and worth stating
+honestly, because an inflated number is the kind of thing that gets a sound
+extraction reverted later:
+
+  * the throwaway-venv harness: `invisible_core` and `invisible_firefox`
+    `test_user_install_e2e.py` share 83 of about 168 non-comment lines, with
+    `_run` and `_venv_python` byte-identical. That pair is real, and it had
+    already started to drift - the manager's `clean_venv` had the install moved
+    out into each test while the core's kept it in the fixture, so the same
+    fixture name meant two different things. That is what `throwaway_venv`
+    below replaces, with the difference named instead of implied.
+  * the wrapper's `test_release_e2e.py` and `test_upgrade_e2e.py` overlap the
+    pair by 10-33%: the same idea, different jobs. They use the helper too now,
+    but they were never copies.
+  * the stub-core harness: the largest pair is 71 lines (24% of the smaller).
+    Related, not duplicated, and NOT extracted - a shared abstraction over four
+    partial overlaps would fit none of them.
 
 MAINTAINER-FACING. Nothing here is part of the product's public API and nothing
 in `invisible_core/` imports it. It carries no third-party dependency, so it
@@ -15,11 +32,13 @@ import it at all.
 """
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from pathlib import Path
 
 __all__ = ["tracked_file_mode", "assert_hook_is_executable",
-           "assert_pre_push_policy_is_wired", "assert_hooks_are_armed"]
+           "assert_pre_push_policy_is_wired", "assert_hooks_are_armed",
+           "run_checked", "venv_python", "make_venv", "throwaway_venv"]
 
 #: Tokens whose presence in a `.githooks/pre-push` means the stub has started
 #: deciding things again. The three hooks were 743 lines of shell that drifted
@@ -181,3 +200,89 @@ def assert_hooks_are_armed(repo_root: Path) -> None:
         f"the forbidden-name scan and the publish gate would all be skipped, "
         f"and the push would look exactly like a checked one.\n"
         f"    python scripts/install_hooks.py")
+
+
+# ======================================================================
+# A throwaway venv
+# ======================================================================
+# `_run` and `_venv_python` were byte-identical in `invisible_core` and
+# `invisible_firefox`, and `clean_venv` differed only in a temp-dir prefix and
+# in whether it pre-installed the distribution. 83 of the ~168 non-comment lines
+# in those two files were the same lines.
+#
+# It had already started to drift the way copies do: the manager's fixture had
+# the install moved out into each test while the core's kept it in the fixture,
+# so the same-named fixture meant two different things depending on which file
+# you were reading.
+
+def run_checked(cmd, *, timeout: int = 600, check: bool = True,
+                env=None, cwd=None):
+    """Run a command and, on failure, raise with BOTH streams attached.
+
+    The tails matter: pip's actual complaint is usually the last thing on
+    stdout, and a bare CalledProcessError in a CI log tells you a number.
+
+    `env` and `cwd` are here because two of the four copies of this function
+    had grown one each. A superset with defaults costs nothing; four functions
+    with the same name and different signatures cost a reader every time.
+    """
+    r = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
+                       timeout=timeout, env=env,
+                       cwd=str(cwd) if cwd is not None else None)
+    if check and r.returncode != 0:
+        raise AssertionError(
+            f"{' '.join(str(c) for c in cmd)} exited {r.returncode}\n"
+            f"--- stdout ---\n{r.stdout[-3000:]}\n"
+            f"--- stderr ---\n{r.stderr[-3000:]}")
+    return r
+
+
+def make_venv(target, *, upgrade_pip: bool = True):
+    """Create a venv at `target` and return its interpreter.
+
+    Separate from `throwaway_venv` because two wrapper tests build their venv
+    inside a workspace that outlives it - the engine tarball and a private
+    cache dir live in the same directory, and re-downloading 110 MB per test is
+    what the shared workspace exists to avoid.
+    """
+    import sys
+
+    target = Path(target)
+    run_checked([sys.executable, "-m", "venv", target], timeout=300)
+    py = venv_python(target)
+    assert py.exists(), f"no venv python at {py}"
+    if upgrade_pip:
+        run_checked([py, "-m", "pip", "install", "--upgrade", "pip", "--quiet"],
+                    timeout=300)
+    return py
+
+
+def venv_python(venv_dir: Path) -> Path:
+    """The interpreter inside a venv, on either platform."""
+    import os
+    bindir = "Scripts" if os.name == "nt" else "bin"
+    name = "python.exe" if os.name == "nt" else "python"
+    return Path(venv_dir) / bindir / name
+
+
+@contextlib.contextmanager
+def throwaway_venv(prefix: str, *, install=None, timeout: int = 900):
+    """An empty venv with nothing but pip, removed on the way out.
+
+    `install` is a distribution to pre-install, or None to leave the
+    environment empty so a test can install into it and watch that happen.
+    Both shapes existed; naming the difference is cheaper than two fixtures
+    that share a name and do not share a meaning.
+    """
+    import shutil
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix=prefix))
+    try:
+        py = make_venv(root / "venv")
+        if install:
+            run_checked([py, "-m", "pip", "install", "--no-cache-dir", install],
+                        timeout=timeout)
+        yield py
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
