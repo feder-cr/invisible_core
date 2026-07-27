@@ -49,6 +49,12 @@ classifiers = [
 # reports a definitively broken environment as healthy.
 dependencies = [
     "platformdirs>=4",
+    # Process identity and the OS-level lifetime guard (invisible_core/process.py).
+    # Both consumers already declared it, so nobody gains a dependency: what
+    # changes is that they stop each carrying their own copy of the same code -
+    # and the manager, which had none, stops leaking its whole browser tree
+    # every time it is killed (measured at 8 survivors, 3 runs of 3).
+    "psutil>=5.9",
     "requests[socks]>=2.31",
     "maxminddb>=2.2",
     "tzdata>=2024.1",

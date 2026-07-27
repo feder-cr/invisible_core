@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -86,6 +86,9 @@ def build_launch_env(
     return env
 
 
+from .process import SessionToken
+
+
 @dataclass
 class LaunchPlan:
     """Everything needed to spawn the patched Firefox for one identity."""
@@ -93,6 +96,12 @@ class LaunchPlan:
     profile_dir: Path
     argv: List[str]
     env: Dict[str, str]
+    #: Identity for the process tree this plan will start. Already stamped into
+    #: ``env``, so every process in the tree inherits it; the caller keeps it to
+    #: bind a lifetime guard and to reap by positive identification rather than
+    #: by guessing which firefox is theirs. Defaulted so that anything
+    #: constructing a LaunchPlan positionally keeps working.
+    session_token: SessionToken = field(default_factory=SessionToken)
 
 
 def build_launch_plan(
@@ -150,4 +159,9 @@ def build_launch_plan(
     argv += list(extra_args or [])
     if url:
         argv.append(url)
-    return LaunchPlan(binary=binary, profile_dir=pdir, argv=argv, env=env)
+    # Mint the identity here rather than in each consumer: the manager had none
+    # at all and leaked its whole tree on every kill, and a token that is not
+    # part of the plan is a token somebody has to remember to add to the env.
+    token = SessionToken.mint()
+    return LaunchPlan(binary=binary, profile_dir=pdir, argv=argv,
+                      env=token.stamp(env), session_token=token)
