@@ -130,6 +130,19 @@ def _gpu_pool() -> List[Dict]:
     return pool
 
 
+#: Knuth's 32-bit golden-ratio multiplier, and a prime modulus. FROZEN: they are
+#: part of the published seed -> identity contract, not tuning knobs. Changing
+#: either remaps 100% of identities.
+#:
+#: Named because they appeared as bare literals in BOTH functions below, and the
+#: two MUST use the same multiplier: select_persona picks the GPU and
+#: render_noise_seed picks the canvas-noise seed, and if they stop agreeing the
+#: two halves of one identity decorrelate silently - a seed's GPU and its render
+#: hash would no longer be drawn from the same stream.
+_IDENTITY_MULTIPLIER = 2654435761
+_IDENTITY_MODULUS = 1_000_003
+
+
 def select_persona(seed: int) -> Optional[Dict]:
     """Deterministic, prevalence-weighted GPU persona for this seed - on EVERY host.
 
@@ -144,7 +157,8 @@ def select_persona(seed: int) -> Optional[Dict]:
     if not pool:
         return None
     total = sum(p["weight"] for p in pool) or 1.0
-    h = ((int(seed) * 2654435761) % 1_000_003) / 1_000_003.0 * total
+    h = (((int(seed) * _IDENTITY_MULTIPLIER) % _IDENTITY_MODULUS)
+         / float(_IDENTITY_MODULUS) * total)
     cum = 0.0
     for p in pool:
         cum += p["weight"]
@@ -218,4 +232,5 @@ def render_noise_seed(seed: int) -> int:
 
     Maps the identity seed into CLEAN_RENDER_SEEDS so every session gets a calibrated
     clean canvas/WebGL render hash while keeping per-user diversity. Stable per seed."""
-    return CLEAN_RENDER_SEEDS[(int(seed) * 2654435761) % len(CLEAN_RENDER_SEEDS)]
+    return CLEAN_RENDER_SEEDS[(int(seed) * _IDENTITY_MULTIPLIER)
+                             % len(CLEAN_RENDER_SEEDS)]

@@ -44,6 +44,17 @@ def _load(filename: str) -> Any:
 # ═══════════════════════════════════════════════════════════════════════
 #  LOCKED IDENTITY (compiled into our Firefox 150 build - never varies)
 # ═══════════════════════════════════════════════════════════════════════
+#: Windows default taskbar height at 100% DPI. The ENGINE derives the
+#: available rect itself - nsScreen.cpp:114 returns {0, 0, w, h - 48} -
+#: so this has to be the same number, or Profile.screen.avail_height
+#: reports a value no browser will ever produce. It was 40 here and in
+#: all 93 rows of cpt_screen_given_class_tier.json against the engine's
+#: 48, since before the split. Not an emitted pref: avail_width/height
+#: are commented out in prefs.py precisely because the engine owns them,
+#: which is why nothing caught it and why fixing it moves no seed.
+_TASKBAR_PX = 48
+
+
 _LOCKED: Dict[str, Any] = {
     # Derived from FIREFOX_UPSTREAM_VERSION (constants.USER_AGENT). The old
     # literal "Firefox/150.0.1" was a patch-versioned UA that no real Firefox
@@ -312,7 +323,7 @@ class Forge:
             "screen_w": int(screen["w"]),
             "screen_h": int(screen["h"]),
             "screen_avail_w": int(screen.get("aw", screen["w"])),
-            "screen_avail_h": int(screen.get("ah", screen["h"] - 40)),
+            "screen_avail_h": int(screen.get("ah", screen["h"] - _TASKBAR_PX)),
             "dpr": float(screen["dpr"]),
             # Hardware (coherent with GPU class)
             "hw_concurrency": int(bundle["hw_concurrency"]),
