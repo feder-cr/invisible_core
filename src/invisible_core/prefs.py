@@ -474,6 +474,251 @@ def _accept_language(locale: str) -> str:
     return f"{lang}, {base}" if base != lang else lang
 
 
+# ---------------------------------------------------------------------------
+#  One section of the prefs dict per function.
+#
+#  These were 203 lines inside `translate_profile_to_prefs`, which is the whole
+#  product's output in one place: every spoof this project ships leaves through
+#  that dict. The comments are the valuable part of this file - each block below
+#  keeps the one it came with, word for word.
+#
+#  They MUTATE `prefs` in a fixed order rather than returning dicts that get
+#  merged. Two sections read what an earlier one wrote (the platform workarounds
+#  use `setdefault`, and the caller overlay must be able to delete anything),
+#  so the order is load-bearing and mutation says so; independent pure functions
+#  merged by a caller would look interchangeable and would not be.
+#
+#  Verified by recording the full output first: 400 profiles across four
+#  locales, four timezones, three overlay shapes and both virtual_display
+#  values, hashed before and after. Identical.
+# ---------------------------------------------------------------------------
+
+
+def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
+    """The validated WebGL persona, and the reason it is applied on every host.
+
+    On Linux we spoof to a Windows ANGLE renderer string (profile.gpu.renderer)
+    so cross-platform sessions report a consistent Windows GPU identity.
+    On Windows/mac, spoofing a renderer string ALONE is unsafe - the ~81
+    getParameter values stay real, so a name<->params hash mismatch FP Pro flags
+    (setting GTX 980 over real Arc A750 params scored ~0.70). Instead we apply a
+    VALIDATED PERSONA (see _webgl_personas): a {renderer, vendor} whose params are
+    the shared ANGLE D3D11 caps (vendor-independent - identical on any host, per the
+    ANGLE source) and whose extension list is FORCED below. That is a coherent fake
+    GPU that passes FP Pro host-independently (the host's real GPU never leaks). If no
+    validated persona exists for the sampled gpu_class yet, fall back to the host-real
+    renderer (empty -> native ANGLE; SanitizeRenderer at ClientWebGLContext.cpp:2592).
+    Apply the camoufox-derived real-Firefox GPU persona on EVERY host (Win/Linux/Mac).
+    We must ALWAYS look Windows (rule), and the WebGL override is platform-independent:
+    SanitizeRenderer (ClientWebGLContext.cpp) is pure string regex, and the param/extension
+    overrides are pref-driven, so the C++ presents the SAME Windows ANGLE GPU regardless of
+    the host's real GL backend (it never consults it when the pref is set). This is why a
+    Windows GPU shows correctly even on a Linux/Mesa host (no more "Generic Renderer").
+
+    Returns the persona, because `_apply_extension_lists` needs to know whether
+    one was applied.
+    """
+    persona = select_persona(profile.seed)
+    if persona:
+        # Apply the FULL coherent WebGL override (renderer + vendor + webgl1/webgl2 extensions
+        # + ~100 getParameter values + shader-precision formats). Setting ALL of them - not just
+        # the renderer string - keeps renderer<->params coherent (FP Pro cross-checks them); a
+        # string-only spoof over the host's real params is the old ~0.85 mismatch.
+        for _k, _v in persona["prefs"].items():
+            if _k == "zoom.stealth.webgl2.enabled":
+                prefs["webgl.enable-webgl2"] = bool(_v)
+            else:
+                prefs[_k] = _v
+    else:
+        prefs["zoom.stealth.webgl.renderer"] = ""
+        prefs["zoom.stealth.webgl.vendor"]   = ""
+    return persona
+
+
+#: The canvas-noise mask, pinned to the Intel rate (1/16, ~6.25%).
+#:
+#: The mask is calibrated to the REAL host GPU's rendering variance - the canvas
+#: is drawn by real hardware, NOT the persona's claimed GPU, so it must NOT
+#: follow the persona (a non-Intel persona on an Intel host would over-noise).
+#: Intel has lower natural rendering variance than NVIDIA/AMD, so the 1/8 rate
+#: over-amplifies the FP Pro tampering_ml signal.
+#:
+#: This was written as `_renderer_lo = "intel"` followed by
+#: `if "intel" in _renderer_lo: ... else: 7`, which reads as a per-vendor choice
+#: and is not one: the condition is a constant compared against itself, so the
+#: 1/8 branch has never executed. Measured across 300 seeds, every profile gets
+#: 15. Written as the constant it is, with the reason it is constant - a dead
+#: branch that looks live is a decision the next reader thinks was made.
+#:
+#: To make it host-dependent again, sample the REAL renderer here; do not
+#: reintroduce the branch over a literal.
+_CANVAS_NOISE_SKIP_MASK = 15
+
+
+def _apply_canvas_and_msaa(prefs: Dict[str, Any], profile: Profile) -> None:
+    # MSAA: on Windows, pin to 4 (Firefox default for ANGLE) so gl.SAMPLES is
+    # constant across all sessions. Different MSAA values cause different CN-set
+    # parameters hashes even with the same renderer -> detectable variation.
+    # Vanilla Intel Arc A750 parameters hash (66544db8) verified at msaa=4.
+    _msaa = profile.webgl.msaa_samples if sys.platform.startswith("linux") else 4
+    # DEAD: appears in NO file of the engine source; MSAA sample counts come from the real GL driver.
+    # prefs["zoom.stealth.webgl.msaa"]        = _msaa
+    prefs["webgl.msaa-samples"]             = _msaa
+    prefs["webgl.msaa-force"]               = _msaa > 0
+    prefs["zoom.stealth.canvas.noise_skip_mask"] = _CANVAS_NOISE_SKIP_MASK
+
+
+def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
+    prefs["zoom.stealth.screen.width"]        = profile.screen.width
+    prefs["zoom.stealth.screen.height"]       = profile.screen.height
+    # DEAD, and kept only so the next reader does not re-add them. Neither name
+    # is declared in StaticPrefList.yaml, and nsScreen::GetAvailRect ignores
+    # them outright: it reads zoom_stealth_screen_width/height and subtracts a
+    # fixed 48px taskbar (dom/base/nsScreen.cpp:112-115). Writing them changes
+    # nothing; the available rect is already derived from the two above.
+    #   prefs["zoom.stealth.screen.avail_width"]  = profile.screen.avail_width
+    #   prefs["zoom.stealth.screen.avail_height"] = profile.screen.avail_height
+    # DEAD: appears in NO file of the engine source; the DPR that reaches a page comes from layout.css.devPixelsPerPx on the line below.
+    # prefs["zoom.stealth.screen.dpr"]          = profile.screen.dpr
+    prefs["layout.css.devPixelsPerPx"]        = str(profile.screen.dpr)
+
+
+def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
+    # Coherent with the sampled gpu_class by construction (the forge draws
+    # hw_concurrency conditioned on the GPU class).
+    prefs["zoom.stealth.hw_concurrency"]      = profile.hardware.concurrency
+    prefs["zoom.stealth.storage.quota_mb"]    = profile.hardware.storage_quota_mb
+
+
+def _apply_audio(prefs: Dict[str, Any], profile: Profile) -> None:
+    prefs["zoom.stealth.audio.sample_rate"]       = profile.audio.sample_rate
+    prefs["zoom.stealth.audio.output_latency_ms"] = profile.audio.output_latency_ms
+    prefs["zoom.stealth.audio.max_channel_count"] = profile.audio.max_channel_count
+
+
+def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
+    prefs["media.av1.enabled"]                = profile.codec.av1_enabled
+    prefs["media.encoder.webm.enabled"]       = profile.codec.webm_encoder_enabled
+    # NOT media.mediasource.{webm,mp4}.enabled. Those two names do not exist in
+    # Firefox - verified against modules/libpref/init/StaticPrefList.yaml, which
+    # declares only media.mediasource.enabled / .vp9.enabled / .experimental.
+    # Setting a name the binary never reads is a no-op, so the per-seed codec
+    # diversity this samples was fictional: every identity we shipped reported
+    # the SAME codec surface to canPlayType and MediaSource.isTypeSupported,
+    # which is an invariant across the fleet rather than the variation intended.
+    # The real switches are media.webm.enabled and media.mp4.enabled.
+    prefs["media.webm.enabled"]               = profile.codec.mediasource_webm
+    prefs["media.mp4.enabled"]                = profile.codec.mediasource_mp4
+
+
+# Fonts - NOTHING to configure here, which is why there is no _apply_fonts. The
+# patched binary is self-contained: it is always bundle-only (host system fonts
+# never enter the font list), exposes exactly the bundled standard-Windows
+# families, and bakes system-ui -> "Segoe UI" and the CSS generics -> Windows
+# fonts in C++. There is no external fontlist / allow-list / name-list: the list
+# IS the bundle. See gfxPlatformFontList (StealthSkipFamily,
+# StealthGenericWindowsFont).
+
+
+def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
+    """Dark mode, plus the Windows colours palette when the theme is light."""
+    prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
+    if not profile.dark_theme:
+        prefs.update(_WIN_LIGHT_COLORS)
+
+
+def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
+    locale = locale or "en-US"
+    lang = locale.replace("_", "-")
+    prefs["intl.accept_languages"]     = _accept_language(locale)
+    prefs["general.useragent.locale"]  = lang
+    prefs["intl.locale.requested"]     = lang
+    prefs["privacy.spoof_english"]     = 0
+    # juggler.locale.override seeds the BrowsingContext LanguageOverride FIELD in
+    # the parent process (BrowsingContext::Attach), whose DidSet drives BOTH
+    # navigator.languages (the full list) AND the realm Intl default locale (the
+    # primary tag it extracts) - so Intl.DateTimeFormat / NumberFormat /
+    # toLocaleString follow the locale, not just the Accept-Language header. Seed
+    # it with the full Accept-Language list so navigator.languages stays the
+    # desktop-default 2 elements (["fr-FR","fr"]); the C++ DidSet takes "fr-FR"
+    # for Intl. Mirrors juggler.timezone.override; the SOLE source of truth.
+    prefs["juggler.locale.override"]   = _accept_language(locale)
+
+
+def _apply_timezone(prefs: Dict[str, Any], timezone: str) -> None:
+    if timezone:
+        # juggler.timezone.override is the SOLE source of truth read by the C++
+        # timezone chain (BrowsingContext::Attach/DidSet, ContentChild). The old
+        # zoom.stealth.timezone pref was declared in the yaml but read by NO
+        # code - dropped here on 2026-06-10 (see 20-our-patches.md section 8).
+        prefs["juggler.timezone.override"] = timezone
+
+
+def _apply_render_seed(prefs: Dict[str, Any], profile: Profile) -> None:
+    # Cross-process seed (canvas noise + DWrite gamma share this). Only
+    # zoom.stealth.fpp.hw_seed is read by the C++; the old zoom.stealth.seed
+    # alias was never declared in the yaml and read by nothing - dropped
+    # 2026-06-10. The render-noise seed is DECOUPLED from the identity seed and
+    # drawn from a calibrated CLEAN pool: the canvas/WebGL render HASH it drives
+    # is the dominant FP Pro tampering_ml signal, and some hw_seeds yield a
+    # "suspicious" render hash. render_noise_seed() maps to the clean pool while
+    # keeping per-seed determinism + diversity. See _webgl_personas.
+    prefs["zoom.stealth.fpp.hw_seed"] = render_noise_seed(profile.seed)
+
+
+def _apply_webrtc_host_ip(prefs: Dict[str, Any], profile: Profile) -> None:
+    # Synthetic host ICE candidate - injected by C++ when addr_ct==0 (SOCKS5
+    # proxy suppresses all local addresses so Firefox can't gather host cands).
+    # LAN IP is seed-derived so it's consistent per session and looks like a
+    # real home router assignment (192.168.x.x range).
+    _s = profile.seed
+    prefs["zoom.stealth.webrtc.host_ip"] = f"192.168.{(_s >> 8) % 254 + 1}.{_s % 254 + 1}"
+
+
+def _apply_extension_lists(prefs: Dict[str, Any], persona) -> None:
+    """Windows/mac extension list.
+
+      - persona active -> the coherent webgl1/webgl2 extension lists (in the GPU's real
+        native order) were ALREADY applied above from the GPU pool's `prefs`, alongside the
+        matching renderer + params + shader-precisions. Nothing to do here.
+      - no persona -> clear so the host-real renderer reports its native extension set
+        (matches real vanilla captures for that host's GPU).
+    """
+    if not sys.platform.startswith("linux") and not persona:
+        prefs["zoom.stealth.webgl.extensions"]  = ""
+        prefs["zoom.stealth.webgl2.extensions"] = ""
+
+
+def _apply_platform_workarounds(prefs: Dict[str, Any], *, virtual_display: bool) -> None:
+    """`setdefault`, deliberately: anything a section above chose already wins."""
+    # Linux Xvfb workarounds (no-op on Windows).
+    if sys.platform.startswith("linux"):
+        for k, v in _LINUX_XVFB_WORKAROUNDS.items():
+            prefs.setdefault(k, v)
+
+    # Windows virtual-desktop workarounds (headless=True on Windows).
+    if virtual_display and sys.platform == "win32":
+        for k, v in _WIN_VIRT_DESKTOP_WORKAROUNDS.items():
+            prefs.setdefault(k, v)
+
+
+def _apply_caller_overlay(prefs: Dict[str, Any],
+                          extra_prefs: Optional[Dict[str, Any]]) -> None:
+    """LAST, so users can override anything we set.
+
+    A value of None is a sentinel meaning "delete this pref entirely from the
+    final dict" - useful for A/B harnesses that need to test what happens when
+    an override is unset (vs set to empty string, which for some prefs like
+    general.useragent.override means literally empty UA).
+    """
+    if extra_prefs:
+        for k, v in extra_prefs.items():
+            if v is None:
+                prefs.pop(k, None)
+            else:
+                prefs[k] = v
+
+
 def translate_profile_to_prefs(
     profile: Profile,
     *,
@@ -492,188 +737,27 @@ def translate_profile_to_prefs(
         virtual_display: When True on Windows, apply GPU-disabling workarounds
                          to prevent the GPU process from crashing on virtual
                          desktops that have no D3D11 backend.
+
+    The body is the ORDER, and the order is the contract: the caller overlay
+    runs last so it can override or delete anything, and the platform
+    workarounds `setdefault` so they never take a choice away from a section
+    above them. Each step keeps the reasoning it was written with.
     """
     prefs: Dict[str, Any] = dict(_BASELINE)
 
-    # GPU / WebGL renderer/vendor.
-    # On Linux we spoof to a Windows ANGLE renderer string (profile.gpu.renderer)
-    # so cross-platform sessions report a consistent Windows GPU identity.
-    # On Windows/mac, spoofing a renderer string ALONE is unsafe - the ~81
-    # getParameter values stay real, so a name↔params hash mismatch FP Pro flags
-    # (setting GTX 980 over real Arc A750 params scored ~0.70). Instead we apply a
-    # VALIDATED PERSONA (see _webgl_personas): a {renderer, vendor} whose params are
-    # the shared ANGLE D3D11 caps (vendor-independent - identical on any host, per the
-    # ANGLE source) and whose extension list is FORCED below. That is a coherent fake
-    # GPU that passes FP Pro host-independently (the host's real GPU never leaks). If no
-    # validated persona exists for the sampled gpu_class yet, fall back to the host-real
-    # renderer (empty → native ANGLE; SanitizeRenderer at ClientWebGLContext.cpp:2592).
-    # Apply the camoufox-derived real-Firefox GPU persona on EVERY host (Win/Linux/Mac).
-    # We must ALWAYS look Windows (rule), and the WebGL override is platform-independent:
-    # SanitizeRenderer (ClientWebGLContext.cpp) is pure string regex, and the param/extension
-    # overrides are pref-driven, so the C++ presents the SAME Windows ANGLE GPU regardless of
-    # the host's real GL backend (it never consults it when the pref is set). This is why a
-    # Windows GPU shows correctly even on a Linux/Mesa host (no more "Generic Renderer").
-    _persona = select_persona(profile.seed)
-    if _persona:
-        # Apply the FULL coherent WebGL override (renderer + vendor + webgl1/webgl2 extensions
-        # + ~100 getParameter values + shader-precision formats). Setting ALL of them - not just
-        # the renderer string - keeps renderer<->params coherent (FP Pro cross-checks them); a
-        # string-only spoof over the host's real params is the old ~0.85 mismatch.
-        for _k, _v in _persona["prefs"].items():
-            if _k == "zoom.stealth.webgl2.enabled":
-                prefs["webgl.enable-webgl2"] = bool(_v)
-            else:
-                prefs[_k] = _v
-    else:
-        prefs["zoom.stealth.webgl.renderer"] = ""
-        prefs["zoom.stealth.webgl.vendor"]   = ""
-    # Canvas-noise mask is calibrated to the REAL host GPU's rendering variance - the canvas is
-    # drawn by real hardware, NOT the persona's claimed GPU, so it must NOT follow the persona
-    # (a non-Intel persona on an Intel host would over-noise). Dev/deployment host is Intel.
-    _renderer_lo = "intel"
-
-    # MSAA: on Windows, pin to 4 (Firefox default for ANGLE) so gl.SAMPLES is
-    # constant across all sessions. Different MSAA values cause different CN-set
-    # parameters hashes even with the same renderer → detectable variation.
-    # Vanilla Intel Arc A750 parameters hash (66544db8) verified at msaa=4.
-    _msaa = profile.webgl.msaa_samples if sys.platform.startswith("linux") else 4
-    # DEAD: appears in NO file of the engine source; MSAA sample counts come from the real GL driver.
-    # prefs["zoom.stealth.webgl.msaa"]        = _msaa
-    prefs["webgl.msaa-samples"]             = _msaa
-    prefs["webgl.msaa-force"]               = _msaa > 0
-
-    # Canvas pixel-noise density per vendor. Intel has lower natural
-    # rendering variance than NVIDIA/AMD, so the default 1/8 noise rate
-    # over-amplifies the FP Pro tampering ML signal. Drop to 1/16 for Intel
-    # to keep tampering_ml below the detection threshold while still
-    # breaking the canvas geometry hash.
-    if "intel" in _renderer_lo:
-        prefs["zoom.stealth.canvas.noise_skip_mask"] = 15  # 1/16, ~6.25%
-    else:
-        prefs["zoom.stealth.canvas.noise_skip_mask"] = 7   # 1/8,  ~12.5%
-
-    # Screen
-    prefs["zoom.stealth.screen.width"]        = profile.screen.width
-    prefs["zoom.stealth.screen.height"]       = profile.screen.height
-    # DEAD, and kept only so the next reader does not re-add them. Neither name
-    # is declared in StaticPrefList.yaml, and nsScreen::GetAvailRect ignores
-    # them outright: it reads zoom_stealth_screen_width/height and subtracts a
-    # fixed 48px taskbar (dom/base/nsScreen.cpp:112-115). Writing them changes
-    # nothing; the available rect is already derived from the two above.
-    #   prefs["zoom.stealth.screen.avail_width"]  = profile.screen.avail_width
-    #   prefs["zoom.stealth.screen.avail_height"] = profile.screen.avail_height
-    # DEAD: appears in NO file of the engine source; the DPR that reaches a page comes from layout.css.devPixelsPerPx on the line below.
-    # prefs["zoom.stealth.screen.dpr"]          = profile.screen.dpr
-    prefs["layout.css.devPixelsPerPx"]        = str(profile.screen.dpr)
-
-    # Hardware - coherent with the sampled gpu_class by construction (the forge
-    # draws hw_concurrency conditioned on the GPU class).
-    prefs["zoom.stealth.hw_concurrency"]      = profile.hardware.concurrency
-    prefs["zoom.stealth.storage.quota_mb"]    = profile.hardware.storage_quota_mb
-
-    # Audio
-    prefs["zoom.stealth.audio.sample_rate"]       = profile.audio.sample_rate
-    prefs["zoom.stealth.audio.output_latency_ms"] = profile.audio.output_latency_ms
-    prefs["zoom.stealth.audio.max_channel_count"] = profile.audio.max_channel_count
-
-    # Codec
-    prefs["media.av1.enabled"]                = profile.codec.av1_enabled
-    prefs["media.encoder.webm.enabled"]       = profile.codec.webm_encoder_enabled
-    # NOT media.mediasource.{webm,mp4}.enabled. Those two names do not exist in
-    # Firefox - verified against modules/libpref/init/StaticPrefList.yaml, which
-    # declares only media.mediasource.enabled / .vp9.enabled / .experimental.
-    # Setting a name the binary never reads is a no-op, so the per-seed codec
-    # diversity this samples was fictional: every identity we shipped reported
-    # the SAME codec surface to canPlayType and MediaSource.isTypeSupported,
-    # which is an invariant across the fleet rather than the variation intended.
-    # The real switches are media.webm.enabled and media.mp4.enabled.
-    prefs["media.webm.enabled"]               = profile.codec.mediasource_webm
-    prefs["media.mp4.enabled"]                = profile.codec.mediasource_mp4
-
-    # Fonts - NOTHING to configure here. The patched binary is self-contained:
-    # it is always bundle-only (host system fonts never enter the font list),
-    # exposes exactly the bundled standard-Windows families, and bakes system-ui
-    # -> "Segoe UI" and the CSS generics -> Windows fonts in C++. There is no
-    # external fontlist / allow-list / name-list: the list IS the bundle. See
-    # gfxPlatformFontList (StealthSkipFamily, StealthGenericWindowsFont).
-
-    # UI / dark mode + Windows colors palette (only when light theme).
-    prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
-    if not profile.dark_theme:
-        prefs.update(_WIN_LIGHT_COLORS)
-
-    # Locale prefs.
-    locale = locale or "en-US"
-    lang = locale.replace("_", "-")
-    prefs["intl.accept_languages"]     = _accept_language(locale)
-    prefs["general.useragent.locale"]  = lang
-    prefs["intl.locale.requested"]     = lang
-    prefs["privacy.spoof_english"]     = 0
-    # juggler.locale.override seeds the BrowsingContext LanguageOverride FIELD in
-    # the parent process (BrowsingContext::Attach), whose DidSet drives BOTH
-    # navigator.languages (the full list) AND the realm Intl default locale (the
-    # primary tag it extracts) - so Intl.DateTimeFormat / NumberFormat /
-    # toLocaleString follow the locale, not just the Accept-Language header. Seed
-    # it with the full Accept-Language list so navigator.languages stays the
-    # desktop-default 2 elements (["fr-FR","fr"]); the C++ DidSet takes "fr-FR"
-    # for Intl. Mirrors juggler.timezone.override; the SOLE source of truth.
-    prefs["juggler.locale.override"]   = _accept_language(locale)
-
-    if timezone:
-        # juggler.timezone.override is the SOLE source of truth read by the C++
-        # timezone chain (BrowsingContext::Attach/DidSet, ContentChild). The old
-        # zoom.stealth.timezone pref was declared in the yaml but read by NO
-        # code - dropped here on 2026-06-10 (see 20-our-patches.md §8).
-        prefs["juggler.timezone.override"] = timezone
-
-    # Cross-process seed (canvas noise + DWrite gamma share this). Only
-    # zoom.stealth.fpp.hw_seed is read by the C++; the old zoom.stealth.seed
-    # alias was never declared in the yaml and read by nothing - dropped
-    # 2026-06-10. The render-noise seed is DECOUPLED from the identity seed and
-    # drawn from a calibrated CLEAN pool: the canvas/WebGL render HASH it drives
-    # is the dominant FP Pro tampering_ml signal, and some hw_seeds yield a
-    # "suspicious" render hash. render_noise_seed() maps to the clean pool while
-    # keeping per-seed determinism + diversity. See _webgl_personas.
-    prefs["zoom.stealth.fpp.hw_seed"] = render_noise_seed(profile.seed)
-
-    # Synthetic host ICE candidate - injected by C++ when addr_ct==0 (SOCKS5
-    # proxy suppresses all local addresses so Firefox can't gather host cands).
-    # LAN IP is seed-derived so it's consistent per session and looks like a
-    # real home router assignment (192.168.x.x range).
-    _s = profile.seed
-    _lan_ip = f"192.168.{(_s >> 8) % 254 + 1}.{_s % 254 + 1}"
-    prefs["zoom.stealth.webrtc.host_ip"] = _lan_ip
-
-    # Windows/mac extension list:
-    #  - persona active → the coherent webgl1/webgl2 extension lists (in the GPU's real
-    #    native order) were ALREADY applied above from the GPU pool's `prefs`, alongside the
-    #    matching renderer + params + shader-precisions. Nothing to do here.
-    #  - no persona → clear so the host-real renderer reports its native extension set
-    #    (matches real vanilla captures for that host's GPU).
-    if not sys.platform.startswith("linux") and not _persona:
-        prefs["zoom.stealth.webgl.extensions"]  = ""
-        prefs["zoom.stealth.webgl2.extensions"] = ""
-
-    # Linux Xvfb workarounds (no-op on Windows).
-    if sys.platform.startswith("linux"):
-        for k, v in _LINUX_XVFB_WORKAROUNDS.items():
-            prefs.setdefault(k, v)
-
-    # Windows virtual-desktop workarounds (headless=True on Windows).
-    if virtual_display and sys.platform == "win32":
-        for k, v in _WIN_VIRT_DESKTOP_WORKAROUNDS.items():
-            prefs.setdefault(k, v)
-
-    # Caller overlay LAST so users can override anything we set. A value of
-    # None is treated as a sentinel meaning "delete this pref entirely from
-    # the final dict" - useful for A/B harnesses that need to test what
-    # happens when an override is unset (vs set to empty string, which for
-    # some prefs like general.useragent.override means literally empty UA).
-    if extra_prefs:
-        for k, v in extra_prefs.items():
-            if v is None:
-                prefs.pop(k, None)
-            else:
-                prefs[k] = v
+    persona = _apply_gpu_persona(prefs, profile)
+    _apply_canvas_and_msaa(prefs, profile)
+    _apply_screen(prefs, profile)
+    _apply_hardware(prefs, profile)
+    _apply_audio(prefs, profile)
+    _apply_codecs(prefs, profile)
+    _apply_theme(prefs, profile)
+    _apply_locale(prefs, locale)
+    _apply_timezone(prefs, timezone)
+    _apply_render_seed(prefs, profile)
+    _apply_webrtc_host_ip(prefs, profile)
+    _apply_extension_lists(prefs, persona)
+    _apply_platform_workarounds(prefs, virtual_display=virtual_display)
+    _apply_caller_overlay(prefs, extra_prefs)
 
     return prefs

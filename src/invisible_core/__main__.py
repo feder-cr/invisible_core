@@ -91,6 +91,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 from ._pin import CORE_NAME as CORE_DIST
+from ._pin import format_command
 from ._pin import pin_from_requirements
 from ._version import __version__ as DERIVED_CORE_VERSION
 from .download import (cache_root, clear_cache, engine_status, ensure_binary,
@@ -109,14 +110,16 @@ EXIT_PROBLEM = 1
 EXIT_UNVERIFIED = 2
 
 # Characters that make a shell do something other than pass the token through.
-_NEEDS_QUOTING = set("=<>[]!;&|$`\"'*? \t")
-
-
-def _format_command(cmd: Sequence[str]) -> str:
-    out = []
-    for token in cmd:
-        out.append(f'"{token}"' if set(token) & _NEEDS_QUOTING else token)
-    return " ".join(out)
+# The command formatter is `_pin.format_command`. This module carried a
+# byte-identical second copy of it AND of its `_NEEDS_QUOTING` set - recorded as
+# open item 9 in 18-gate-inventory.md, "same class as the parser forks".
+#
+# Measured before removing it: the two agreed on all nine shapes tried,
+# including a path with a space, an extras specifier and an embedded semicolon.
+# They agreed today. Two copies of a quoting rule is a pair that will not agree
+# forever, and this one decides whether the remedy a human pastes back is a
+# command that runs or one that loses half a path.
+_format_command = format_command
 
 
 def _refuse_to_install(cmd: Sequence[str], *, execute: bool) -> str:

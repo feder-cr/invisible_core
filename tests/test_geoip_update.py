@@ -20,7 +20,12 @@ root, the tag resolver, and the per-tag download so nothing touches the network.
 # `test_no_test_reaches_the_core_through_a_shim` in the wrapper keeps them here.
 import pytest
 
-import invisible_core.download as dl
+# The geoip half of `download` became `_geoip_db` on 2026-07-27: two subjects
+# in one file, sharing nothing but "fetch a GitHub release asset". The two
+# public names are still importable from `download` - that path is public
+# through the wrapper's shim - but the code, and therefore what a test
+# patches, lives in one place now.
+import invisible_core._geoip_db as dl
 
 
 @pytest.fixture

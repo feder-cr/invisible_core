@@ -369,7 +369,15 @@ def test_the_doctor_imports_only_the_reading_half_of_pin():
     readers = {"CORE_NAME", "pin_from_requirements", "pin_declaration",
                "declared_core_pin", "PinDeclaration", "parse_requirement",
                "normalise_name", "installed_core_version", "recorded_core_version",
-               "editable_core_path", "probe_core", "pin_report", "pin_problem"}
+               "editable_core_path", "probe_core", "pin_report", "pin_problem",
+               # Added 2026-07-27 when the doctor's byte-identical copy of it was
+               # deleted (18-gate-inventory open item 9). Pure string formatting:
+               # it takes a list of tokens and returns a quoted line, touches no
+               # process and no filesystem. Classified by hand ON PURPOSE - this
+               # gate exists so a new name from a module that CAN install has to
+               # be looked at by somebody, and widening it silently is the failure
+               # it guards against.
+               "format_command"}
     tree = ast.parse(Path(doctor.__file__).read_text(encoding="utf-8"))
     imported = []
     for node in ast.walk(tree):
