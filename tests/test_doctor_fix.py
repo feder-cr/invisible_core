@@ -215,7 +215,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(doctor, "INSTALL_RUNNER", state.install)
     # NOTE: nothing here stands in for the pin parser. The requirement strings
     # in state.facts[...].requires go through the SHIPPED
-    # invisible_core._pin.pin_from_requirements, so a spelling that parser stops
+    # invisible_core.pin.pin_from_requirements, so a spelling that parser stops
     # understanding shows up here as a changed doctor verdict rather than as a
     # test of a fake that agrees with itself.
     monkeypatch.setattr(doctor, "_dist_facts",
@@ -354,7 +354,7 @@ def test_the_doctor_module_cannot_start_a_process_at_all():
 def test_the_doctor_imports_only_the_reading_half_of_pin():
     """The doctor shares _pin's parser, and _pin also contains an INSTALLER.
 
-    invisible_core._pin grew a real pip runner (_run_pip / INSTALL_RUNNER /
+    invisible_core.pin grew a real pip runner (_run_pip / INSTALL_RUNNER /
     enforce_core_pin) for the consumers' import floor, which is allowed to
     repair the environment it was imported into. The doctor is not: it reports.
     Since the doctor now imports that module, "this file cannot start a process"
@@ -871,7 +871,7 @@ def test_the_doctor_carries_no_second_copy_of_the_pin_parser():
     """One parser, or two verdicts on the same metadata.
 
     The doctor used to keep its own `_PIN_RE` + `_core_pin_of` beside
-    invisible_core._pin's. They disagreed in two measured ways - the local copy
+    invisible_core.pin's. They disagreed in two measured ways - the local copy
     dropped every requirement carrying an environment marker and did not
     understand the parenthesised dialect - and both disagreements read as "no
     pin declared", which was then reported as healthy. The two tests below show

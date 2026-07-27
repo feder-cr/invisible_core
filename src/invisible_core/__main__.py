@@ -71,7 +71,7 @@ skipped, so the run still ended on `verdict: OK` and exit 0 - a state the doctor
 had explicitly failed to verify, reported as a state it had verified to be fine.
 Every path that cannot compare something now records it and lands on 2.
 
-The pin is parsed by invisible_core._pin.pin_from_requirements, which is what
+The pin is parsed by invisible_core.pin.pin_from_requirements, which is what
 each consumer's import-time check goes through too. One parser, one answer: a
 second copy of that regex lived here and drifted from it in two measurable ways
 (it dropped any requirement carrying an environment marker, and it did not
@@ -211,7 +211,7 @@ def _package_section(facts_of=None
     a record that agrees with the pin while the files do not is a partial
     install, and that one needs --force-reinstall where the plain case does not.
 
-    The pin itself is parsed by invisible_core._pin.pin_from_requirements, the
+    The pin itself is parsed by invisible_core.pin.pin_from_requirements, the
     same call the consumers' own import-time check goes through. This module
     used to carry a second, weaker copy: it dropped every requirement carrying
     an environment marker and did not understand the parenthesised

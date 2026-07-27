@@ -54,7 +54,7 @@ class DistFacts:
     editable check used to conclude "not editable" from a truncated file.
 
     requires is the raw Requires-Dist list. The doctor does NOT parse it here:
-    the `invisible-core==` question is answered by invisible_core._pin, so the
+    the `invisible-core==` question is answered by invisible_core.pin, so the
     doctor and the consumers' import-time check cannot disagree about the same
     metadata. It is kept because it is what the environment declares, and the
     tests feed the shared parser from this same field.

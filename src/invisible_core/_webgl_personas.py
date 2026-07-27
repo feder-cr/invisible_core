@@ -9,8 +9,8 @@ Firefox's SanitizeRenderer emits and that FP Pro's tampering_ml scores as CLEAN.
 The blocker is NOT anti_detect and NOT a "render-vs-renderer" check. It is FP Pro's
 **tampering_ml** (gate <=0.5), a holistic ML coherence score. We reverse-engineered its
 GPU sensitivity with single-variable A/Bs on demo.fingerprint.com (deterministic per
-(seed, renderer, IP); tools in tests/_gpu_isolate.py / _gpu_landscape.py / _gpu_sweep.py /
-_gpu_sweep2.py / _gpu_persona_pure.py). Findings:
+(seed, renderer, IP); tools in tests/probes/gpu_webgl/: _gpu_isolate.py, _gpu_landscape.py,
+_gpu_sweep.py, _gpu_sweep2.py, _gpu_persona_pure.py). Findings:
 
   1. tampering_ml = f(renderer STRING, seed baseline = canvas/audio). The renderer string
      carries a STABLE per-bucket penalty; the seed sets the floor it adds to.
