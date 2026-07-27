@@ -6,6 +6,11 @@ from typing import Any, Dict, List, Optional
 
 from ._sampler import sample as _sample_raw
 
+# Top level, not deferred: `_webgl_personas` imports nothing from this package at
+# module scope, so there is no cycle to work around - verified by importing the
+# package, this module and `_webgl_personas` each first in a fresh interpreter.
+from .._webgl_personas import forced_gpu_class as _forced_gpu_class
+
 
 @dataclass(frozen=True)
 class GPUProfile:
@@ -211,10 +216,34 @@ def generate_profile(
         for key in pin:
             _validate_pin_key(key)
 
-    # fixed_gpu_class re-conditions the whole bundle on a chosen class (used so the
-    # bundle stays coherent with the validated WebGL persona we expose on Windows/mac).
-    # An explicit gpu.class_tier pin still wins.
-    eff_class = (pin or {}).get("gpu.class_tier") or fixed_gpu_class
+    # fixed_gpu_class re-conditions the whole bundle on a chosen class, so the
+    # bundle stays coherent with the WebGL persona actually exposed.
+    #
+    # IT DEFAULTS TO THE SEED'S OWN PERSONA CLASS, and that default is the fix
+    # for a live bug rather than a convenience. `prefs.translate_profile_to_prefs`
+    # applies `select_persona(profile.seed)` UNCONDITIONALLY, so the GPU a page
+    # sees is always the persona's - which means conditioning the bundle on that
+    # persona's class is not a policy a caller may choose, it is an invariant of
+    # the pipeline. Passing it was left to the caller, and of the five call sites
+    # three passed it and two did not:
+    #
+    #   config.py, launcher.py, async_api.py     passed it
+    #   launch.py (the manager's LAUNCH path)    did not
+    #   manager/fingerprint.py (the UI preview)  did not
+    #
+    # Measured over 500 seeds before this default: 355 (71%) of manager profiles
+    # emitted different prefs from the wrapper's for the same seed - storage
+    # quota, audio output latency, sample rate, screen size, devicePixelRatio,
+    # av1 - every one of them a value the identification service cross-checks
+    # against the reported GPU. A profile advertising a mid_range renderer while
+    # carrying low_end storage and audio is exactly the internal contradiction
+    # the per-GPU pool exists to remove.
+    #
+    # An explicit `gpu.class_tier` pin still wins, then an explicit
+    # `fixed_gpu_class`; only the unspecified case changed.
+    eff_class = ((pin or {}).get("gpu.class_tier")
+                 or fixed_gpu_class
+                 or _forced_gpu_class(int(seed)))
     raw = _sample_raw(int(seed), fixed_gpu_class=eff_class)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
