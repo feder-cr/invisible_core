@@ -25,6 +25,7 @@ Two findings came out of measuring rather than reasoning, and both are here:
 from __future__ import annotations
 
 import subprocess
+import time
 import sys
 
 import pytest
@@ -122,3 +123,72 @@ def test_the_launch_plan_carries_a_token_that_is_already_in_its_env():
     env = tok.stamp({"A": "1"})
     assert env[TOKEN_VAR] == tok.value and env["A"] == "1"
     assert tok.matches(type("P", (), {"environ": lambda self: env})())
+
+
+# ── moved here from the wrapper on 2026-07-27, with the implementation ──────
+#
+# They monkeypatch `find_processes`, so they can only work in the module that
+# DEFINES it. While the wrapper had its own copy they passed there; once
+# `_reaper` became a re-export they went red, because patching a re-exported
+# name does not affect the module the function actually runs in. That is a
+# useful failure: it says out loud which module owns the behaviour.
+def test_bind_keeps_adopting_after_the_first_success(monkeypatch):
+    """The regression that shipped: `bind` had `if bound: break`.
+
+    It adopted whatever existed at the first instant anything existed, then
+    returned. Windows adds later CHILDREN of a job member automatically - but
+    on Windows `firefox.exe` is a launcher stub that exits, so the real browser
+    is re-parented away from whatever was adopted, and anything appearing a
+    moment later escaped.
+
+    Measured before the fix by killing the runner mid-session and counting
+    survivors carrying the session token: sync 0/0/0/0, async 2/0/0/2. Same
+    code on both paths - only their timing differs, which is what made a race
+    look like a working feature for a day. After: 10 sessions, 0 survivors.
+
+    This drives the loop with a search that returns a SECOND process only on a
+    later pass, which is the shape the old `break` could not survive.
+    """
+    guard = P.JobObjectGuard.__new__(P.JobObjectGuard)
+    guard._adopted = set()
+    adopted = []
+    guard._adopt = lambda pid: (adopted.append(pid), True)[1]
+
+    calls = {"n": 0}
+
+    class _P:
+        def __init__(self, pid): self.pid = pid
+
+    def waves(_token):
+        calls["n"] += 1
+        return [_P(101)] if calls["n"] < 3 else [_P(101), _P(202)]
+
+    monkeypatch.setattr(P, "find_processes", waves)
+    bound = guard.bind(P.SessionToken.mint(), wait=6.0, settle=0.3)
+
+    assert adopted == [101, 202], (
+        f"bind stopped early and adopted {adopted}; a process that appears "
+        f"after the first successful pass is exactly what escapes the job")
+    assert bound == 2
+
+
+def test_bind_does_not_wait_out_the_whole_deadline_once_the_tree_is_stable():
+    """The settle window must END the scan, or every launch pays the full wait."""
+    guard = P.JobObjectGuard.__new__(P.JobObjectGuard)
+    guard._adopted = set()
+    guard._adopt = lambda pid: True
+
+    class _P:
+        def __init__(self, pid): self.pid = pid
+
+    original = P.find_processes
+    P.find_processes = lambda _t: [_P(7)]
+    try:
+        started = time.monotonic()
+        bound = guard.bind(P.SessionToken.mint(), wait=30.0, settle=0.3)
+        elapsed = time.monotonic() - started
+    finally:
+        P.find_processes = original
+
+    assert bound == 1
+    assert elapsed < 5, f"bind took {elapsed:.1f}s on a stable tree; wait was 30s"

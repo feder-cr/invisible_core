@@ -67,6 +67,7 @@ Then the six a later adversarial pass found, each of them measured:
 from __future__ import annotations
 
 import importlib.util
+import re
 import json
 import shutil
 import subprocess
@@ -185,11 +186,19 @@ def gate_module():
     """The gate imported as a module, for the pieces worth testing directly.
 
     normalise() is one of them: its upper bound is a property of the function and
-    proving it only end-to-end costs a build per assertion."""
-    spec = importlib.util.spec_from_file_location("version_gate_under_test", GATE)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    proving it only end-to-end costs a build per assertion.
+
+    Imported as a MODULE, not loaded from `scripts/version_gate.py` by path. The
+    implementation moved into the package on 2026-07-27 so the two consumers -
+    which pin this package exactly - can run the same gate; they had none, which
+    is how invisible-playwright 0.4.4 was uploaded from a stale tree. The script
+    is a back-compat shim now, and loading it by path gave
+    `AttributeError: module has no attribute 'normalise'` - a useful failure,
+    because it says the test was addressing the code by its old address.
+    """
+    from invisible_core import release
+
+    return release
 
 
 def fake_index(tmp_path: Path, versions: list[str]) -> str:
@@ -361,7 +370,7 @@ def test_ok1_moving_only_the_seal_tag_is_allowed(core):
     r = run_gate(core)
     text = out_of(r)
     assert r.returncode == 0, text
-    assert "invisible-core 19.0.0" in text
+    assert re.search(r"invisible[-_]core 19\.0\.0", text), text[:200]
     assert "HAS NEVER BEEN PUBLISHED" in text
     assert "PUBLISH ALLOWED" in text
 
@@ -374,7 +383,11 @@ def test_ok2_a_code_change_with_a_core_revision_bump_is_allowed(core):
     r = run_gate(core)
     text = out_of(r)
     assert r.returncode == 0, text
-    assert "invisible-core 18.1.0" in text
+    # PEP 503 makes the hyphen and underscore forms the SAME name, and the
+    # header now takes it from pyproject (one gate, three projects) instead of
+    # a hardcoded constant. The claim is that the project and its version are
+    # both stated - not which spelling.
+    assert re.search(r"invisible[-_]core 18\.1\.0", text), text[:200]
     assert "PUBLISH ALLOWED" in text
 
 
