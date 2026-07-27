@@ -201,6 +201,60 @@ def test_every_cpt_keyed_by_gpu_class_covers_every_class():
     assert not missing, "CPTs that do not cover every GPU class:\n  " + "\n  ".join(missing)
 
 
+def test_the_available_screen_rect_matches_what_the_engine_computes():
+    """The engine derives the available rect itself - `nsScreen.cpp:114` returns
+    `{0, 0, w, h - 48}`, "matches Windows default taskbar height at 100% DPI".
+    Python said 40, in the fallback AND in all 93 data rows, so every profile
+    REPORTED a 40px taskbar while the browser would report 48.
+
+    It hid because `avail_width`/`avail_height` are not emitted as prefs - the
+    engine owns them - so the wrong value never reached a page. It reached
+    `Profile.screen.avail_height`, which is public API and the obvious thing for
+    a doc example or a test to assert against.
+    """
+    from invisible_core import generate_profile
+    from invisible_core._fpforge._sampler import _TASKBAR_PX
+
+    assert _TASKBAR_PX == 48, "the engine's nsScreen.cpp uses 48; this must match it"
+    deltas = {
+        generate_profile(seed=s).screen.height
+        - generate_profile(seed=s).screen.avail_height
+        for s in range(300)
+    }
+    assert deltas == {48}, (
+        f"profiles report a taskbar of {sorted(deltas)} px while the engine "
+        f"computes {_TASKBAR_PX}")
+
+
+def test_no_pool_for_any_platform_carries_a_software_renderer():
+    """`test_gpu_pool_realism` covers the `win` list, which is the only one the
+    loader reads. This covers all three, because the day someone wires per-OS
+    personas is the day the other two go live - and `lin` carried two llvmpipe
+    entries at a combined 8.97%, seven times the mass of the Windows rasterizer
+    that was removed the day before."""
+    import re
+
+    software = re.compile(r"basic render|llvmpipe|softpipe|swiftshader|"
+                          r"mesa offscreen|virgl|vmware svga", re.I)
+    pool = json.loads((_DATA / "webgl_gpu_pool.json").read_text(encoding="utf-8"))
+    bad = [
+        (os_key, i, e["prefs"]["zoom.stealth.webgl.renderer"])
+        for os_key in ("win", "mac", "lin")
+        for i, e in enumerate(pool[os_key])
+        if software.search(e["prefs"]["zoom.stealth.webgl.renderer"] + " " + e.get("vendor", ""))
+    ]
+    assert not bad, (
+        f"software renderer(s) in a persona pool: {bad}. Replace the slot in "
+        f"place keeping its prob - deleting renormalises the draw")
+
+
+def test_every_pools_probability_mass_is_intact():
+    pool = json.loads((_DATA / "webgl_gpu_pool.json").read_text(encoding="utf-8"))
+    for os_key in ("win", "mac", "lin"):
+        total = sum(e["prob"] for e in pool[os_key])
+        assert abs(total - 1.0) < 0.02, f"{os_key}: mass is {total}"
+
+
 def test_every_class_the_pool_can_draw_is_a_declared_class():
     """Ties the pool to `_GPU_CLASSES`, which existed as a declaration that
     nothing read."""
