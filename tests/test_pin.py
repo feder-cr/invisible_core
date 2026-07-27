@@ -1,4 +1,4 @@
-"""The core-pin comparison (src/invisible_core/_pin.py).
+"""The core-pin comparison (src/invisible_core/pin.py).
 
 WHY THESE TESTS LOOK EXPENSIVE. The previous version of this suite monkeypatched
 probe_core, installed_core_version, recorded_core_version and editable_core_path,
@@ -9,7 +9,7 @@ the whole point of the check, because a clobbered site-packages is precisely the
 environment where the record is right and the files are wrong.
 
 So the fact-gathering functions are exercised against real site-packages layouts
-built under tmp_path: a real invisible_core package (this repo's own _pin.py and
+built under tmp_path: a real invisible_core package (this repo's own pin.py and
 _version.py, copied in), a real seal.json, real .dist-info directories with real
 Requires-Dist lines, and a real direct_url.json. importlib.metadata reads those
 the same way it reads an installed environment. Anything that has to import the
@@ -70,7 +70,7 @@ def make_core(
 ) -> Path:
     """A real-enough invisible_core under `site`.
 
-    _pin.py and _version.py are COPIES OF THE SHIPPED FILES, so the derivation
+    pin.py and _version.py are COPIES OF THE SHIPPED FILES, so the derivation
     under test is the real one: seal.json's tag number, plus CORE_REVISION out of
     _version.py, is what installed_core_version() has to report.
 
@@ -84,6 +84,12 @@ def make_core(
     if init_version is not None:
         init += f'__version__ = "{init_version}"\n'
     (pkg / "__init__.py").write_text(init, encoding="utf-8")
+    # BOTH files. The implementation is `pin.py` since 2026-07-27 and `_pin.py`
+    # is a two-line alias kept for consumers built against <= 18.6.0; a
+    # synthetic install that copies only one of them is not a shape any real
+    # install has. Copying the shipped files rather than writing a stub is the
+    # point of this fixture - the derivation under test must be the real one.
+    shutil.copy2(REAL_PKG / "pin.py", pkg / "pin.py")
     shutil.copy2(REAL_PKG / "_pin.py", pkg / "_pin.py")
     if with_version:
         text = (REAL_PKG / "_version.py").read_text(encoding="utf-8")
@@ -546,7 +552,11 @@ def test_the_escape_hatch_warns_instead_of_raising(tmp_path, monkeypatch):
 
 # ── the module keeps its own constraints ─────────────────────────────────────
 
-SOURCE = (REAL_PKG / "_pin.py").read_text(encoding="utf-8")
+# The IMPLEMENTATION, not the alias. `_pin.py` is two lines of
+# `sys.modules[__name__] = pin` since 2026-07-27; scanning it for the pip
+# seam found zero occurrences and passed nothing - a source gate pointed at
+# the wrong file reads exactly like a clean source.
+SOURCE = (REAL_PKG / "pin.py").read_text(encoding="utf-8")
 
 
 def test_every_pip_command_goes_through_the_one_seam():
