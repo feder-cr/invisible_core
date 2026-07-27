@@ -57,6 +57,18 @@ _IANA_TO_POSIX_TZ: Dict[str, str] = {
 }
 
 
+def tz_env(timezone: str) -> str:
+    """The value to put in ``TZ`` for an IANA zone.
+
+    PUBLIC since 18.5.0. It was private, so the wrapper kept its own byte-identical
+    copy of both this and the table - and the core's own comment admitted the table
+    was "copied verbatim from the wrapper". A private name is not a reason to
+    duplicate ten entries whose Phoenix row exists because getting it wrong made an
+    identification service deduce the wrong origin timezone.
+    """
+    return _IANA_TO_POSIX_TZ.get(timezone, timezone)
+
+
 def _tz_env(timezone: str) -> str:
     """POSIX TZ value for an IANA zone (falls back to the IANA name)."""
     return _IANA_TO_POSIX_TZ.get(timezone, timezone)

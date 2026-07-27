@@ -37,7 +37,16 @@ def pytest_configure(config):
     if not (_REPO / ".git").exists():
         return                       # not a dev checkout; nothing to compare against
 
-    import invisible_core
+    try:
+        import invisible_core
+    except Exception:
+        # NOT importable is not this guard's business. It broke `user-install.yml`
+        # on 2026-07-27 with `INTERNALERROR> ModuleNotFoundError`: that workflow
+        # collects from the checkout before the package is on the path, so an
+        # unconditional import here turned a guard into the thing that fails the
+        # run. A gate that breaks a run it was not asked about is worse than the
+        # bug it watches for.
+        return
 
     installed = pathlib.Path(invisible_core.__file__).resolve()
     expected = (_REPO / "src" / "invisible_core").resolve()

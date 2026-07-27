@@ -39,7 +39,7 @@ from ._headless import cloak_prefs, make_virtual_display
 from ._proxy import configure_proxy
 from .config import get_default_args, get_default_stealth_prefs
 from .constants import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
-from .launch import LaunchPlan, build_launch_env, build_launch_plan, write_user_js
+from .launch import tz_env, _IANA_TO_POSIX_TZ as IANA_TO_POSIX_TZ, LaunchPlan, build_launch_env, build_launch_plan, write_user_js
 
 # One headline version, and it is the honest one.
 #
@@ -100,6 +100,8 @@ __all__ = [
     "build_launch_plan",
     "LaunchPlan",
     "build_launch_env",
+    "tz_env",
+    "IANA_TO_POSIX_TZ",
     "write_user_js",
     # constants
     "BINARY_VERSION",

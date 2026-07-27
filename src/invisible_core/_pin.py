@@ -735,6 +735,42 @@ def repair_core(
             "not retried",
             shown, None, None)
 
+    # NEVER overwrite an editable install, and never guess that it is safe.
+    #
+    # This module runs `pip install --force-reinstall` from the first line of a
+    # consumer's `__init__`, so on a developer's machine it can replace their
+    # working tree with the published wheel - and it did, three times in one
+    # session on 2026-07-27. Twice it corrupted a measurement rather than merely
+    # being annoying: tests went red naming fixes that were present on disk, and
+    # a mutation run reported SURVIVED against a gate that was sound. Nothing
+    # said the package under test had been swapped.
+    #
+    # The check that could have stopped it already existed - a three-valued
+    # detector over four independent signals - but it lived in `__main__`, which
+    # is forbidden from installing anything. What guarded THIS command was one
+    # file read with two possible answers. The careful check protected the
+    # command that never runs.
+    #
+    # `safe_to_reinstall` is `state == NOT_EDITABLE`, not `state != EDITABLE`:
+    # every way the old check was defeated produced an ABSENCE of evidence, and
+    # that must not read as permission.
+    try:
+        from ._env import _dist_facts, _editable_of
+
+        verdict = _editable_of(_dist_facts(CORE_NAME))
+    except Exception:                      # a broken probe is not a licence
+        verdict = None
+    if verdict is not None and not verdict.safe_to_reinstall:
+        where = f" at {verdict.path}" if verdict.path else ""
+        return RepairResult(
+            False, False,
+            f"{CORE_NAME} is an EDITABLE install{where} ({verdict.why}), so the "
+            f"automatic repair would overwrite a working tree with a published "
+            f"wheel. Refusing. Fix the environment yourself - usually "
+            f"`pip install -e <path-to-{CORE_NAME}>` - or set {AUTOFIX_ENV}=off "
+            f"for the session",
+            shown, None, None)
+
     # Set BEFORE the attempt, both flags, so a crash, a hang killed from outside
     # or a failure that re-execs cannot come back through here.
     _REPAIR_ATTEMPTED = True
