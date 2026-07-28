@@ -940,9 +940,29 @@ def _verify_first_release(url: str) -> int:
     return EXIT_OK
 
 
+class _Parser(argparse.ArgumentParser):
+    """Argparse exits 2 on a usage error. In this gate 2 means EXIT_BROKEN.
+
+    So `version_gate.py chekc` and "the gate could not reach a verdict" were the
+    same number, and a caller reading the exit code could not tell a typo from a
+    broken gate. `EXIT_USAGE = 3` had been declared for exactly this and used
+    nowhere - open item 5 in `18-gate-inventory.md`, alongside the note that a
+    documented code which cannot happen is a false entry in the contract.
+
+    Wired rather than deleted, because the ambiguity is real: `doctor` already
+    uses 2 for "a check could not be made", and A3 in that same document warns
+    that anything treating 2 as an argparse error will misread it.
+    """
+
+    def error(self, message):                      # pragma: no cover - exits
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"{self.prog}: error: {message}\n")
+        raise SystemExit(EXIT_USAGE)
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:]) if argv is None else list(argv)
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="version_gate.py",
         description="Refuse to publish a core whose content changed but whose version did not.")
     p.add_argument("--project-root", default=str(DEFAULT_ROOT),

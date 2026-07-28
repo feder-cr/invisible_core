@@ -551,7 +551,17 @@ def engine_problems(ident: EngineIdentity, seal: Seal,
         p = _build_id_problem("platform.ini", ident.platform_build_id, expected)
         if p:
             probs.append(p)
-    where = "omni.ja" if ident.juggler_layout != "loose" else "the unpacked tree"
+    # Three layout values, three branches. This was
+    #     "omni.ja" if ident.juggler_layout != "loose" else "the unpacked tree"
+    # which folded `none` in with `omni.ja`, so a tree carrying NEITHER produced
+    # "no chrome/juggler/ in omni.ja" two lines below a note saying there is no
+    # omni.ja at all. The block contradicted itself, and this is the message a
+    # user pastes into an issue when their engine will not drive.
+    where = {
+        "omni.ja": "omni.ja",
+        "loose": "the unpacked tree",
+        "none": "this tree (which has no omni.ja either)",
+    }.get(ident.juggler_layout, f"this tree (layout {ident.juggler_layout!r})")
     if not ident.juggler_present:
         probs.append(f"no {JUGGLER_DIR_REL}/ in {where} (Playwright cannot drive this build)")
     elif ident.marked_entries < JUGGLER_MIN_MARKED:

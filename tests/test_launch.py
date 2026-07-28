@@ -21,7 +21,7 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_dl, "ensure_binary", lambda ver=None: "/fake/firefox")
     monkeypatch.setattr(_geo, "prepare_session_geo",
-                        lambda tz, proxy: SessionGeo("America/New_York", "1.2.3.4"))
+                        lambda tz, proxy: SessionGeo("America/New_York", "198.51.100.4"))
     monkeypatch.setattr(_geo, "resolve_session_locale", lambda ip, proxy: "en-US")
     monkeypatch.setattr(_fp, "generate_profile", lambda seed, pin=None: object())
     # include a float pref to exercise the serialization end to end
@@ -38,7 +38,7 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
     assert 'user_pref("zoom.stealth.screen.dpr", "1.25");' in text            # float -> string
     assert 'user_pref("toolkit.startup.max_resumed_crashes", -1);' in text    # no Safe Mode prompt
     assert 'user_pref("browser.sessionstore.resume_from_crash", false);' in text
-    assert plan.env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "1.2.3.4"
+    assert plan.env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.4"
 
 
 def test_write_user_js_emits_user_pref_lines(tmp_path):
@@ -65,10 +65,10 @@ def test_build_launch_env_no_font_env_but_webrtc():
     # so build_launch_env must NOT set any STEALTHFOX_FONTLIST/SYSTEMUI env - even
     # when legacy font prefs are passed. WebRTC egress + TZ are still wired.
     prefs = {"zoom.stealth.font.fontlist": "Arial,Calibri", "zoom.stealth.font.system_ui": "Segoe UI"}
-    env = build_launch_env(prefs, timezone="America/New_York", egress_ip="1.2.3.4", base_env={})
+    env = build_launch_env(prefs, timezone="America/New_York", egress_ip="198.51.100.4", base_env={})
     assert "STEALTHFOX_FONTLIST" not in env
     assert "STEALTHFOX_SYSTEMUI" not in env
-    assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "1.2.3.4"
+    assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.4"
     assert env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] == "1"
     assert env["TZ"]  # a POSIX TZ string was set
 

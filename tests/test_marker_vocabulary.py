@@ -326,3 +326,87 @@ def test_every_repo_runs_the_undefined_name_check():
             missing.append(f"{repo}: {rel} selects {sorted(selected)}, missing {absent}")
     assert not missing, (
         "an undefined name would reach main unchallenged in:\n  " + "\n  ".join(missing))
+
+
+def test_no_test_uses_a_globally_routable_placeholder_ip():
+    """`1.2.3.4` belongs to someone. RFC 5737 exists for this.
+
+    Fourteen uses across four files, in all three repos, as the stand-in for an
+    egress IP - open item 11. Not a leak: it is nobody's real address here. The
+    cost is the scanner. A secrets sweep that whitelists the documentation ranges
+    keeps flagging these forever, and a check whose output is always noise is one
+    that stops being read, which is how a real address eventually gets through.
+
+    192.0.2.0/24, 198.51.100.0/24 and 203.0.113.0/24 are reserved for exactly this
+    and can never route anywhere. The rest of these suites already used them; the
+    four files simply predated the convention.
+
+    An address is recognised by its OCTETS, not by being quoted. The first cut
+    required a quote either side, and `1.2.3.4` inside a proxy URL - which is how
+    `test_sx.py` used it - has quotes around the whole URL: the mutation putting
+    that one address back SURVIVED. Four octets in 0-255 is what an IP is.
+    """
+    import re
+
+    candidate = re.compile(r"(?<![\d.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\d.])")
+
+    def is_documentation_or_private(a, b, c, d):
+        if a in (0, 10, 127, 255):
+            return True
+        if a == 192 and b == 168:
+            return True
+        if a == 172 and 16 <= b <= 31:
+            return True
+        if (a, b, c) in ((192, 0, 2), (198, 51, 100), (203, 0, 113)):
+            return True
+        if a == 169 and b == 254:                      # link-local
+            return True
+        return False
+
+    def prose_lines(text):
+        """Line numbers covered by a docstring, derived with ast.
+
+        Comments are skipped by their `#`; a docstring needs parsing. This test's
+        OWN docstring names the address it is about, and the first version of the
+        check duly reported this file - a gate that cannot describe itself without
+        failing is one somebody will silence.
+        """
+        covered = set()
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return covered
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Module, ast.ClassDef,
+                                     ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = getattr(node, "body", None)
+            if not body or not isinstance(body[0], ast.Expr):
+                continue
+            val = body[0].value
+            if isinstance(val, ast.Constant) and isinstance(val.value, str):
+                covered.update(range(val.lineno, (val.end_lineno or val.lineno) + 1))
+        return covered
+
+    offenders = []
+    for repo in _REPOS:
+        tests = _RELEASE / repo / "tests"
+        if not tests.is_dir():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        for path in sorted(tests.rglob("test_*.py")):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            prose = prose_lines(text)
+            for i, line in enumerate(text.splitlines(), 1):
+                if line.lstrip().startswith("#") or i in prose:
+                    continue
+                for m in candidate.finditer(line):
+                    octets = tuple(int(x) for x in m.groups())
+                    if any(o > 255 for o in octets):   # not an address at all
+                        continue
+                    if is_documentation_or_private(*octets):
+                        continue
+                    offenders.append(f"{repo}/{path.name}:{i}: {m.group(0)}")
+    assert not offenders, (
+        "these tests use a globally routable address as a placeholder; use an RFC "
+        "5737 range (192.0.2.x, 198.51.100.x, 203.0.113.x) so a secrets scan can "
+        "whitelist them:" + chr(10) + "  " + (chr(10) + "  ").join(offenders))

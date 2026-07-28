@@ -526,6 +526,26 @@ def test_the_exit_codes_are_all_distinct(core):
     assert run_gate(core).returncode == 4                       # no memory
 
 
+def test_a_mistyped_command_is_not_reported_as_a_broken_gate(core):
+    """A typo and "the gate could not reach a verdict" were the same number.
+
+    Argparse exits 2 on a usage error, and 2 is EXIT_BROKEN here, so a CI step
+    reading the code could not tell `chekc` from a gate that fell over. EXIT_USAGE
+    was declared for this and used nowhere - open item 5 in
+    `18-gate-inventory.md`, whose own text about it was wrong too: it claimed the
+    module docstring documented the code, and the docstring never mentioned it.
+
+    Both shapes: an unknown subcommand and an unknown option, since argparse
+    reports them through different parsers.
+    """
+    for argv in (["chekc"], ["check", "--no-such-flag"]):
+        r = run_gate(core, *argv)
+        assert r.returncode == 3, (
+            f"{argv} exited {r.returncode}; 2 would be indistinguishable from "
+            f"EXIT_BROKEN and 0 would be worse\n" + out_of(r))
+        assert "PUBLISH ALLOWED" not in out_of(r)
+
+
 def test_an_unreadable_ledger_is_a_hard_failure_not_a_refusal(core):
     (core / "PUBLISHED.json").write_text("{not json", encoding="utf-8")
     r = run_gate(core)

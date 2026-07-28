@@ -191,28 +191,28 @@ def _install_fake_maxminddb(monkeypatch, record):
 @pytest.mark.unit
 def test_ip_to_timezone_reads_location_time_zone(monkeypatch):
     _install_fake_maxminddb(monkeypatch, {"location": {"time_zone": "Europe/Rome"}})
-    assert ip_to_timezone("1.2.3.4", "x.mmdb") == "Europe/Rome"
+    assert ip_to_timezone("198.51.100.4", "x.mmdb") == "Europe/Rome"
 
 
 @pytest.mark.unit
 def test_ip_to_timezone_ip_absent_raises(monkeypatch):
     _install_fake_maxminddb(monkeypatch, None)
     with pytest.raises(GeoTimezoneError):
-        ip_to_timezone("1.2.3.4", "x.mmdb")
+        ip_to_timezone("198.51.100.4", "x.mmdb")
 
 
 @pytest.mark.unit
 def test_ip_to_timezone_missing_zone_raises(monkeypatch):
     _install_fake_maxminddb(monkeypatch, {"location": {}})
     with pytest.raises(GeoTimezoneError):
-        ip_to_timezone("1.2.3.4", "x.mmdb")
+        ip_to_timezone("198.51.100.4", "x.mmdb")
 
 
 @pytest.mark.unit
 def test_ip_to_timezone_invalid_iana_raises(monkeypatch):
     _install_fake_maxminddb(monkeypatch, {"location": {"time_zone": "Not/AZone"}})
     with pytest.raises(GeoTimezoneError):
-        ip_to_timezone("1.2.3.4", "x.mmdb")
+        ip_to_timezone("198.51.100.4", "x.mmdb")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -364,14 +364,14 @@ def _country(monkeypatch, code):
 @pytest.mark.unit
 def test_ip_to_locale_follows_the_egress_country(monkeypatch, cc, locale):
     _country(monkeypatch, cc)
-    assert ip_to_locale("1.2.3.4", "x.mmdb") == locale
+    assert ip_to_locale("198.51.100.4", "x.mmdb") == locale
 
 
 @pytest.mark.unit
 def test_ip_to_locale_is_case_insensitive_about_the_country_code(monkeypatch):
     """MaxMind returns upper case; nothing guarantees a future DB will."""
     _country(monkeypatch, "it")
-    assert ip_to_locale("1.2.3.4", "x.mmdb") == "it-IT"
+    assert ip_to_locale("198.51.100.4", "x.mmdb") == "it-IT"
 
 
 @pytest.mark.parametrize("record", [
@@ -386,7 +386,7 @@ def test_ip_to_locale_falls_back_to_en_US(monkeypatch, record):
     implementation looks like - which is why it is asserted separately from the
     cases above rather than being the only thing asserted."""
     _install_fake_maxminddb(monkeypatch, record)
-    assert ip_to_locale("1.2.3.4", "x.mmdb") == "en-US"
+    assert ip_to_locale("198.51.100.4", "x.mmdb") == "en-US"
 
 
 @pytest.mark.unit

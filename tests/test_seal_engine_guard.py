@@ -407,6 +407,34 @@ def test_a_tree_with_neither_layout_is_refused(tmp_path, five_legs):
     assert "juggler" in str(exc.value).lower()
 
 
+def test_the_refusal_for_that_tree_does_not_contradict_itself(tmp_path, five_legs):
+    """It used to say "no chrome/juggler/ in omni.ja" about a tree with no omni.ja.
+
+    `where` was `"omni.ja" if layout != "loose" else "the unpacked tree"`, which
+    folds THREE layout values into two branches, and `none` landed on the omni.ja
+    side. So the same error block carried a note saying there is no omni.ja and a
+    problem line saying the juggler is missing from it - open item 6 in
+    `18-gate-inventory.md`, and the message a user pastes into an issue when
+    their engine will not drive.
+
+    Asserted as an absence, because that is what the defect was: the word must not
+    appear in the problem line for a tree that does not have one.
+    """
+    root = tmp_path / "neither"
+    entry = build_leg_tree(root, "firefox", build_id=LEG_BUILDS["linux-x86_64"], omni=False)
+    shutil.rmtree(root / "chrome")
+    assert read_engine_identity(entry).juggler_layout == "none"
+    with pytest.raises(EngineMismatch) as exc:
+        verify_engine(entry, five_legs, source="unit")
+    juggler_lines = [ln for ln in str(exc.value).splitlines()
+                     if "chrome/juggler" in ln and "no " in ln]
+    assert juggler_lines, str(exc.value)
+    for line in juggler_lines:
+        assert "omni.ja" not in line.replace("no omni.ja", ""), (
+            "the problem line still locates the missing juggler inside an omni.ja "
+            "this tree does not have:\n" + str(exc.value))
+
+
 # ------------------------------- the refusal carries its reason as data (D4)
 #
 # Two callers render ONE line out of a refusal: the adoption log line in
