@@ -25,6 +25,8 @@ installed copy has no siblings and no opinion about them.
 """
 from __future__ import annotations
 
+import ast
+import sys
 import tomllib
 from pathlib import Path
 
@@ -199,3 +201,92 @@ def test_a_repo_whose_suite_demands_armed_hooks_arms_them_in_ci():
         "passing over an empty set")
     assert not missing, "\n  ".join(["the CI does not arrange what the suite demands:"]
                                     + missing)
+
+
+# ------------- the install-e2e files must collect with only pytest present
+
+#: The workflow that runs a stranger's install, in each repo.
+_USER_INSTALL_WORKFLOW = ".github/workflows/user-install.yml"
+
+#: What the runner actually has. `user-install.yml` installs pip, pytest and
+#: packaging and NOTHING else, deliberately - the package under test goes into a
+#: venv the fixture builds from the index, and a second copy on the runner's path
+#: would mean every assertion read the wrong one.
+_ON_THE_RUNNER = {"pytest", "packaging", "pip"}
+
+_FIRST_PARTY = {"invisible_core", "invisible_playwright", "invisible_firefox"}
+
+
+def _install_e2e_files(root: Path) -> list[Path]:
+    """The test files that repo's user-install workflow names, read from the
+    workflow rather than guessed - a hand-kept list is a shorter list that
+    drifts, which is the failure mode this whole file exists for."""
+    import re
+
+    wf = root / _USER_INSTALL_WORKFLOW
+    if not wf.is_file():
+        return []
+    found = []
+    for hit in re.findall(r"tests/[A-Za-z0-9_./-]+\.py", wf.read_text(encoding="utf-8")):
+        path = root / hit
+        if path.is_file() and path not in found:
+            found.append(path)
+    return found
+
+
+def test_no_install_e2e_file_imports_a_package_the_runner_does_not_have():
+    """MEASURED 2026-07-28, on all three repos, twice in one day.
+
+    The venv helpers moved into `invisible_core.testing` so the three suites
+    could share them, and these files imported them from there. On a development
+    machine that is fine - an editable install is always on the path. On the
+    runner it is `ModuleNotFoundError` at COLLECTION, so the job goes red having
+    tested nothing, and the message names a module rather than the mistake.
+
+    The core hit it first and grew a guard inside its own install-e2e file, which
+    is where a guard has to live if it must run WITHOUT imports. That copy could
+    not be shared, so the two consumers hit the identical wall hours later.
+
+    This is the version that covers all of them: it runs in the ordinary suite,
+    where importing is fine, and PARSES the files. The list of files comes out of
+    each repo's workflow, so a file added to the job is covered the same day.
+
+    Skipped outside the workbench - an installed copy has no sibling repos.
+    """
+    checked, offenders = [], []
+    for repo in _REPOS:
+        root = _RELEASE / repo
+        if not root.is_dir():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        for path in _install_e2e_files(root):
+            checked.append(f"{repo}/{path.relative_to(root).as_posix()}")
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                # Module level only. Inside a function is fine, and is how these
+                # files reach the VENV's copy through a subprocess.
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+                if node.col_offset != 0:
+                    continue
+                names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                         else [node.module or ""])
+                for name in names:
+                    top = name.split(".")[0]
+                    if top in _FIRST_PARTY or (
+                            top not in _ON_THE_RUNNER
+                            and top not in sys.stdlib_module_names):
+                        offenders.append(
+                            f"{repo}/{path.relative_to(root).as_posix()} "
+                            f"line {node.lineno}: {name}")
+
+    assert checked, (
+        "no install-e2e file was found in any repo's user-install workflow. "
+        "Either the workflows stopped naming test files - in which case this "
+        "test is passing over an empty set - or the pattern that finds them "
+        "no longer matches")
+    assert not offenders, (
+        "these files import something the user-install runner does not have, at "
+        "module level:\n  " + "\n  ".join(offenders) +
+        f"\n\nThe runner has only {sorted(_ON_THE_RUNNER)}, so this is a "
+        f"collection error: the job reports failure having run nothing. Keep the "
+        f"helpers local in these files - the duplication is the point.")
