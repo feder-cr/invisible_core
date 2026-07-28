@@ -450,3 +450,160 @@ def test_every_user_install_workflow_waits_for_the_index_on_a_release():
                            f"would hang the job instead of failing it")
     assert not missing, "\n  ".join(
         ["a publish would race its own verification in:"] + missing)
+
+
+# ------------------- control characters, the self-inflicted one
+
+#: Bytes that have no business in a source or documentation file. Tab and the two
+#: newline bytes are excluded because they are legitimate whitespace; everything
+#: else in C0 is either invisible or actively breaks the file.
+_FORBIDDEN_BYTES = (set(range(0x00, 0x09)) | {0x0B, 0x0C}
+                    | set(range(0x0E, 0x20)))
+
+_TEXT_SUFFIXES = {".py", ".md", ".txt", ".yml", ".yaml", ".toml", ".json", ".cfg"}
+
+
+def test_no_tracked_text_file_carries_an_invisible_control_character():
+    r"""The defect this project keeps inflicting on itself.
+
+    Authoring a file through a shell heredoc turns backslash escapes into the
+    bytes they name. It happened FOUR times on 2026-07-28 alone:
+
+      * `\b` became 0x08 inside a regex in the wrapper's `test_readme_claims.py`,
+        so the pattern matched nothing and the test collected zero parameters;
+      * `\f` and `\t` became 0x0C and 0x09 inside three Windows paths in
+        `18-gate-inventory.md` and `80-decision-log.md`, where `C:\ff\source\...`
+        rendered as `C:` + a formfeed + `f\source` + a tab. They sat there for
+        DAYS reading as perfectly ordinary paths, in the row that told a reader
+        where the make_seal gate's known-bad input lived;
+      * and earlier the same week `\n` and `\0` broke four test files outright.
+
+    The formfeed case is the one that makes this worth a gate rather than a habit:
+    a corrupted path is INVISIBLE. It does not fail, it does not look wrong, and
+    the reader who follows it finds nothing and concludes the documentation is
+    unreliable. Python's own `splitlines()` even splits on 0x0C, so line numbers
+    reported by tooling stop matching the editor.
+
+    Zero violations across all three repos when this was written, so it is a gate
+    and not a cleanup. Scoped to text suffixes: a `.png` or a `.ttf` is full of
+    these bytes legitimately.
+    """
+    import subprocess
+
+    # The WORKBENCH docs folder is in scope, and that is not an afterthought: the
+    # three corrupted Windows paths that motivated this check were in
+    # `18-gate-inventory.md` and `80-decision-log.md`, which live there and in no
+    # published package. A gate scoped to the three repos would have missed every
+    # instance it was written for. Measured while writing it, and again ten minutes
+    # later, when the decision-log entry DESCRIBING the bug was itself written with
+    # a formfeed, a backspace and a NUL in it.
+    roots = [_RELEASE / repo for repo in _REPOS]
+    workbench_docs = _RELEASE.parent / "docs"
+    if workbench_docs.is_dir():
+        roots.append(workbench_docs)
+
+    offenders = []
+    for root in roots:
+        repo = root.name if root.name != "docs" else "workbench/docs"
+        if not root.is_dir():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        listing = subprocess.run(["git", "-C", str(root), "ls-files"],
+                                 capture_output=True, text=True, timeout=120)
+        assert listing.returncode == 0, listing.stderr
+        names = [n for n in listing.stdout.splitlines() if n.strip()]
+        assert names, f"{repo}: git tracks no files, so this check saw nothing"
+        for rel in names:
+            path = root / rel
+            if path.suffix.lower() not in _TEXT_SUFFIXES or not path.is_file():
+                continue
+            try:
+                blob = path.read_bytes()
+            except OSError:
+                continue
+            bad = sorted({b for b in blob if b in _FORBIDDEN_BYTES})
+            if bad:
+                line = blob[:blob.index(bytes([bad[0]]))].count(b"\n") + 1
+                offenders.append(
+                    f"{repo}/{rel} line ~{line}: "
+                    + ", ".join(f"0x{b:02X}" for b in bad))
+    assert not offenders, (
+        "these tracked text files contain invisible control characters, which is "
+        "what a shell heredoc does to a backslash escape:\n  "
+        + "\n  ".join(offenders) +
+        "\n\nA 0x0C inside a Windows path renders as a plausible path and points "
+        "nowhere. Rewrite the file with the Edit tool or read the text from a "
+        "file, never by embedding escapes in a heredoc.")
+
+
+def test_no_string_LITERAL_evaluates_to_a_control_character():
+    r"""The subtler half, and the one that caught this test's own docstring.
+
+    The check above reads file BYTES. A file can be byte-clean and still carry a
+    corrupted string: `"C:\ff\source"` in a non-raw literal is four characters of
+    path plus a FORMFEED, because Python resolves `\f` when it compiles. Nothing
+    is wrong with the bytes on disk; the value the program uses is wrong.
+
+    MEASURED while writing the byte check: its own docstring explained the bug
+    using `C:\ff\source\...` in a non-raw string, so the docstring a reader sees
+    contained 0x00, 0x08 and 0x0C. Python emitted one SyntaxWarning about `\s`
+    and said nothing about the three valid escapes, because `\f` and `\b` ARE
+    valid - they just never mean what a Windows path means.
+
+    So: no string literal in these suites may evaluate to a C0 control character
+    other than newline or tab. A Windows path wants a raw string or forward
+    slashes; a literal that genuinely needs a formfeed can spell it `chr(12)` and
+    say why.
+
+    Parsed rather than compiled: reading these files with `ast` gets the resolved
+    VALUE of every literal without importing anything.
+    """
+    import subprocess
+    import warnings
+
+    # Newline, tab and CARRIAGE RETURN. The first run flagged eight literals and
+    # every one was a deliberate CRLF: SDP is specified with CRLF line endings
+    # (`test_webrtc_realness.py`) and so is the checksum file format
+    # (`test_download.py`). A gate whose first output is eight false positives is
+    # one somebody switches off, so CR belongs here with the other two.
+    #
+    # What is left is the set no text format uses: NUL, backspace, vertical tab,
+    # formfeed and the rest of C0. Those only ever appear by accident.
+    allowed = {chr(10), chr(9), chr(13)}
+    offenders = []
+    for repo in _REPOS:
+        root = _RELEASE / repo
+        if not root.is_dir():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        listing = subprocess.run(["git", "-C", str(root), "ls-files", "*.py"],
+                                 capture_output=True, text=True, timeout=120)
+        assert listing.returncode == 0, listing.stderr
+        names = [n for n in listing.stdout.splitlines() if n.strip()]
+        assert names, f"{repo}: git tracks no Python files; this check saw nothing"
+        for rel in names:
+            path = root / rel
+            if not path.is_file():
+                continue
+            try:
+                with warnings.catch_warnings():
+                    # An invalid escape is a SyntaxWarning, and the point of this
+                    # test is that the VALID ones are the dangerous half.
+                    warnings.simplefilter("ignore", SyntaxWarning)
+                    tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+            except (OSError, SyntaxError):
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                    continue
+                bad = sorted({c for c in node.value
+                              if ord(c) < 0x20 and c not in allowed})
+                if bad:
+                    offenders.append(
+                        f"{repo}/{rel} line {node.lineno}: "
+                        + ", ".join(f"0x{ord(c):02X}" for c in bad))
+    assert not offenders, (
+        "these string literals evaluate to a control character, which is what a "
+        "backslash in a non-raw literal does to a Windows path:\n  "
+        + "\n  ".join(offenders) +
+        "\n\nUse a raw string, forward slashes, or chr() with a comment. The file "
+        "bytes look correct in every one of these, which is why the byte check "
+        "next door cannot see them.")
