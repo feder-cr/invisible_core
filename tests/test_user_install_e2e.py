@@ -18,12 +18,15 @@ release.
 """
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
-from invisible_core.testing import run_checked, throwaway_venv
 
 pytestmark = pytest.mark.e2e
 
@@ -31,11 +34,42 @@ DIST = "invisible-core"
 REPO = "invisible_core"
 
 
-# The venv mechanics live in invisible_core.testing: `_run` and `_venv_python`
-# were byte-identical here and in the other consumer, and the two fixtures had
-# already drifted on whether the install happens in the fixture or in the test -
-# same name, two meanings.
-_run = run_checked
+# LOCAL AND STAYING LOCAL. This is the one file in this repository that must
+# NOT import invisible_core.
+#
+# The whole point of the job that runs it is a clean environment where ONLY the
+# venv it builds has the package - the runner installs pytest and nothing else.
+# `from invisible_core.testing import ...` therefore fails at COLLECTION with
+# `ModuleNotFoundError: No module named 'invisible_core'`, which is what
+# happened on both legs on 2026-07-28 after the venv helpers were shared. It
+# passes on any development machine, where the editable install is on the path.
+#
+# `test_the_install_e2e_never_imports_the_package_under_test` keeps it that way.
+# The wrapper's test_release_e2e.py carries the same rule in prose and has since
+# the day it hit the same wall.
+def _run(cmd, *, timeout: int = 600, check: bool = True, env=None, cwd=None):
+    r = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
+                       timeout=timeout, env=env,
+                       cwd=str(cwd) if cwd is not None else None)
+    if check and r.returncode != 0:
+        raise AssertionError(
+            "{} exited {}\n--- stdout ---\n{}\n--- stderr ---\n{}".format(
+                " ".join(str(c) for c in cmd), r.returncode,
+                r.stdout[-3000:], r.stderr[-3000:]))
+    return r
+
+
+def _venv_python(venv):
+    bindir = "Scripts" if os.name == "nt" else "bin"
+    return Path(venv) / bindir / ("python.exe" if os.name == "nt" else "python")
+
+
+def _make_venv(target):
+    _run([sys.executable, "-m", "venv", target], timeout=300)
+    py = _venv_python(target)
+    assert py.exists(), "no venv python at {}".format(py)
+    _run([py, "-m", "pip", "install", "--upgrade", "pip", "--quiet"], timeout=300)
+    return py
 
 
 @pytest.fixture(scope="module")
@@ -43,8 +77,13 @@ def clean_venv():
     """An empty venv with nothing but pip, plus this distribution.
 
     Module-scoped: the install pulls the whole dependency tree."""
-    with throwaway_venv("invcore-e2e-", install=DIST) as py:
+    root = Path(tempfile.mkdtemp(prefix="invcore-e2e-"))
+    try:
+        py = _make_venv(root / "venv")
+        _run([py, "-m", "pip", "install", "--no-cache-dir", DIST], timeout=900)
         yield py
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_it_installs_from_the_index_with_nothing_else_present(clean_venv: Path):
@@ -203,3 +242,45 @@ def test_the_published_version_has_a_github_release():
     assert (payload.get("body") or "").strip(), (
         f"the release for v{version} has an empty body - a release page with no "
         f"notes is a tag with extra steps")
+
+
+def test_the_install_e2e_never_imports_the_package_under_test():
+    """This file must be COLLECTABLE without invisible_core installed.
+
+    The job that runs it installs pytest on the runner and nothing else, on
+    purpose: the package under test goes into a venv the fixture builds, from
+    the index, and a second copy on the runner's path would mean every
+    assertion read the wrong one.
+
+    So a module-level `import invisible_core...` here fails at COLLECTION with
+    `ModuleNotFoundError`, and the whole job goes red having tested nothing.
+    That happened on both legs on 2026-07-28, after the venv helpers were moved
+    into `invisible_core.testing` and this file started importing them from
+    there. It passes on any development machine, where the editable install is
+    always on the path - which is why an assertion is cheaper than remembering.
+
+    Parsed, not imported: importing this module to check it would be the very
+    thing under test.
+    """
+    import ast
+
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    offenders = []
+    for node in ast.walk(tree):
+        # Module level only. Inside a function is fine and is how the checks
+        # below reach the VENV's copy through a subprocess.
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        if node.col_offset != 0:
+            continue
+        names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                 else [node.module or ""])
+        for name in names:
+            if name.split(".")[0] == REPO:
+                offenders.append(f"line {node.lineno}: {name}")
+
+    assert not offenders, (
+        "this file imports the package it is testing the INSTALL of, at module "
+        "level:\n  " + "\n  ".join(offenders) +
+        "\nThe runner has no invisible_core, so this is a collection error and "
+        "the job reports failure having run nothing. Keep the helpers local.")
