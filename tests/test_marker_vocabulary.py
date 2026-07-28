@@ -130,3 +130,72 @@ def test_every_repo_refuses_a_run_in_which_nothing_ran():
     assert not missing, (
         "a repository's CI cannot tell a collapsed selection from a pass:\n  "
         + "\n  ".join(missing))
+
+
+# ------------------------ the CI must arrange what the suite asserts
+
+#: The workflow in each repo that runs the DEFAULT selection - the same mapping
+#: the collapse tripwire above uses, and for the same reason: an e2e or install
+#: job legitimately runs a handful of tests and arms nothing.
+_DEFAULT_SUITE_WORKFLOW = {
+    "invisible_core": ".github/workflows/ci.yml",
+    "invisible_playwright": ".github/workflows/tests.yml",
+    "invisible_firefox": ".github/workflows/ci.yml",
+}
+
+
+def test_a_repo_whose_suite_demands_armed_hooks_arms_them_in_ci():
+    """The assertion is shared; the thing that satisfies it was not.
+
+    MEASURED 2026-07-28. `assert_hooks_are_armed` moved into
+    `invisible_core.testing` so that all three repos could make the claim, and
+    all three began making it. Only `invisible_core`'s workflow ran
+    `install_hooks.py` - it had needed that step since the day its own version of
+    the test was written. So the wrapper and the manager went red on every push,
+    on all four matrix legs, with a message about `core.hooksPath` that reads
+    like a developer's mistake rather than a missing CI step.
+
+    A GitHub checkout IS a git work tree, which is why the helper's "skip outside
+    a git checkout" guard cannot cover this: the honest arrangement is for CI to
+    do what a developer does once, not for the assertion to quietly excuse
+    itself. Arming it on the runner also means `install_hooks.py` is exercised on
+    every leg instead of only on the one machine that ever ran it by hand.
+
+    This test is the comparison that did not exist: whoever adds the assertion to
+    a fourth repo gets told about the step in the same run.
+    """
+    import re
+
+    demanded, armed, missing = [], [], []
+    for repo in _REPOS:
+        root = _RELEASE / repo
+        if not root.is_dir():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        tests_dir = root / "tests"
+        wants = any(
+            "assert_hooks_are_armed" in path.read_text(encoding="utf-8", errors="ignore")
+            for path in tests_dir.rglob("test_*.py")) if tests_dir.is_dir() else False
+        if not wants:
+            continue
+        demanded.append(repo)
+        wf = root / _DEFAULT_SUITE_WORKFLOW[repo]
+        if not wf.is_file():
+            missing.append(f"{repo}: {_DEFAULT_SUITE_WORKFLOW[repo]} does not exist")
+            continue
+        text = wf.read_text(encoding="utf-8")
+        # Either spelling: the core checks first and installs on failure, the
+        # consumers just install. What matters is that the step is there.
+        if re.search(r"install_hooks\.py", text):
+            armed.append(repo)
+        else:
+            missing.append(
+                f"{repo}: its suite calls assert_hooks_are_armed but "
+                f"{_DEFAULT_SUITE_WORKFLOW[repo]} never runs install_hooks.py, so "
+                f"every CI run fails on core.hooksPath being unset")
+
+    assert demanded, (
+        "no repo's suite asserts the hooks are armed any more. If that assertion "
+        "was deliberately dropped, delete this test with it - otherwise it is "
+        "passing over an empty set")
+    assert not missing, "\n  ".join(["the CI does not arrange what the suite demands:"]
+                                    + missing)
