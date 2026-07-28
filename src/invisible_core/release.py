@@ -554,6 +554,12 @@ def _ledger_path_for(args) -> Path:
 
 
 def _index_url_for(args) -> str:
+    """The index for THIS project, unless the caller named another.
+
+    Reads the module global, which `main()` rebinds from the resolved
+    distribution name. The flag's own default is None on purpose - see the
+    comment where it is declared.
+    """
     return getattr(args, "index_json_url", None) or DEFAULT_INDEX_JSON_URL
 
 
@@ -956,10 +962,22 @@ def main(argv=None) -> int:
                         help="state that nothing has ever been published. Only legal "
                              "against an empty ledger, only ever once, and always "
                              "cross-checked against the index.")
-        sp.add_argument("--index-json-url", default=DEFAULT_INDEX_JSON_URL,
-                        help=f"the index JSON API to cross-check against "
-                             f"(default: {DEFAULT_INDEX_JSON_URL}). Point it at the "
-                             f"index a --repository upload actually lands on.")
+        # default=None, NOT the module constant. The parser is built before
+        # main() resolves which project this is, so a default captured here is
+        # invisible-core's URL forever - and `_index_url_for` prefers a non-None
+        # args value over the resolved one. Measured 2026-07-28 on the manager:
+        # `check --verify-index` fetched the CORE's index and reported "the
+        # index serves 8 version(s) of invisible_firefox that the ledger does
+        # not record: 18.0.0 ... 18.7.0". Core versions, named as the manager's.
+        # Both consumers' index cross-check had never asked about them at all.
+        #
+        # Same shape as the BINARY_VERSION default-argument bug this file's
+        # meta-rule is about: a constant bound once, at definition time.
+        sp.add_argument("--index-json-url", default=None,
+                        help="the index JSON API to cross-check against "
+                             "(default: this project's own, derived from its "
+                             "pyproject name). Point it at the index a "
+                             "--repository upload actually lands on.")
 
     c = sub.add_parser("check", help="the gate (default)")
     _gate_flags(c)
@@ -990,6 +1008,10 @@ def main(argv=None) -> int:
     except GateBroken as exc:
         print(f"GATE BROKEN: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    # PEP 503: the index normalises "_" to "-". Building the URL from the raw
+    # pyproject name works because PyPI redirects, but every message printed
+    # from DIST_NAME then spells the package a way no user typed.
+    DIST_NAME = DIST_NAME.replace("_", "-")
     DEFAULT_INDEX_JSON_URL = f"https://pypi.org/pypi/{DIST_NAME}/json"
 
     try:

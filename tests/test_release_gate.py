@@ -1020,3 +1020,54 @@ def test_the_default_run_builds_twice_and_the_build_is_reproducible(published_ba
     r = subprocess.run(cmd, capture_output=True, text=True)
     assert r.returncode == 0, out_of(r)   # exit 2 here would mean not reproducible
     assert json.loads(r.stdout)["version"] == "18.0.0"
+
+
+def test_the_index_cross_check_asks_about_THIS_project(monkeypatch):
+    """One gate, three projects - and it asked the wrong index for two of them.
+
+    `--index-json-url` declared `default=DEFAULT_INDEX_JSON_URL`, evaluated when
+    the parser is BUILT, which is before `main()` resolves which project this
+    is. So the flag always arrived non-None holding invisible-core's URL, and
+    `_index_url_for` prefers a non-None args value over the resolved global.
+
+    Measured 2026-07-28 running `check --verify-index` in the manager:
+
+        RELEASE REFUSED: the index serves 8 version(s) of invisible_firefox
+        that the ledger does not record: 18.0.0 ... 18.7.0
+
+    Those are CORE versions, reported as the manager's. Neither consumer's
+    index cross-check had ever asked about its own package.
+
+    Same shape as the `BINARY_VERSION` default-argument bug this file's
+    meta-rule is about: a constant bound once, at definition time.
+
+    Driven at `_index_url_for`, not through a whole gate run: which URL the
+    gate WOULD use must not depend on ledger state, and for a project whose
+    current version is already published byte-identically the gate exits before
+    the cross-check and the assertion would pass over nothing.
+    """
+    import invisible_core.release as R
+
+    seen: list[str] = []
+    monkeypatch.setattr(R, "cmd_check",
+                        lambda args: (seen.append(R._index_url_for(args)), 0)[1])
+
+    for root, expect in ((REPO_ROOT, "invisible-core"),
+                         (REPO_ROOT.parent / "invisible_firefox", "invisible-firefox"),
+                         (REPO_ROOT.parent / "invisible_playwright", "invisible-playwright")):
+        if not (root / "pyproject.toml").is_file():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        seen.clear()
+        R.main(["--project-root", str(root), "check", "--verify-index"])
+        assert seen, f"{root.name}: the gate never resolved an index URL"
+        url = seen[0]
+        assert f"/pypi/{expect}/" in url, (
+            f"{root.name} would cross-check against {url} - a gate that asks "
+            f"another package's index answers confidently about the wrong thing")
+
+    # And an explicit flag still wins, because a --repository upload lands on
+    # another index and has to be checkable against it.
+    seen.clear()
+    R.main(["--project-root", str(REPO_ROOT), "check",
+            "--index-json-url", "https://example.invalid/pypi/x/json"])
+    assert seen and seen[0] == "https://example.invalid/pypi/x/json", seen

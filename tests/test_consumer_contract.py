@@ -72,19 +72,19 @@ CONTRACT = {
     "invisible_core._fpforge": {
         "Profile", "_network", "_sampler", "generate_profile", "profile",
     },
-    "invisible_core._pin": {
+    "invisible_core.constants": {
+        "BINARY_VERSION",
+    },
+    "invisible_core.download": {
+        "cache_root", "clear_cache", "engine_status", "ensure_binary",
+    },
+    "invisible_core.pin": {
         "AUTOFIX_ENV", "CORE_NAME", "PinDeclaration", "Requirement",
         "SKIP_ENV", "assert_core_pin", "canonical_requirement",
         "declared_core_pin", "editable_core_path", "enforce_core_pin",
         "installed_core_version", "normalise_name", "parse_requirement",
         "pin_declaration", "pin_from_requirements", "pin_problem",
         "pin_report", "recorded_core_version", "repair_core",
-    },
-    "invisible_core.constants": {
-        "BINARY_VERSION",
-    },
-    "invisible_core.download": {
-        "cache_root", "clear_cache", "engine_status", "ensure_binary",
     },
     "invisible_core.process": {
         "JobObjectGuard", "LifetimeGuard", "NullGuard", "SessionToken",
@@ -162,18 +162,20 @@ def test_the_private_modules_in_the_contract_are_named_as_such():
     A module with a leading underscore tells a reader of THIS package that they
     are free to change it. When a consumer imports from it, they are not.
 
-    It was 23 names across three private modules on 2026-07-27. The rename to
-    `pin` was correct and stands in THIS package, but both consumers had to be
-    reverted to `_pin` on 2026-07-28: an exact pin means they may only use what
-    the INDEX has, and the rename carried no version bump. So the count is 25
-    again until a core release ships `pin.py` and the pins move. What remains is `_fpforge` (the sampler package, aliased wholesale by
+    It was 23 names across three private modules on 2026-07-27, briefly 25 again
+    on 2026-07-28 when both consumers had to be reverted to `_pin` - an exact
+    pin means they may only use what the INDEX has, and the rename carried no
+    version bump. Publish, move the pin, then use the name: all three happened
+    and it is 6 across two now. What remains is `_fpforge` (the sampler,
+    aliased wholesale by the wrapper's own shim) and `__main__` (the CLI the
+    wrapper's `cli` delegates to). Both real, both small. What remains is `_fpforge` (the sampler package, aliased wholesale by
     the wrapper's own back-compat shim) and `__main__` (the CLI entry point the
     wrapper's `cli` delegates to). Both are real and both are small; this test
     is what stops the number climbing back without somebody deciding to.
     """
     private = {m: len(n) for m, n in CONTRACT.items()
                if m.split(".")[-1].startswith("_")}
-    assert private == {'invisible_core._fpforge': 5, 'invisible_core.__main__': 1, 'invisible_core._pin': 19}, (
+    assert private == {'invisible_core._fpforge': 5, 'invisible_core.__main__': 1}, (
         f"the set of PRIVATE modules the consumers depend on changed: {private}.\n"
         "If it grew, a refactor that looks internal now breaks two published "
         "packages. If it shrank, update this test - that is progress worth "
