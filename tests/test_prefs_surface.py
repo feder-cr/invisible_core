@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import sys
 
 import pytest
 
@@ -113,8 +114,101 @@ def test_two_seeds_differ_in_the_fields_that_identify_a_machine():
 _FF_SRC = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", "C:/ff/source"))
 
 
+#: Where a pref literal can live. Both search paths use this one list.
+_SOURCE_GLOBS = ("*.cpp", "*.h", "*.js", "*.jsm", "*.mjs", "*.yaml", "*.idl")
+
+_PREF_LITERAL = r"zoom[._]stealth[._][A-Za-z0-9_.]+"
+
+
+def _normalise(hits) -> set[str]:
+    """C++ StaticPrefs mangles dots to underscores; keep both spellings."""
+    found: set[str] = set()
+    for hit in hits:
+        found.add(hit.replace("_stealth_", ".stealth.").replace("zoom_", "zoom."))
+        found.add(hit)
+    return found
+
+
+def _names_via_git() -> set[str] | None:
+    """Ask git for the literals. None when the tree is not a git work tree.
+
+    WHY THIS EXISTS. The version below walks the tree in Python, and on the
+    workbench that is `C:/ff/source`: **412,691 files, 132,465 of them matching
+    the extension list, 0.86 GB to decode.** Measured 2026-07-28: **189 s with a
+    warm file cache, and over TEN MINUTES cold** - one test costing more wall
+    clock than the other 806 put together, in the suite the core's pre-push hook
+    runs. The cost is not the regex, it is 132,465 individual file opens on
+    Windows, each one seen by the on-access scanner. `git grep` over the same
+    globs answers in **8 s**.
+
+    A twenty-minute pre-push gate is a gate people learn to push past, so the
+    speed is the correctness issue here, not a nicety.
+
+    The two paths were compared, not assumed equivalent: with the git path
+    disabled the suite gives the identical verdict on the workbench tree, only
+    slower.
+
+    It is also a STRICTER question, not a looser one. git sees tracked files plus
+    untracked-and-not-ignored ones, so what it drops relative to the filesystem
+    walk is exactly what `.gitignore` covers - `obj-*`, which is GENERATED from
+    the tree it is being compared against. A name found only in build output
+    cannot be a name the source reads. Fewer names found means more prefs
+    reported missing, so any error this introduces fails closed.
+    """
+    import subprocess
+
+    try:
+        probe = subprocess.run(
+            ["git", "-C", str(_FF_SRC), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(_FF_SRC), "grep", "--untracked", "-hoIE",
+             _PREF_LITERAL, "--", *_SOURCE_GLOBS],
+            capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # git grep exits 1 for "no matches". In a tree that has StaticPrefList.yaml
+    # - which is what gates this whole test - no matches means the invocation is
+    # wrong, not that the engine reads no prefs. Fall back rather than hand back
+    # an empty set that would report every pref as dead.
+    if out.returncode not in (0, 1) or not out.stdout.strip():
+        return None
+    return _normalise(out.stdout.split())
+
+
+def _names_by_walking() -> set[str]:
+    """The fallback: read the tree from Python. Slow - see `_names_via_git`."""
+    import re
+
+    pattern = re.compile(_PREF_LITERAL)
+    suffixes = {g[1:] for g in _SOURCE_GLOBS}
+    hits: list[str] = []
+    for path in _FF_SRC.rglob("*"):
+        if path.suffix not in suffixes:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if "zoom" not in text:
+            continue
+        hits.extend(pattern.findall(text))
+    return _normalise(hits)
+
+
+#: The search costs 8 seconds and two tests want the same answer, so it is
+#: memoised - but on `_FF_SRC`, not on nothing, because two tests below point
+#: `_FF_SRC` at throwaway trees and must not be served the workbench's answer.
+_READABLE_CACHE: dict[pathlib.Path, frozenset] = {}
+
+
 def _names_the_binary_reads() -> set[str]:
-    """Every `zoom.stealth.*` string literal anywhere in the Firefox tree.
+    """Every `zoom.stealth.*` string literal in the Firefox tree.
 
     NOT just StaticPrefList.yaml. A pref read from JS with
     `getBoolPref(name, default)` needs no static declaration and works fine -
@@ -123,24 +217,10 @@ def _names_the_binary_reads() -> set[str]:
     reads perfectly well. Searching for the literal is the honest definition of
     "the binary reads this".
     """
-    import re
-
-    found: set[str] = set()
-    pattern = re.compile(r"zoom[._]stealth[._][A-Za-z0-9_.]+")
-    for path in _FF_SRC.rglob("*"):
-        if path.suffix not in {".cpp", ".h", ".js", ".jsm", ".mjs", ".yaml", ".idl"}:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        if "zoom" not in text:
-            continue
-        for hit in pattern.findall(text):
-            # C++ StaticPrefs mangles dots to underscores; normalise both ways.
-            found.add(hit.replace("_stealth_", ".stealth.").replace("zoom_", "zoom."))
-            found.add(hit)
-    return found
+    key = _FF_SRC
+    if key not in _READABLE_CACHE:
+        _READABLE_CACHE[key] = frozenset(_names_via_git() or _names_by_walking())
+    return set(_READABLE_CACHE[key])
 
 
 @pytest.mark.skipif(
@@ -166,6 +246,77 @@ def test_every_stealth_pref_emitted_is_one_the_binary_reads():
     assert not missing, (
         "these prefs are emitted but appear nowhere in the engine source, so "
         f"they are no-ops that look like working spoofs: {missing}")
+
+
+@pytest.mark.skipif(
+    not (_FF_SRC / "modules" / "libpref" / "init" / "StaticPrefList.yaml").is_file(),
+    reason="no Firefox source tree beside this checkout",
+)
+def test_the_cross_check_would_actually_report_a_dead_pref():
+    """Its known-bad input, and the reason it needs one.
+
+    The check above passes when nothing is wrong, which is also what it does if
+    `_names_the_binary_reads()` returns everything - and the search moved to
+    `git grep` on 2026-07-28 for speed, so "the new search path is too generous"
+    is now a way for this gate to go quietly vacuous. A fabricated name must come
+    back absent, and the real ones present, or the search is answering the wrong
+    question.
+    """
+    readable = _names_the_binary_reads()
+    assert readable, "the search found no pref literals at all in the engine tree"
+    invented = "zoom.stealth.this_pref_was_invented_by_a_test"
+    assert invented not in readable, (
+        "a name that exists nowhere in the engine was reported as readable, so "
+        "the cross-check cannot fail and every emitted pref looks alive")
+    # And a spot-check in the other direction: hw_seed is read from three C++
+    # sites, so a search that misses it is missing real reads.
+    assert ("zoom.stealth.fpp.hw_seed" in readable
+            or "zoom_stealth_fpp_hw_seed" in readable), (
+        "the search missed zoom.stealth.fpp.hw_seed, which three C++ sites read; "
+        "it is under-reporting, and every pref will look dead")
+
+
+def test_the_git_search_refuses_an_empty_answer_instead_of_returning_one(tmp_path,
+                                                                        monkeypatch):
+    """An empty result must fall back, never be handed on as "nothing is read".
+
+    A git invocation that stops matching - a glob typo, a git version that
+    spells a flag differently - exits 0 or 1 with no output. Returning that
+    empty set makes EVERY emitted pref look dead, which is a wall of false
+    failures; the shape to avoid is the opposite one, where an empty set is
+    treated as a clean answer. Either way the caller must not receive it.
+    """
+    import subprocess
+
+    repo = tmp_path / "empty-tree"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    (repo / "nothing.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys.modules[__name__], "_FF_SRC", repo)
+    assert _names_via_git() is None, (
+        "a tree with no pref literals produced a non-None result; the caller "
+        "would use it as the readable set and report every pref as dead")
+
+
+def test_the_git_search_is_not_silently_skipping_the_tree(tmp_path, monkeypatch):
+    """And the positive half: a tree that DOES carry a literal is read.
+
+    Without this, the test above is satisfied by a `_names_via_git` that always
+    returns None - which would restore the ten-minute walk while every test
+    stayed green.
+    """
+    import subprocess
+
+    repo = tmp_path / "one-hit"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    (repo / "probe.cpp").write_text(
+        'Preferences::GetBool("zoom.stealth.fpp.hw_seed", false);\n', encoding="utf-8")
+
+    monkeypatch.setattr(sys.modules[__name__], "_FF_SRC", repo)
+    found = _names_via_git()
+    assert found and "zoom.stealth.fpp.hw_seed" in found, found
 
 
 # ── hw_seed doubles as an off-switch, so it must never be zero ──────────────
