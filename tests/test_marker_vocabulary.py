@@ -410,3 +410,43 @@ def test_no_test_uses_a_globally_routable_placeholder_ip():
         "these tests use a globally routable address as a placeholder; use an RFC "
         "5737 range (192.0.2.x, 198.51.100.x, 203.0.113.x) so a secrets scan can "
         "whitelist them:" + chr(10) + "  " + (chr(10) + "  ").join(offenders))
+
+
+def test_every_user_install_workflow_waits_for_the_index_on_a_release():
+    """The most expensive kind of red: one that looks like the real defect.
+
+    `user-install.yml` runs on `release:`, which fires seconds after the upload,
+    and PyPI does not serve a new version to pip immediately. MEASURED
+    2026-07-28: `invisible-firefox` 0.2.6 was uploaded, the release created about
+    forty seconds later, and the job's `pip install` still resolved 0.2.5 - so it
+    reported a forgotten publish that had happened two minutes earlier, which is
+    exactly the failure this workflow exists to catch. Indistinguishable.
+
+    The wait lives in the workflow rather than in the four install-e2e test files:
+    the race only exists on that one event, and those files may not import a
+    shared helper (the runner has no invisible_core - see the gate above), so a
+    Python version would be four copies of a poll loop.
+
+    Two properties, not one. It must be there, and it must be BOUNDED: an
+    unbounded wait converts a genuinely forgotten publish from a red run into a
+    job that hangs until the runner's own timeout, which is worse than the flake.
+    """
+    import re
+
+    missing = []
+    for repo in _REPOS:
+        path = _RELEASE / repo / ".github" / "workflows" / "user-install.yml"
+        if not path.is_file():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        text = path.read_text(encoding="utf-8")
+        if "wait for the index" not in text:
+            missing.append(f"{repo}: user-install.yml never waits for the index")
+            continue
+        if "github.event_name == 'release'" not in text:
+            missing.append(f"{repo}: the wait is not scoped to the release event, so "
+                           f"a scheduled run would poll for a real absence")
+        if not re.search(r"deadline\s*=\s*time\.monotonic\(\)\s*\+\s*\d+", text):
+            missing.append(f"{repo}: the wait has no deadline; a forgotten publish "
+                           f"would hang the job instead of failing it")
+    assert not missing, "\n  ".join(
+        ["a publish would race its own verification in:"] + missing)
