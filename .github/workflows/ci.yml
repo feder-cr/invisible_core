@@ -32,6 +32,21 @@ jobs:
         # A fresh clone has no core.hooksPath, and tests/test_release_wiring.py
         # says so. Do here what a developer does once.
         run: python scripts/install_hooks.py
+
+      - name: undefined names and duplicate definitions
+        # F821 (undefined name) and F811 (redefinition) only. Not a style pass:
+        # these two are the rules that catch a name that cannot resolve, which
+        # `from __future__ import annotations` hides in an annotation and which
+        # a suite only finds if it happens to execute that line. Both bit on
+        # 2026-07-28 - a `throwaway_venv` used and imported nowhere took a
+        # user-install job red at RUNTIME, and six annotations named a type that
+        # was defined in no module at all.
+        #
+        # Zero violations in all three repos when this was added, so it is a
+        # gate rather than a cleanup backlog. Keep it that way.
+        run: |
+          python -m pip install --quiet ruff
+          python -m ruff check --select F821,F811 --no-cache --output-format concise .
       # -rs prints WHY anything skipped, so a skip is readable in the log
       # instead of being indistinguishable from a pass.
       - name: Run the suite

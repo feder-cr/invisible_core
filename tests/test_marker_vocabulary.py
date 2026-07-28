@@ -290,3 +290,39 @@ def test_no_install_e2e_file_imports_a_package_the_runner_does_not_have():
         f"\n\nThe runner has only {sorted(_ON_THE_RUNNER)}, so this is a "
         f"collection error: the job reports failure having run nothing. Keep the "
         f"helpers local in these files - the duplication is the point.")
+
+
+def test_every_repo_runs_the_undefined_name_check():
+    """F821 and F811 in CI, in all three, or the class comes straight back.
+
+    Both rules earned their place on 2026-07-28. `throwaway_venv` was used at one
+    line of the manager's install e2e and imported nowhere, which took that job
+    red at RUNTIME - after a parse-level guard had passed it, because the name
+    resolves fine on any machine where the shared helper is importable. And six
+    annotations in the wrapper named `Renderer`, a type defined in no module in
+    the repository: harmless only because `from __future__ import annotations`
+    never evaluates an annotation, so nothing ever tried to resolve it.
+
+    Neither is a style question and neither is findable by running tests, which
+    is why this is the pair rather than a full lint config. There were ZERO
+    violations in all three repos when the step went in, so it is a gate and not
+    a backlog - if it ever starts failing, fix the name, do not widen the select.
+    """
+    import re
+
+    missing = []
+    for repo, rel in _DEFAULT_SUITE_WORKFLOW.items():
+        path = _RELEASE / repo / rel
+        if not path.is_file():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        text = path.read_text(encoding="utf-8")
+        m = re.search(r"ruff check[^\n]*--select\s+(\S+)", text)
+        if not m:
+            missing.append(f"{repo}: {rel} never runs ruff check --select")
+            continue
+        selected = set(m.group(1).split(","))
+        absent = sorted({"F821", "F811"} - selected)
+        if absent:
+            missing.append(f"{repo}: {rel} selects {sorted(selected)}, missing {absent}")
+    assert not missing, (
+        "an undefined name would reach main unchallenged in:\n  " + "\n  ".join(missing))
