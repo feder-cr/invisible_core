@@ -43,4 +43,17 @@ Which surfaces a browser fingerprint is made of, what each one gives away, and w
 consistency between them matters more than any single value, is written up at
 **[feder-cr.github.io/invisible_playwright](https://feder-cr.github.io/invisible_playwright/)**.
 Those pages are about the problem, not about this package, and several of them
-record something we got wrong first.
+record something we got wrong first. A few that document the exact fields this
+package generates:
+
+- [Pinning fingerprint fields](https://github.com/feder-cr/invisible_playwright/blob/main/docs/pinning.md) -
+  how `pin=` interacts with the Bayesian sampler, and which combinations it refuses
+  because they don't occur on real hardware.
+- [How to make Linux and macOS report real Windows fonts](https://github.com/feder-cr/invisible_playwright/blob/main/docs/bundled-fonts-cross-platform.md) -
+  the font side of `generate_profile`, and why the family list is bundled rather than
+  sampled from the host.
+- [Canvas and WebGL fingerprints, identical across OSes](https://github.com/feder-cr/invisible_playwright/blob/main/docs/canvas-webgl-cross-platform-consistency.md) -
+  why the same seed produces a byte-identical hash regardless of what's actually
+  running underneath.
+- [Playwright timezone does not match the proxy IP](https://github.com/feder-cr/invisible_playwright/blob/main/docs/timezone-proxy-mismatch.md) -
+  the surfaces this package's geo/timezone resolution has to keep in agreement.
