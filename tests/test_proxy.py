@@ -165,13 +165,27 @@ def test_cp13_socks_scheme_is_case_insensitive():
 
 
 @pytest.mark.unit
-def test_cp14_socks_without_port_dropped_silently():
+def test_cp14_socks_without_port_is_refused_not_dropped():
+    """This test asserted the opposite until 2026-08-01, and it was wrong.
+
+    A SOCKS server with no port wrote no `network.proxy.*` pref and returned
+    None, which the caller reads as "SOCKS handled, Playwright needs nothing".
+    The session then went out on the host's own address while the caller
+    believed it was proxied. Silent, and for this package the worst outcome
+    available: the browser launches, the page loads, the IP is wrong.
+
+    The two parsers disagreed as well - `_geo` builds `socks5h://host` from the
+    same dict and gives it to requests - so a malformed endpoint could leave one
+    half of a session proxied and the other half not.
+
+    Refusing costs a caller with a typo an exception at launch. That is the
+    trade, and it is the right way round.
+    """
     prefs = {}
-    result = configure_proxy({"server": "socks5://hostonly"}, prefs)
-    assert result is None
-    # Malformed input drops silently - no mutations.
-    assert "network.proxy.type" not in prefs
-    assert "network.proxy.socks" not in prefs
+    with pytest.raises(ValueError) as exc:
+        configure_proxy({"server": "socks5://hostonly"}, prefs)
+    assert "no port" in str(exc.value)
+    assert prefs == {}, "a refused proxy must not leave half its prefs behind"
 
 
 @pytest.mark.unit
@@ -276,3 +290,27 @@ def test_socks_non_numeric_port_raises_value_error():
     prefs = {}
     with pytest.raises(ValueError):
         configure_proxy({"server": "socks5://host:notaport"}, prefs)
+
+
+@pytest.mark.unit
+def test_the_two_proxy_parsers_agree_on_what_is_usable():
+    """One dict, two readers, and nothing compared them.
+
+    `configure_proxy` writes the browser's prefs; `_geo._proxies_for` builds the
+    requests URL for the egress lookup. A dict that one accepts and the other
+    rejects means half a session is proxied - which is what a portless SOCKS
+    endpoint used to produce.
+    """
+    from invisible_core import _geo
+
+    for server in ("socks5://hostonly", "socks4://hostonly", "socks://hostonly"):
+        proxy = {"server": server}
+        with pytest.raises(ValueError):
+            configure_proxy(proxy, {})
+        with pytest.raises(ValueError):
+            _geo._proxies_for_requests(proxy)
+
+    for server in ("socks5://host:1080", "http://host:8080", "https://host:8080"):
+        proxy = {"server": server}
+        configure_proxy(proxy, {})          # must not raise
+        assert _geo._proxies_for_requests(proxy)     # must produce a usable URL

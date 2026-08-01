@@ -61,7 +61,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-mock>=3", "responses>=0.24", "build>=1"]
+dev = ["pytest>=7", "pytest-mock>=3", "responses>=0.24", "build>=1", "ruff>=0.6"]
 
 [project.scripts]
 invisible-core = "invisible_core.__main__:main"

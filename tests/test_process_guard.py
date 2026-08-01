@@ -192,3 +192,56 @@ def test_bind_does_not_wait_out_the_whole_deadline_once_the_tree_is_stable():
 
     assert bound == 1
     assert elapsed < 5, f"bind took {elapsed:.1f}s on a stable tree; wait was 30s"
+
+
+def test_the_scan_never_asks_psutil_for_ppid_across_every_process(monkeypatch):
+    """`ppid` in the process_iter attrs cost ten seconds on every Windows launch.
+
+    psutil answers ppid on Windows out of `ppid_map()`, which enumerates EVERY
+    process on the machine, and process_iter asks once per P. Measured with
+    cProfile on 2026-08-01: 354 processes x 26ms = 9.2 seconds for ONE pass, and
+    `LifetimeGuard.bind` runs this in a loop bounded by wait=10.0 whose own
+    docstring says it "costs about a second on launch". A single pass outlasted
+    the settle window it was measured against, so the loop could never converge
+    and every launch paid the full deadline. After: 0.2s per pass.
+
+    Asserted on the CALL rather than on elapsed time - a timing assertion here
+    would be flaky on a loaded runner and would say nothing about the cause.
+    """
+    seen_attrs = []
+    ppid_calls = []
+
+    class _Proc:
+        def __init__(self, pid, parent, token_value):
+            self.pid = pid
+            self._parent = parent
+            self._token = token_value
+
+        def ppid(self):
+            ppid_calls.append(self.pid)
+            return self._parent
+
+        def environ(self):
+            return {P.TOKEN_VAR: self._token} if self._token else {}
+
+    token = P.SessionToken.mint()
+    procs = [_Proc(1, 0, None), _Proc(2, 1, token.value), _Proc(3, 2, token.value)]
+    procs += [_Proc(n, 1, None) for n in range(4, 40)]
+
+    def fake_iter(attrs=None):
+        seen_attrs.append(tuple(attrs or ()))
+        return iter(procs)
+
+    monkeypatch.setattr(P.psutil, "process_iter", fake_iter)
+
+    found = P.find_processes(token)
+
+    assert [p.pid for p in found] == [3, 2], (
+        "deepest child first: the one whose parent is also in the set comes out "
+        f"in front, got {[p.pid for p in found]}")
+    assert "ppid" not in seen_attrs[0], (
+        "ppid is back in the process_iter attrs, which asks psutil for the "
+        "parent of every process on the machine")
+    assert set(ppid_calls) <= {2, 3}, (
+        "the parent was read for a process that did not carry the token: "
+        f"{sorted(set(ppid_calls))}")

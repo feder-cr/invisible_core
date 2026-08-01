@@ -149,11 +149,29 @@ def find_processes(token: SessionToken) -> List[Any]:
     """
     if psutil is None or not token:
         return []
-    found = [p for p in psutil.process_iter(["pid", "ppid"]) if token.matches(p)]
+    # NO `ppid` in the attrs, and this is not a micro-optimisation. On Windows
+    # psutil answers ppid out of `ppid_map()`, which enumerates EVERY process on
+    # the machine, and `process_iter(["pid", "ppid"])` asks once per process:
+    # 354 processes x 26ms = 9.2 seconds per pass, measured with cProfile on
+    # 2026-08-01. `LifetimeGuard.bind` runs this in a loop bounded by wait=10.0
+    # and its own docstring says the loop "costs about a second on launch" - it
+    # cost ten, on every launch, and the scan never converged because a single
+    # pass outlasted the settle window it was being measured against.
+    #
+    # The parent is only needed for the handful that MATCHED, so it is read
+    # there: a browser tree is tens of processes, not hundreds.
+    found = [p for p in psutil.process_iter(["pid"]) if token.matches(p)]
     pids = {p.pid for p in found}
+
+    def _parent(proc: Any) -> Any:
+        try:
+            return proc.ppid()
+        except Exception:      # gone between the scan and here
+            return None
+
     # The token already delimits the tree exactly, so "deeper" is just "my
     # parent is also in the set" - no tree walk needed.
-    found.sort(key=lambda p: p.info.get("ppid") in pids, reverse=True)
+    found.sort(key=lambda p: _parent(p) in pids, reverse=True)
     return found
 
 

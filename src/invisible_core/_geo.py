@@ -69,6 +69,15 @@ def _proxies_for_requests(proxy: Dict[str, str]) -> Dict[str, str]:
         scheme = "http"
 
     host_port = server.split("://", 1)[1] if "://" in server else server
+    if ":" not in host_port:
+        # The same refusal `configure_proxy` makes, on the same dict. These two
+        # are the only readers of a proxy endpoint in the package and they used
+        # to disagree: this one built `socks5h://host` with no port and handed it
+        # to requests while the browser side wrote no proxy pref at all, so one
+        # half of a session was proxied and the other was not.
+        raise ValueError(
+            f"proxy server {server!r} has no port. An endpoint needs host:port "
+            f"- e.g. socks5://host:1080")
     user = proxy.get("username") or ""
     pwd = proxy.get("password") or ""
     if user:

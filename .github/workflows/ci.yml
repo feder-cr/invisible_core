@@ -45,7 +45,6 @@ jobs:
         # Zero violations in all three repos when this was added, so it is a
         # gate rather than a cleanup backlog. Keep it that way.
         run: |
-          python -m pip install --quiet ruff
           python -m ruff check --select F821,F811,F601 --no-cache --output-format concise .
       # -rs prints WHY anything skipped, so a skip is readable in the log
       # instead of being indistinguishable from a pass.

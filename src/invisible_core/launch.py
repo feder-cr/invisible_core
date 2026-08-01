@@ -69,9 +69,11 @@ def tz_env(timezone: str) -> str:
     return _IANA_TO_POSIX_TZ.get(timezone, timezone)
 
 
-def _tz_env(timezone: str) -> str:
-    """POSIX TZ value for an IANA zone (falls back to the IANA name)."""
-    return _IANA_TO_POSIX_TZ.get(timezone, timezone)
+#: The private name kept as an alias, not a second body. It was byte-identical
+#: to `tz_env` above - two definitions of a ten-entry table lookup whose Phoenix
+#: row exists because getting it wrong made an identification service deduce the
+#: wrong origin timezone. Nothing outside this module should reach for it.
+_tz_env = tz_env
 
 
 def build_launch_env(

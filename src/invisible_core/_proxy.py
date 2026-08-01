@@ -35,7 +35,21 @@ def configure_proxy(
 
     host_port = _strip_scheme(server)
     if ":" not in host_port:
-        return None  # malformed, drop silently
+        # It used to `return None  # malformed, drop silently`, and a test named
+        # test_cp14_socks_without_port_dropped_silently pinned that. Changed
+        # 2026-08-01 after reading what the silence costs: the caller asked for a
+        # proxy, no network.proxy.* pref is written, and the session goes out on
+        # the host's own address believing it is proxied. For this package that
+        # is the worst outcome there is, and it is invisible - the browser
+        # launches, the page loads, the IP is wrong.
+        #
+        # The other parser disagreed too: _geo builds `socks5h://host` from the
+        # same dict and hands it to requests, so one half of a session was
+        # proxied and the other was not.
+        raise ValueError(
+            f"proxy server {server!r} has no port. A SOCKS endpoint needs "
+            f"host:port - e.g. socks5://host:1080. Refusing rather than "
+            f"launching unproxied, which is what this used to do silently")
 
     host, port_str = host_port.rsplit(":", 1)
     prefs["network.proxy.type"]            = 1
