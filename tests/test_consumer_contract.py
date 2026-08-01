@@ -58,13 +58,22 @@ CONTRACT = {
     "invisible_core": {
         "BINARY_VERSION", "FIREFOX_UPSTREAM_VERSION", "GeoTimezoneError",
         "IANA_TO_POSIX_TZ", "LaunchPlan", "_geo", "_headless", "_proxy",
-        "_webgl_personas", "build_launch_plan", "cloak_prefs", "config",
+        "_webgl_personas", "build_launch_plan", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
         "ensure_geoip_mmdb", "forced_gpu_class", "generate_profile",
         "get_default_args", "get_default_stealth_prefs",
         "make_virtual_display", "prefs", "prepare_session_geo",
         "resolve_session_locale", "resolve_session_timezone",
-        "translate_profile_to_prefs", "tz_env",
+        "tz_env",
+        # compose_session_prefs joined on 2026-08-01 and took two rows with it.
+        # The wrapper's build_prefs was the third place stacking layers on top of
+        # translate_profile_to_prefs in its own order; now it asks for the one
+        # composition, so it no longer names `translate_profile_to_prefs` or
+        # `cloak_prefs` itself. Neither is deleted from the core - both are
+        # public and exported - they are simply not load-bearing for a consumer
+        # any more, and a contract that over-claims freezes this package for
+        # nobody.
+        "compose_session_prefs",
     },
     "invisible_core._fpforge": {
         "Profile", "_network", "_sampler", "generate_profile", "profile",

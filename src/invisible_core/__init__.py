@@ -25,7 +25,12 @@ from ._fpforge import (
     generate_profile,
 )
 from ._webgl_personas import forced_gpu_class, select_persona, render_noise_seed
-from .prefs import translate_profile_to_prefs
+from .prefs import (
+    ComposedPrefs,
+    compose_session_prefs,
+    humanize_prefs,
+    translate_profile_to_prefs,
+)
 from .download import ensure_binary, ensure_geoip_mmdb
 from ._geo import (
     GeoTimezoneError,
@@ -85,6 +90,9 @@ __all__ = [
     "render_noise_seed",
     # prefs
     "translate_profile_to_prefs",
+    "compose_session_prefs",
+    "ComposedPrefs",
+    "humanize_prefs",
     "get_default_stealth_prefs",
     "get_default_args",
     # binary + geoip
