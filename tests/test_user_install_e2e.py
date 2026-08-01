@@ -196,7 +196,7 @@ def test_the_packaged_seal_is_actually_in_the_wheel(clean_venv: Path):
 # ── PyPI and GitHub Releases must not drift apart ──────
 
 def test_the_published_version_has_a_github_release():
-    """Every version on the index needs a tag and a release carrying it.
+    """EVERY version on the index needs a tag and a release carrying it.
 
     Added 2026-07-26, when the three packages had been on PyPI for a day with
     ZERO tags and ZERO releases between them. Not cosmetic: the release page is
@@ -204,45 +204,117 @@ def test_the_published_version_has_a_github_release():
     and there is no commit anybody can point at as "this is the source of the
     version you have".
 
+    IT CHECKED ONE VERSION UNTIL 2026-08-02. It read `info.version` - the latest
+    - so the moment a release was published without its page, the next release
+    made the omission invisible: the check moved on to the new version and the
+    old gap stayed behind it. Measured that day: ELEVEN published versions across
+    the three packages had no release, and eight had no tag at all, three of them
+    published AFTER the backfill this test was written to protect. The docstring
+    said "every version" from the first line while the code checked one, which is
+    the same defect this project found three times in two days - a claim written
+    beside the code rather than from it.
+
+    It now walks the whole index. That is one API call per version, ~36 across
+    the three packages, and it runs in the install-e2e job rather than the unit
+    suite for exactly that reason.
+
     NO VENV, deliberately. The first version of this took `clean_venv` and read
     the version out of the installed package, which made it depend on ANOTHER
     test in the same file having installed it first - it passed alone in the one
     repository whose fixture installs, and failed in the two whose fixture does
     not. A test whose result depends on what ran before it is not measuring what
-    it claims. Both facts here are public: the index says what the latest
-    version is, and the releases API says whether it has one.
+    it claims. Both facts here are public: the index says which versions exist,
+    and the releases API says whether each has one.
 
     One-directional on purpose. A release for a version not yet on the index is
     a normal intermediate state during a publish; an index version with no
     release is the thing that gets forgotten, because nothing downstream breaks.
+
+    Yanked versions are skipped: a yanked release is one the project has
+    withdrawn, and demanding a release page for something nobody should install
+    would be asking for the opposite of what the yank said.
     """
     import json
+    import os
     import urllib.error
     import urllib.request
 
     with urllib.request.urlopen(
             f"https://pypi.org/pypi/{DIST}/json", timeout=30) as resp:
-        version = json.load(resp)["info"]["version"]
+        index = json.load(resp)["releases"]
 
-    url = f"https://api.github.com/repos/feder-cr/{REPO}/releases/tags/v{version}"
-    try:
-        with urllib.request.urlopen(url, timeout=30) as resp:
-            payload = json.load(resp)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            pytest.fail(
-                f"the index serves {DIST} {version} and there is no GitHub "
-                f"release tagged v{version}. Create it at the commit that built "
-                f"that version - not at HEAD, which has moved on")
-        if exc.code in (403, 429):
-            pytest.skip(f"GitHub API rate-limited this check ({exc.code})")
-        raise
-    assert payload.get("draft") is False, (
-        f"the release for v{version} is still a DRAFT, so nobody can see it")
-    assert (payload.get("body") or "").strip(), (
-        f"the release for v{version} has an empty body - a release page with no "
-        f"notes is a tag with extra steps")
+    live = sorted((version for version, files in index.items()
+                   if files and not all(f.get("yanked") for f in files)),
+                  key=lambda v: tuple(int(p) for p in v.split(".")))
+    assert live, f"the index serves no usable version of {DIST}"
 
+    # Authenticated when a token happens to be around, which on a GitHub runner
+    # it always is. Unauthenticated the API allows 60 calls an hour PER IP, and
+    # this walk wants one per version across three repositories: measured
+    # 2026-08-02, the walk hit 403 on its eleventh call. The token is optional,
+    # never required, and never printed.
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    missing, drafts, empty = [], [], []
+    checked = 0
+    cut_short = None
+    for version in live:
+        url = f"https://api.github.com/repos/feder-cr/{REPO}/releases/tags/v{version}"
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=30) as resp:
+                payload = json.load(resp)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                missing.append(version)
+                checked += 1
+                continue
+            if exc.code in (403, 429):
+                # NOT an unconditional skip. The first version of this walk
+                # skipped here, which threw away every violation already in
+                # hand: the mutation that deleted an OLD release passed, because
+                # a rate-limit two versions later abandoned the whole test. A
+                # gate that discards its own findings on an unrelated error is
+                # worse than no gate, because it reports PASS.
+                cut_short = (version, exc.code)
+                break
+            raise
+        checked += 1
+        if payload.get("draft") is not False:
+            drafts.append(version)
+        if not (payload.get("body") or "").strip():
+            empty.append(version)
+
+    problems = []
+    if missing:
+        problems.append(
+            f"on the index with NO release: {missing}. Create each at the commit "
+            f"that built that version - not at HEAD, which has moved on. PyPI's "
+            f"upload_time and the commit carrying the version are how to find it")
+    if drafts:
+        problems.append(f"still a DRAFT, so nobody can see it: {drafts}")
+    if empty:
+        problems.append(f"empty body, which is a tag with extra steps: {empty}")
+
+    assert not problems, (
+        f"{DIST} has {len(live)} usable versions on the index, {checked} were "
+        f"checked, and " + "; ".join(problems))
+
+    if cut_short:
+        version, code = cut_short
+        if checked == 0:
+            # "Green because it never ran" is the shape this project met three
+            # times in two days. A skip that reads "all clean so far" after
+            # checking NOTHING is that shape wearing a pass.
+            pytest.skip(f"GitHub API answered {code} on the FIRST call, so NONE "
+                        f"of {len(live)} versions were checked and this proves "
+                        f"nothing. Set GITHUB_TOKEN to raise the rate limit")
+        pytest.skip(f"GitHub API answered {code} at v{version} after {checked} of "
+                    f"{len(live)} versions, clean up to there. Set GITHUB_TOKEN to "
+                    f"raise the rate limit")
 
 def test_the_install_e2e_never_imports_the_package_under_test():
     """This file must be COLLECTABLE without invisible_core installed.
