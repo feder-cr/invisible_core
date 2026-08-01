@@ -640,141 +640,40 @@ def test_a_network_failure_is_not_dressed_up_as_a_retired_release(
     assert "current release" not in str(exc.value), str(exc.value)
 
 
-# ------------------------------ and it REPAIRS rather than only advising (#51)
+def test_the_download_path_never_installs_anything():
+    """18.10.0 shipped a repair here. This is why it is not coming back.
 
-@pytest.fixture
-def recording_pip(monkeypatch):
-    """Replace the pip seam and the one-attempt flags. No test reaches pip."""
-    from invisible_core import pin
+    That version answered a 404 on a retired engine by running
+    `pip install --upgrade` on the caller's environment and then telling them to
+    re-run. It worked. It is still the wrong shape: a library that installs
+    things while it is running mutates an environment nobody asked it to touch,
+    ignores whatever lockfile chose that version, and inside a container rewrites
+    an image layer at runtime. Detecting the state and printing the command is
+    the whole job.
 
-    calls = []
-
-    def recorder(cmd, *, execute):
-        calls.append({"cmd": list(cmd), "execute": bool(execute)})
-        return pin.InstallOutcome(bool(execute), "recorded", "recorded")
-
-    monkeypatch.setattr(pin, "INSTALL_RUNNER", recorder)
-    monkeypatch.setattr(pin, "_REPAIR_ATTEMPTED", False)
-    monkeypatch.delenv(pin.AUTOFIX_ATTEMPTED_ENV, raising=False)
-    monkeypatch.delenv(pin.AUTOFIX_ENV, raising=False)
-    # The workbench installs the consumers EDITABLE, and the repair refuses to
-    # overwrite a working tree - correctly, and it would refuse in every test
-    # here. Neutralise only that probe; the refusal itself has its own case.
-    monkeypatch.setattr("invisible_core._env._editable_of", lambda facts: None)
-    return calls
-
-
-@pytest.mark.parametrize("plat", PLATFORMS)
-@responses.activate
-def test_a_retired_tag_upgrades_the_consumer_instead_of_only_advising(
-    cache, tmp_path, monkeypatch, plat, recording_pip,
-):
-    """The point of issue #51, once the owner confirmed the old releases are gone
-    on purpose: the user should not have to work out the pip command.
-
-    The machinery already existed for the core-version case. This is the same
-    guards applied to the other question - the install is not INCONSISTENT, it is
-    old all the way down, so what moves is the consumer and the command is
-    `--upgrade`, not an exact pin.
+    Asserted on the SOURCE rather than by running it, because the failure mode is
+    a call that only fires on a path no test happens to take - which is exactly
+    how the same module reached real pip during a mutation run on 2026-08-01 and
+    replaced this workbench's editable installs with published wheels.
     """
-    monkeypatch.setattr(sys, "platform", plat)
-    seal, name, archive_bytes, _ = publish(tmp_path, plat)
-    old = load_seal(write_seal(tmp_path / "old.json", tag="firefox-13",
-                               sha_for={(plat, host_arch()):
-                                        hashlib.sha256(archive_bytes).hexdigest()}))
-    responses.add(responses.GET,
-                  RELEASE_URL_TEMPLATE.format(tag="firefox-13", asset=name), status=404)
+    import ast
+    import pathlib
 
-    with pytest.raises(RuntimeError) as exc:
-        ensure_binary(seal=old)
+    import invisible_core.download as dl
 
-    assert recording_pip, "no pip command was formed; the repair never ran"
-    cmd = recording_pip[0]["cmd"]
-    assert "--upgrade" in cmd, cmd
-    assert any(c.startswith("invisible-") for c in cmd), cmd
-    assert recording_pip[0]["execute"] is True
-
-    msg = str(exc.value)
-    assert "run it again" in msg, msg
-    # The advice block - the one explaining the retirement and handing over a
-    # command to type - must be GONE once the upgrade has happened. The `ran:`
-    # line legitimately echoes the command that was executed, which is why this
-    # asserts on the advice text rather than on the substring "pip install": the
-    # first version did the latter and failed on the echo of its own success.
-    assert "REMOVED on purpose" not in msg, (
-        "it upgraded and still lectured the user about the retirement:\n" + msg)
-    assert "If the pin is not yours to move" not in msg, msg
-
-
-@pytest.mark.parametrize("plat", PLATFORMS)
-@responses.activate
-def test_a_current_tag_never_triggers_an_upgrade(
-    cache, tmp_path, monkeypatch, plat, recording_pip,
-):
-    """A 404 on a published tag is our defect, not their pin. Upgrading there
-    changes nothing and hides the real cause behind a reinstall."""
-    monkeypatch.setattr(sys, "platform", plat)
-    seal, name, _, _ = publish(tmp_path, plat)
-    responses.add(responses.GET,
-                  RELEASE_URL_TEMPLATE.format(tag=seal.tag, asset=name), status=404)
-
-    with pytest.raises(RuntimeError):
-        ensure_binary(seal=seal)
-    assert not recording_pip, f"a current tag ran pip: {recording_pip}"
-
-
-@pytest.mark.parametrize("plat", PLATFORMS)
-@responses.activate
-def test_the_kill_switch_stops_the_upgrade_and_the_message_says_so(
-    cache, tmp_path, monkeypatch, plat, recording_pip,
-):
-    """Same escape hatch as every other repair in this package. Somebody who does
-    not want a library touching site-packages sets it once and gets the command
-    to run instead."""
-    from invisible_core import pin
-
-    monkeypatch.setenv(pin.AUTOFIX_ENV, "off")
-    monkeypatch.setattr(sys, "platform", plat)
-    seal, name, archive_bytes, _ = publish(tmp_path, plat)
-    old = load_seal(write_seal(tmp_path / "old.json", tag="firefox-13",
-                               sha_for={(plat, host_arch()):
-                                        hashlib.sha256(archive_bytes).hexdigest()}))
-    responses.add(responses.GET,
-                  RELEASE_URL_TEMPLATE.format(tag="firefox-13", asset=name), status=404)
-
-    with pytest.raises(RuntimeError) as exc:
-        ensure_binary(seal=old)
-    assert not recording_pip, "the kill switch did not stop the install"
-    msg = str(exc.value)
-    assert "pip install --upgrade" in msg, ("with the repair off, the user has to "
-                                            "be told what to run:\n" + msg)
-    assert pin.AUTOFIX_ENV in msg, msg
-
-
-@pytest.mark.parametrize("plat", PLATFORMS)
-@responses.activate
-def test_an_editable_consumer_is_never_overwritten(
-    cache, tmp_path, monkeypatch, plat, recording_pip,
-):
-    """The rule that cost three corrupted measurements on 2026-07-27: a working
-    tree is never replaced by a published wheel, and an ABSENCE of evidence does
-    not read as permission."""
-    from invisible_core import _env
-
-    class Verdict:
-        state, path, why = _env.EDITABLE, "C:/checkout", "direct_url.json says editable"
-        safe_to_reinstall = False
-
-    monkeypatch.setattr("invisible_core._env._editable_of", lambda facts: Verdict())
-    monkeypatch.setattr(sys, "platform", plat)
-    seal, name, archive_bytes, _ = publish(tmp_path, plat)
-    old = load_seal(write_seal(tmp_path / "old.json", tag="firefox-13",
-                               sha_for={(plat, host_arch()):
-                                        hashlib.sha256(archive_bytes).hexdigest()}))
-    responses.add(responses.GET,
-                  RELEASE_URL_TEMPLATE.format(tag="firefox-13", asset=name), status=404)
-
-    with pytest.raises(RuntimeError) as exc:
-        ensure_binary(seal=old)
-    assert not recording_pip, "an editable install was about to be overwritten"
-    assert "EDITABLE" in str(exc.value), str(exc.value)
+    tree = ast.parse(pathlib.Path(dl.__file__).read_text(encoding="utf-8"))
+    banned = {"repair_retired_engine", "repair_core", "INSTALL_RUNNER", "_run_pip"}
+    hits = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in banned:
+            hits.append(f"line {node.lineno}: {node.id}")
+        elif isinstance(node, ast.Attribute) and node.attr in banned:
+            hits.append(f"line {node.lineno}: .{node.attr}")
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                if a.name in banned:
+                    hits.append(f"line {node.lineno}: import {a.name}")
+    assert not hits, (
+        "the engine download path reaches an installer again:\n  "
+        + "\n  ".join(hits) +
+        "\n\nIt may report what to run. It may not run it.")

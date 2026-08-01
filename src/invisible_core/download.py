@@ -124,6 +124,14 @@ def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
     template named a repo hosting nothing. That investigation is the message's
     job, not the reporter's.
 
+    AND IT STOPS AT A MESSAGE, DELIBERATELY. 18.10.0 shipped a version of this
+    that ran `pip install --upgrade` on the caller's environment and then told
+    them to re-run. It worked, and it is the wrong shape: a library that installs
+    things while it is running mutates an environment nobody asked it to touch,
+    ignores whatever lockfile put that version there, and inside a container
+    rewrites an image layer at runtime. Removed in 18.11.0. Detecting the state
+    and saying what to run is the whole job; running it is the caller's.
+
     The two cases are genuinely different and the message says which one it is.
     An OLD tag cannot be fixed by waiting: those releases were removed on purpose,
     so the pin has to move. A CURRENT tag missing its asset is something else -
@@ -163,37 +171,6 @@ def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
             f"re-cut without it. Worth reporting, with this message.",
         ]
     return chr(10).join(lines)
-
-
-def _handle_missing_release(tag: str, asset_name: str, url: str) -> str:
-    """Repair what can be repaired, then say what is left. Never raises.
-
-    A retired engine tag is not a fault to report - it is an install that is old
-    all the way down, and the fix is a pip command the user should not have to
-    work out. So the repair machinery in `pin.py` runs first and the message
-    reports what it did.
-
-    The two are deliberately in this order. If the upgrade succeeds the user still
-    cannot continue in this process, so they still get a message - but it says
-    "start it again" instead of "here is what to install", which is the difference
-    between a chore and a keystroke.
-    """
-    text = _missing_release_message(tag, asset_name, url)
-    number = tag.split("-", 1)[1] if tag.startswith("firefox-") else ""
-    if not (number.isdigit() and int(number) < OLDEST_PUBLISHED_TAG_NUMBER):
-        return text
-    try:
-        from .pin import repair_retired_engine
-        result = repair_retired_engine(tag=tag)
-    except Exception as exc:            # a broken repair must not mask the 404
-        return text + chr(10) * 2 + f"(the automatic upgrade could not run: {exc})"
-    if result.attempted and result.reason.startswith("the upgrade succeeded"):
-        return (f"{tag} is no longer published, and the packages that pin it have "
-                f"been upgraded for you." + chr(10) * 2 +
-                f"This process is still running the old code, so it cannot "
-                f"continue: run it again." + chr(10) * 2 +
-                f"  ran: {result.command}")
-    return text + chr(10) * 2 + f"(automatic upgrade not done: {result.reason})"
 
 
 def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
@@ -406,7 +383,7 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
         except requests.HTTPError as exc:
             if getattr(exc.response, "status_code", None) != 404:
                 raise
-            raise RuntimeError(_handle_missing_release(seal.tag, asset.name,
+            raise RuntimeError(_missing_release_message(seal.tag, asset.name,
                                                        url_archive)) from exc
         _phase("verifying")
         actual = _sha256_file(archive_path)
