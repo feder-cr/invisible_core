@@ -772,3 +772,48 @@ def test_every_published_package_uploads_without_a_stored_credential():
         "the publish path can be authenticated by something other than a"
         " short-lived OIDC token:"
         + "".join(chr(10) + "  " + p for p in problems))
+
+
+def test_no_workflow_reads_a_version_its_pyproject_does_not_have():
+    """`dynamic = ["version"]` means there is no literal to read, and a workflow
+    that reads one anyway raises KeyError on its first line.
+
+    This is not hypothetical and it was not caught by anything. The core declares
+    its version dynamic - derived from the packaged seal's tag plus
+    CORE_REVISION, which is the whole point of the seal - and
+    `user-install.yml` read `tomllib.load(...)["project"]["version"]`. It raised
+    `KeyError: 'version'` on every release, on both runners, from the day it was
+    written: the check that a user can `pip install` this from the index and
+    launch it had never once executed a line past that point.
+
+    It stayed invisible because the workflow only runs on a release event, so
+    nobody looking at a push saw it, and because a red run that has always been
+    red reads as a known condition rather than a fault. Found 2026-08-01 by
+    opening one.
+
+    The rule: derive the version the way the PACKAGE derives it. That is what
+    publish.yml already did in the same repository, four files away.
+    """
+    import re
+
+    reads_literal = re.compile(r'\[\s*"project"\s*\]\s*\[\s*"version"\s*\]')
+    declares_dynamic = re.compile(r'(?m)^\s*dynamic\s*=\s*\[[^\]]*"version"')
+
+    problems = []
+    for repo in _DEFAULT_SUITE_WORKFLOW:
+        root = _RELEASE / repo
+        pyproject = root / "pyproject.toml"
+        if not pyproject.is_file():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        if not declares_dynamic.search(pyproject.read_text(encoding="utf-8")):
+            continue          # a literal version is there to be read
+        for wf in sorted((root / ".github" / "workflows").glob("*.yml")):
+            if reads_literal.search(wf.read_text(encoding="utf-8")):
+                problems.append(
+                    repo + "/" + wf.name + ' reads ["project"]["version"] while '
+                    "pyproject declares it dynamic: that is a KeyError on the "
+                    "first line that touches it, every run")
+
+    assert not problems, (
+        "a workflow reads a version that does not exist in its pyproject:"
+        + "".join(chr(10) + "  " + p for p in problems))

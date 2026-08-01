@@ -189,8 +189,20 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, sys, time, tomllib, urllib.error, urllib.request
-          dist = tomllib.load(open("pyproject.toml", "rb"))["project"]["name"]
-          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          meta = tomllib.load(open("pyproject.toml", "rb"))["project"]
+          dist = meta["name"]
+          # NOT meta["version"]. This package declares `dynamic = ["version"]` -
+          # the version is DERIVED from the packaged seal's tag plus
+          # CORE_REVISION, and there is no literal in pyproject.toml to read. So
+          # this step raised KeyError: 'version' on line 3, on every release, on
+          # both runners, since it was written: the check that a user can install
+          # this from the index and launch it had never once executed. Found
+          # 2026-08-01 by reading a red run that had been red all along.
+          #
+          # Derived the way the package derives it, which is also what
+          # publish.yml already does.
+          sys.path.insert(0, "src")
+          from invisible_core._version import __version__ as version
           url = f"https://pypi.org/pypi/{dist}/{version}/json"
           deadline = time.monotonic() + 300
           n = 0
