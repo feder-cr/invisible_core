@@ -668,3 +668,107 @@ def test_the_core_checks_daily_that_its_published_seals_still_resolve():
         assert guard in flat, (
             f"the empty-set refusal {guard!r} is gone: an API that returns nothing, "
             f"or an index with no sealed wheels, would read as a clean bill")
+
+
+def test_every_python_a_repo_promises_is_actually_run():
+    """`requires-python` is a promise; the CI matrix is what keeps it.
+
+    Measured 2026-08-01, with all three declaring `>=3.11`: the core ran 3.12
+    only, the manager ran 3.12 only, the wrapper ran 3.11 and 3.12. Three
+    quarters of the promise was untested, and the user who opened issue #51 was
+    on 3.14 - a version no job in any of the three repositories had ever executed
+    a line on.
+
+    The check is CONTIGUITY FROM THE FLOOR, not a hardcoded list: a repo decides
+    where its ceiling is, but it may not skip a version in between, and it may
+    not raise the floor without the matrix following. Both are silent otherwise -
+    the wheel installs and a user finds out.
+    """
+    import re
+
+    floor_re = re.compile(r'requires-python\s*=\s*"\s*>=\s*(\d+)\.(\d+)')
+    axis_re = re.compile(r'(?m)^\s*python:\s*\[([^\]]*)\]')
+    version_re = re.compile(r'"(\d+\.\d+)"')
+
+    problems = []
+    for repo, rel in _DEFAULT_SUITE_WORKFLOW.items():
+        wf = _RELEASE / repo / rel
+        pyproject = _RELEASE / repo / "pyproject.toml"
+        if not wf.is_file() or not pyproject.is_file():
+            pytest.skip("not the workbench - the sibling repos are not here")
+
+        m = floor_re.search(pyproject.read_text(encoding="utf-8"))
+        if not m:
+            problems.append(repo + ": no `requires-python = >=X.Y` to compare against")
+            continue
+        floor = (int(m.group(1)), int(m.group(2)))
+
+        axis = axis_re.search(wf.read_text(encoding="utf-8"))
+        if not axis:
+            problems.append(
+                repo + ": " + rel + " has no `python:` matrix axis, so it runs one version")
+            continue
+        got = sorted(tuple(int(n) for n in v.split("."))
+                     for v in version_re.findall(axis.group(1)))
+        if not got:
+            problems.append(repo + ": the python axis parsed empty")
+            continue
+
+        want = [(floor[0], minor) for minor in range(floor[1], got[-1][1] + 1)]
+        missing = ["%d.%d" % v for v in want if v not in got]
+        if missing:
+            problems.append(
+                "%s: declares >=%d.%d and runs %s, never %s"
+                % (repo, floor[0], floor[1], ["%d.%d" % v for v in got], missing))
+
+    assert not problems, (
+        "a version these packages promise is not run by anything:"
+        + "".join(chr(10) + "  " + p for p in problems))
+
+
+def test_every_published_package_uploads_without_a_stored_credential():
+    """Three packages on PyPI; one of them had a publish workflow.
+
+    The other two were uploaded by hand from one machine with a long-lived PyPI
+    token on it. That token is a standing credential whose blast radius is the
+    whole project, and a hand-run twine has no gate in front of it - the ordering
+    rules live in somebody's memory rather than in a `needs:`.
+
+    All three now publish through the `pypi` GitHub Environment's OIDC trust
+    relationship, minted per run. This asserts the two properties that make that
+    true and that a well-meaning edit can undo: the upload job asks for
+    `id-token: write`, and NOTHING in the file reaches for a stored password.
+
+    A token creeping back is not a syntax error and would work, which is exactly
+    why it needs a test rather than a review.
+    """
+    import re
+
+    forbidden = re.compile(
+        r"(password\s*:|PYPI_API_TOKEN|PYPI_TOKEN|TWINE_PASSWORD|secrets\.PYPI)")
+    problems = []
+    for repo in _DEFAULT_SUITE_WORKFLOW:
+        wf = _RELEASE / repo / ".github/workflows/publish.yml"
+        if not (_RELEASE / repo).is_dir():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        if not wf.is_file():
+            problems.append(repo + ": no .github/workflows/publish.yml, so it is "
+                                   "published by hand with a long-lived token")
+            continue
+        text = wf.read_text(encoding="utf-8")
+        if "id-token: write" not in text:
+            problems.append(repo + ": publish.yml never asks for id-token: write, "
+                                   "so it cannot be using trusted publishing")
+        if "environment: pypi" not in text:
+            problems.append(repo + ": the upload job names no `environment: pypi`, "
+                                   "which is where the trust relationship lives")
+        hit = forbidden.search(text)
+        if hit:
+            problems.append(
+                repo + ": publish.yml reaches for a stored credential ("
+                + hit.group(0) + "), which is the thing OIDC replaced")
+
+    assert not problems, (
+        "the publish path can be authenticated by something other than a"
+        " short-lived OIDC token:"
+        + "".join(chr(10) + "  " + p for p in problems))
