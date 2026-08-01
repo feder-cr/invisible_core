@@ -90,6 +90,85 @@ jobs:
       - name: Test harness only
         run: python -m pip install --upgrade pip pytest packaging
 
+      # A published version whose seal names a DELETED engine release is a
+      # version nobody can make work: pip resolves it happily and the browser
+      # can never be downloaded. That is what issue #51 looked like from the
+      # outside, and the only reason PyPI escaped it is that the retirement
+      # (everything below firefox-14) happened while every published core still
+      # named firefox-18.
+      #
+      # Escaping by luck is not a property. This asks the question directly, on
+      # every version the index still serves, every day: does the engine release
+      # this wheel is sealed to still exist? Retiring an engine that a published
+      # package needs becomes something we find out about within 24 hours rather
+      # than from a user.
+      #
+      # Deliberately NOT part of the unit suite: it needs the network and the
+      # GitHub API, and a unit suite that fails when a CDN hiccups is a suite
+      # people stop reading.
+      - name: every published seal points at an engine that still exists
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import io, json, os, sys, tempfile, urllib.error, urllib.request, zipfile
+
+          REPO = "feder-cr/firefox_antidetect_patch"
+          DIST = "invisible-core"
+
+          def gh(url):
+              req = urllib.request.Request(url, headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json"})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.load(r)
+
+          live = {r["tag_name"] for r in
+                  gh(f"https://api.github.com/repos/{REPO}/releases?per_page=100")}
+          print("live engine releases:", sorted(live))
+          if not live:
+              sys.exit("::error::no engine releases found at all - refusing to "
+                       "call that a pass")
+
+          index = json.load(urllib.request.urlopen(
+              f"https://pypi.org/pypi/{DIST}/json", timeout=60))
+          broken, checked = [], 0
+          for version, files in sorted(index["releases"].items()):
+              wheel = next((f for f in files if f["filename"].endswith(".whl")), None)
+              if not wheel or wheel.get("yanked"):
+                  continue
+              blob = urllib.request.urlopen(wheel["url"], timeout=120).read()
+              with tempfile.NamedTemporaryFile(suffix=".whl", delete=False) as tmp:
+                  tmp.write(blob)
+                  path = tmp.name
+              tag = None
+              with zipfile.ZipFile(path) as z:
+                  for name in z.namelist():
+                      if name.endswith("invisible_core/seal.json"):
+                          tag = json.loads(z.read(name))["tag"]
+                          break
+              if tag is None:
+                  print(f"::warning::{version} carries no seal.json")
+                  continue
+              checked += 1
+              status = "ok" if tag in live else "MISSING"
+              print(f"  {version:10} seal={tag:14} {status}")
+              if tag not in live:
+                  broken.append((version, tag))
+
+          if not checked:
+              sys.exit("::error::no published wheel carried a seal - this check "
+                       "verified nothing")
+          if broken:
+              for version, tag in broken:
+                  print(f"::error title=dead engine::{DIST} {version} is sealed to "
+                        f"{tag}, which no longer exists as a release. Anyone who "
+                        f"resolves that version cannot download a browser.")
+              sys.exit(1)
+          print(f"all {checked} published versions point at a live engine")
+          PY
+
       # PyPI does not serve a new version to pip the instant twine finishes, and
       # this workflow runs on `release:` - which fires seconds after the upload.
       # MEASURED 2026-07-28: invisible-firefox 0.2.6 was uploaded, the release was

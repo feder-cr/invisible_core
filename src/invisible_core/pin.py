@@ -690,6 +690,116 @@ def _say(stream, text: str) -> None:
         pass
 
 
+#: The distributions that consume this package. Kept beside the repair rather
+#: than imported from `__main__`, which is forbidden from installing anything.
+REPAIRABLE_CONSUMERS = ("invisible-playwright", "invisible-firefox")
+
+
+def repair_retired_engine(*, tag: str, stream=None) -> RepairResult:
+    """Upgrade the CONSUMER when the sealed engine no longer exists. Never raises.
+
+    WHY THIS IS A DIFFERENT REPAIR FROM `repair_core`. That one installs the core
+    at the version the consumer DECLARES, which fixes a disagreement between two
+    installed things. Issue #51 is not a disagreement: an install pinned to a git
+    ref from before firefox-14 is perfectly self-consistent, and its seal names an
+    engine release that was removed on purpose. Nothing about that environment is
+    inconsistent - it is simply old, all the way down. Repairing the core to what
+    it already declares would install the same old core again.
+
+    So what has to move is the consumer, and `--upgrade` rather than an exact pin,
+    because the whole point is that this install has no idea what the current
+    version is.
+
+    WHY IT DOES NOT CONTINUE IN-PROCESS. `repair_core` can, because it runs from
+    the first line of a consumer's `__init__`, before anybody holds an object.
+    This runs at browser launch, deep inside the user's program, with the consumer
+    fully imported - the exact condition `core_preimported` exists to refuse. And
+    the half-measure is worse than either end: reading the new seal off disk and
+    downloading the new engine would leave the OLD wrapper driving a NEW engine,
+    which is the wrapper-to-engine mismatch this entire system exists to prevent.
+
+    So: install, then say the process has to start again. The user does not have
+    to work out what to run, which is the part they should never have to do.
+
+    Every guard from `repair_core` applies unchanged - the kill switch, one
+    attempt per environment, the editable refusal, and never raising.
+    """
+    global _REPAIR_ATTEMPTED
+    out = stream if stream is not None else sys.stderr
+
+    installed = []
+    for name in REPAIRABLE_CONSUMERS:
+        try:
+            _pkg_version(name)
+        except PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+        installed.append(name)
+
+    if not installed:
+        return RepairResult(
+            False, False,
+            f"none of {', '.join(REPAIRABLE_CONSUMERS)} is installed, so there is "
+            f"nothing to upgrade - this core is being used directly",
+            "", None, None)
+
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", *installed]
+    shown = format_command(cmd)
+
+    if not autofix_enabled():
+        return RepairResult(
+            False, False,
+            f"the automatic repair is switched off ({AUTOFIX_ENV})", shown, None, None)
+
+    if _REPAIR_ATTEMPTED or os.environ.get(AUTOFIX_ATTEMPTED_ENV):
+        return RepairResult(
+            False, False,
+            "an automatic repair was already attempted in this environment and is "
+            "not retried",
+            shown, None, None)
+
+    # Never overwrite a working tree. Same rule and same reasoning as the core's:
+    # an ABSENCE of evidence must not read as permission.
+    for name in installed:
+        try:
+            from ._env import _dist_facts, _editable_of
+            verdict = _editable_of(_dist_facts(name))
+        except Exception:
+            verdict = None
+        if verdict is not None and not verdict.safe_to_reinstall:
+            where = f" at {verdict.path}" if verdict.path else ""
+            return RepairResult(
+                False, False,
+                f"{name} is an EDITABLE install{where} ({verdict.why}), so upgrading "
+                f"it would overwrite a working tree with a published wheel. Refusing "
+                f"- move the checkout forward yourself, or set {AUTOFIX_ENV}=off",
+                shown, None, None)
+
+    _REPAIR_ATTEMPTED = True
+    os.environ[AUTOFIX_ATTEMPTED_ENV] = "1"
+
+    _say(out, f"[invisible-core] the sealed engine {tag} is no longer published: "
+              f"releases before firefox-{14} were removed so that everybody runs one "
+              f"engine.")
+    _say(out, f"[invisible-core] upgrading {', '.join(installed)} to a version whose "
+              f"seal names an engine that exists:")
+    _say(out, f"    {shown}")
+
+    outcome = INSTALL_RUNNER(cmd, execute=True)
+    if not outcome.ok:
+        return RepairResult(True, False, outcome.detail, shown, None, None)
+
+    _say(out, f"[invisible-core] upgraded. This process is still running the old "
+              f"code, so it cannot continue - start it again.")
+    return RepairResult(
+        True, False,
+        "the upgrade succeeded, but this process still holds the old modules: an "
+        "old wrapper driving a new engine is the mismatch the seal exists to "
+        "prevent. Run the program again",
+        shown, None, None)
+
+
 def repair_core(
     *,
     dist_name: str,

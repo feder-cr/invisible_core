@@ -607,3 +607,56 @@ def test_no_string_LITERAL_evaluates_to_a_control_character():
         "\n\nUse a raw string, forward slashes, or chr() with a comment. The file "
         "bytes look correct in every one of these, which is why the byte check "
         "next door cannot see them.")
+
+
+def test_the_core_checks_daily_that_its_published_seals_still_resolve():
+    """The structural half of issue #51.
+
+    A published version whose seal names a DELETED engine release is a version
+    nobody can make work: pip resolves it, the browser can never be downloaded.
+    PyPI escaped that in August 2026 only because the retirement (everything
+    below firefox-14) happened while every published core still named
+    firefox-18. Escaping by luck is not a property.
+
+    So `user-install.yml` asks the question directly, daily, against every
+    version the index still serves. This asserts the step is there and that it
+    fails on a missing tag rather than merely printing - the shape that made
+    every earlier fail-open in this codebase.
+    """
+    path = _RELEASE / "invisible_core" / ".github" / "workflows" / "user-install.yml"
+    if not path.is_file():
+        pytest.skip("not the workbench")
+    text = path.read_text(encoding="utf-8")
+    # Whitespace-collapsed, because the phrases below are wrapped across source
+    # lines inside the embedded script. The first version of this test searched
+    # the raw text and failed on its own subject - the guard was there, split by
+    # a line break and an indent.
+    # Scoped to THIS step, not the whole file. `sys.exit(1)` also appears in the
+    # suite-collapse step further down, so a whole-file search was satisfied by
+    # an unrelated line: deleting this step's own exit left the check green.
+    # Measured 2026-08-01, the third time today that a passing mention elsewhere
+    # satisfied a gate.
+    marker = "- name: every published seal points at an engine that still exists"
+    assert marker in text, (
+        "the daily check that a published seal still resolves is gone. Without it, "
+        "retiring an engine strands every version sealed to it and we find out "
+        "from a user")
+    start = text.index(marker)
+    nxt = text.find(chr(10) + "      - name:", start + 1)
+    step = text[start:nxt if nxt != -1 else len(text)]
+    flat = " ".join(step.split())
+    assert "every published seal points at an engine that still exists" in flat, (
+        "the daily check that a published seal still resolves is gone. Without it, "
+        "retiring an engine strands every version sealed to it and we find out "
+        "from a user")
+    assert "sys.exit(1)" in flat, (
+        "the check no longer exits non-zero, so a dead engine would be a green run "
+        "with a warning in the log")
+    # Fragments that live inside ONE string literal. "refusing to call that a
+    # pass" is split across two adjacent literals in the script, so even a
+    # whitespace-collapsed search sees `refusing to " "call that a pass` - the
+    # second thing this test got wrong about its own subject.
+    for guard in ("verified nothing", "no engine releases found"):
+        assert guard in flat, (
+            f"the empty-set refusal {guard!r} is gone: an API that returns nothing, "
+            f"or an index with no sealed wheels, would read as a clean bill")

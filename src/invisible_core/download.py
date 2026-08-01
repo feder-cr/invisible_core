@@ -106,6 +106,96 @@ def _resolve_asset_url(tag: str, asset_name: str) -> str:
     raise RuntimeError(f"asset {asset_name!r} not found in release {tag!r}")
 
 
+#: The first release whose binaries are still published. Everything below it was
+#: REMOVED deliberately, so that every user is on one engine rather than a long
+#: tail of old ones - the owner's call, and the reason a 404 here is a fact about
+#: the pin rather than a fault to report.
+OLDEST_PUBLISHED_TAG_NUMBER = 14
+
+
+def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
+    """What to say when the engine archive is not there.
+
+    WHY THIS EXISTS. A 404 surfaced as `requests.exceptions.HTTPError: 404 Client
+    Error` and nothing else - no tag, no cause, no remedy. Reported as issue #51
+    on 2026-08-01 by somebody whose install came from a git pin predating
+    firefox-14, when the binaries moved to the source repo. They did the work
+    themselves: found that the tags existed, that no release did, and that the URL
+    template named a repo hosting nothing. That investigation is the message's
+    job, not the reporter's.
+
+    The two cases are genuinely different and the message says which one it is.
+    An OLD tag cannot be fixed by waiting: those releases were removed on purpose,
+    so the pin has to move. A CURRENT tag missing its asset is something else -
+    a re-cut release, a pruned asset - and worth reporting.
+    """
+    number = None
+    if tag.startswith("firefox-") and tag.split("-", 1)[1].isdigit():
+        number = int(tag.split("-", 1)[1])
+
+    lines = [
+        f"the engine archive for {tag} is not published: {asset_name} -> HTTP 404",
+        f"  tried {url}",
+        f"  the tag comes from the release seal inside invisible-core, not from "
+        f"anything you configured.",
+    ]
+    if number is not None and number < OLDEST_PUBLISHED_TAG_NUMBER:
+        lines += [
+            "",
+            f"{tag} is one of the engine releases that were REMOVED on purpose, so "
+            f"that everybody runs one engine rather than a long tail of old ones. "
+            f"It is not coming back and no amount of retrying will find it.",
+            "",
+            "You are running a version of this package that predates the move. That "
+            "usually means an install pinned to a git ref rather than to a release - "
+            "including a pin inside some other project that depends on this one.",
+            "",
+            "  pip install --upgrade invisible-playwright     # or invisible-firefox",
+            "",
+            "If the pin is not yours to move, the project that owns it has to move "
+            "it: a git ref from before the move can never download an engine again.",
+        ]
+    else:
+        lines += [
+            "",
+            f"{tag} is a current release, so this is not the retired-engine case. "
+            f"Either the asset was pruned from the release or the release was "
+            f"re-cut without it. Worth reporting, with this message.",
+        ]
+    return chr(10).join(lines)
+
+
+def _handle_missing_release(tag: str, asset_name: str, url: str) -> str:
+    """Repair what can be repaired, then say what is left. Never raises.
+
+    A retired engine tag is not a fault to report - it is an install that is old
+    all the way down, and the fix is a pip command the user should not have to
+    work out. So the repair machinery in `pin.py` runs first and the message
+    reports what it did.
+
+    The two are deliberately in this order. If the upgrade succeeds the user still
+    cannot continue in this process, so they still get a message - but it says
+    "start it again" instead of "here is what to install", which is the difference
+    between a chore and a keystroke.
+    """
+    text = _missing_release_message(tag, asset_name, url)
+    number = tag.split("-", 1)[1] if tag.startswith("firefox-") else ""
+    if not (number.isdigit() and int(number) < OLDEST_PUBLISHED_TAG_NUMBER):
+        return text
+    try:
+        from .pin import repair_retired_engine
+        result = repair_retired_engine(tag=tag)
+    except Exception as exc:            # a broken repair must not mask the 404
+        return text + chr(10) * 2 + f"(the automatic upgrade could not run: {exc})"
+    if result.attempted and result.reason.startswith("the upgrade succeeded"):
+        return (f"{tag} is no longer published, and the packages that pin it have "
+                f"been upgraded for you." + chr(10) * 2 +
+                f"This process is still running the old code, so it cannot "
+                f"continue: run it again." + chr(10) * 2 +
+                f"  ran: {result.command}")
+    return text + chr(10) * 2 + f"(automatic upgrade not done: {result.reason})"
+
+
 def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
     """Download ``url`` to ``dst``. If ``progress`` is given it is called with
     ``(bytes_done, total_bytes)`` as the download proceeds (total is 0 when the
@@ -311,7 +401,13 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
     with tempfile.TemporaryDirectory() as td:
         archive_path = Path(td) / asset.name
         _phase("downloading")
-        _download_file(url_archive, archive_path, progress=progress)
+        try:
+            _download_file(url_archive, archive_path, progress=progress)
+        except requests.HTTPError as exc:
+            if getattr(exc.response, "status_code", None) != 404:
+                raise
+            raise RuntimeError(_handle_missing_release(seal.tag, asset.name,
+                                                       url_archive)) from exc
         _phase("verifying")
         actual = _sha256_file(archive_path)
         if actual.lower() != asset.sha256.lower():

@@ -520,3 +520,261 @@ def test_losing_the_race_uses_the_tree_the_winner_landed(cache, tmp_path, monkey
     assert not [d for d in dirs_under(cache) if d.startswith(".tmp-")], dirs_under(cache)
     stamp = read_stamp(version_dir)
     assert stamp and stamp["seal_digest"] == seal.digest, stamp
+
+
+# ---------------------------------------------------- NOTHING here reaches pip
+#
+# The 404 path repairs, and repairing means `pip install --upgrade` against the
+# environment running the tests. That is not hypothetical: while mutating the
+# editable guard on 2026-08-01 this module ran a REAL pip and replaced the
+# workbench's editable invisible-core and invisible-playwright with published
+# wheels - the exact incident CLAUDE.md records from 2026-07-27, reproduced by
+# removing the one guard that was stopping it.
+#
+# The guard is not the only thing that should have stopped it. A test module that
+# can install packages when a production guard is removed is a test module with a
+# loaded weapon in it. So the seam is replaced for EVERY test here, autouse, and
+# an execute=True that reaches this recorder is itself a failure: tests that want
+# to observe the repair inject their own recorder over the top.
+
+
+@pytest.fixture(autouse=True)
+def _no_test_may_reach_pip(monkeypatch):
+    from invisible_core import pin
+
+    def refuse(cmd, *, execute):
+        assert not execute, (
+            "a test in this module asked to EXECUTE pip: "
+            + " ".join(map(str, cmd))
+            + ". No test here may install anything. If you are testing the "
+              "repair, inject a recording runner in the test itself.")
+        return pin.InstallOutcome(False, " ".join(map(str, cmd)), "refused by tripwire")
+
+    monkeypatch.setattr(pin, "INSTALL_RUNNER", refuse)
+    monkeypatch.setattr(pin, "_REPAIR_ATTEMPTED", False)
+    monkeypatch.delenv(pin.AUTOFIX_ATTEMPTED_ENV, raising=False)
+
+
+# ------------------------- a 404 has to say WHICH kind of 404 it is (issue #51)
+
+@pytest.mark.parametrize("plat", PLATFORMS)
+@responses.activate
+def test_a_retired_engine_tag_says_so_instead_of_reporting_a_bare_404(
+    cache, tmp_path, monkeypatch, plat,
+):
+    """Issue #51, 2026-08-01.
+
+    A user on a git pin from before firefox-14 got
+    `requests.exceptions.HTTPError: 404 Client Error` and nothing else: no tag,
+    no cause, no remedy. They worked it out themselves - the tags existed, no
+    release did, and the URL template named a repo hosting nothing - and filed a
+    careful report asking us to publish the old assets.
+
+    We will not: the releases below firefox-14 were removed deliberately, so that
+    everybody runs one engine instead of a long tail of old ones. That makes this
+    404 a permanent fact about their pin, and the message has to say so, because
+    "not found" invites a retry and a bug report where neither can help.
+    """
+    monkeypatch.setattr(sys, "platform", plat)
+    seal, name, archive_bytes, _ = publish(tmp_path, plat)
+    old = load_seal(write_seal(tmp_path / "old-seal.json", tag="firefox-13",
+                               sha_for={(plat, host_arch()):
+                                        hashlib.sha256(archive_bytes).hexdigest()}))
+    url = RELEASE_URL_TEMPLATE.format(tag="firefox-13", asset=name)
+    responses.add(responses.GET, url, status=404)
+
+    with pytest.raises(RuntimeError) as exc:
+        ensure_binary(seal=old)
+    msg = str(exc.value)
+    assert "firefox-13" in msg and name in msg, msg
+    assert "REMOVED on purpose" in msg, msg
+    assert "pip install --upgrade" in msg, msg
+    assert "seal inside invisible-core" in msg, (
+        "the message must say where the tag came from; a user who thinks they "
+        "chose it goes looking for a setting that does not exist:\n" + msg)
+
+
+@pytest.mark.parametrize("plat", PLATFORMS)
+@responses.activate
+def test_a_current_tag_missing_its_asset_is_NOT_blamed_on_the_pin(
+    cache, tmp_path, monkeypatch, plat,
+):
+    """The other half, and the reason the message branches.
+
+    If the sealed tag is one that IS published, a 404 means something else - an
+    asset pruned from the release, a re-cut tag - and telling that user to
+    upgrade sends them to do something that cannot help. A message with one
+    branch would be wrong exactly half the time, and wrong in the direction that
+    hides a real defect on our side.
+    """
+    monkeypatch.setattr(sys, "platform", plat)
+    seal, name, _, _ = publish(tmp_path, plat)
+    url = RELEASE_URL_TEMPLATE.format(tag=seal.tag, asset=name)
+    responses.add(responses.GET, url, status=404)
+
+    with pytest.raises(RuntimeError) as exc:
+        ensure_binary(seal=seal)
+    msg = str(exc.value)
+    assert "current release" in msg, msg
+    assert "REMOVED on purpose" not in msg, (
+        "a current tag was blamed on the user's pin:\n" + msg)
+    assert "Worth reporting" in msg, msg
+
+
+@pytest.mark.parametrize("plat", PLATFORMS)
+@responses.activate
+def test_a_network_failure_is_not_dressed_up_as_a_retired_release(
+    cache, tmp_path, monkeypatch, plat,
+):
+    """Only 404 is this story. A 500, a proxy error or a timeout must keep its
+    own exception, or a transient outage reads as "your version is too old" and
+    somebody upgrades something that was never wrong."""
+    monkeypatch.setattr(sys, "platform", plat)
+    seal, name, _, _ = publish(tmp_path, plat)
+    responses.add(responses.GET, RELEASE_URL_TEMPLATE.format(tag=seal.tag, asset=name),
+                  status=503)
+
+    with pytest.raises(Exception) as exc:
+        ensure_binary(seal=seal)
+    assert "REMOVED on purpose" not in str(exc.value), str(exc.value)
+    assert "current release" not in str(exc.value), str(exc.value)
+
+
+# ------------------------------ and it REPAIRS rather than only advising (#51)
+
+@pytest.fixture
+def recording_pip(monkeypatch):
+    """Replace the pip seam and the one-attempt flags. No test reaches pip."""
+    from invisible_core import pin
+
+    calls = []
+
+    def recorder(cmd, *, execute):
+        calls.append({"cmd": list(cmd), "execute": bool(execute)})
+        return pin.InstallOutcome(bool(execute), "recorded", "recorded")
+
+    monkeypatch.setattr(pin, "INSTALL_RUNNER", recorder)
+    monkeypatch.setattr(pin, "_REPAIR_ATTEMPTED", False)
+    monkeypatch.delenv(pin.AUTOFIX_ATTEMPTED_ENV, raising=False)
+    monkeypatch.delenv(pin.AUTOFIX_ENV, raising=False)
+    # The workbench installs the consumers EDITABLE, and the repair refuses to
+    # overwrite a working tree - correctly, and it would refuse in every test
+    # here. Neutralise only that probe; the refusal itself has its own case.
+    monkeypatch.setattr("invisible_core._env._editable_of", lambda facts: None)
+    return calls
+
+
+@pytest.mark.parametrize("plat", PLATFORMS)
+@responses.activate
+def test_a_retired_tag_upgrades_the_consumer_instead_of_only_advising(
+    cache, tmp_path, monkeypatch, plat, recording_pip,
+):
+    """The point of issue #51, once the owner confirmed the old releases are gone
+    on purpose: the user should not have to work out the pip command.
+
+    The machinery already existed for the core-version case. This is the same
+    guards applied to the other question - the install is not INCONSISTENT, it is
+    old all the way down, so what moves is the consumer and the command is
+    `--upgrade`, not an exact pin.
+    """
+    monkeypatch.setattr(sys, "platform", plat)
+    seal, name, archive_bytes, _ = publish(tmp_path, plat)
+    old = load_seal(write_seal(tmp_path / "old.json", tag="firefox-13",
+                               sha_for={(plat, host_arch()):
+                                        hashlib.sha256(archive_bytes).hexdigest()}))
+    responses.add(responses.GET,
+                  RELEASE_URL_TEMPLATE.format(tag="firefox-13", asset=name), status=404)
+
+    with pytest.raises(RuntimeError) as exc:
+        ensure_binary(seal=old)
+
+    assert recording_pip, "no pip command was formed; the repair never ran"
+    cmd = recording_pip[0]["cmd"]
+    assert "--upgrade" in cmd, cmd
+    assert any(c.startswith("invisible-") for c in cmd), cmd
+    assert recording_pip[0]["execute"] is True
+
+    msg = str(exc.value)
+    assert "run it again" in msg, msg
+    # The advice block - the one explaining the retirement and handing over a
+    # command to type - must be GONE once the upgrade has happened. The `ran:`
+    # line legitimately echoes the command that was executed, which is why this
+    # asserts on the advice text rather than on the substring "pip install": the
+    # first version did the latter and failed on the echo of its own success.
+    assert "REMOVED on purpose" not in msg, (
+        "it upgraded and still lectured the user about the retirement:\n" + msg)
+    assert "If the pin is not yours to move" not in msg, msg
+
+
+@pytest.mark.parametrize("plat", PLATFORMS)
+@responses.activate
+def test_a_current_tag_never_triggers_an_upgrade(
+    cache, tmp_path, monkeypatch, plat, recording_pip,
+):
+    """A 404 on a published tag is our defect, not their pin. Upgrading there
+    changes nothing and hides the real cause behind a reinstall."""
+    monkeypatch.setattr(sys, "platform", plat)
+    seal, name, _, _ = publish(tmp_path, plat)
+    responses.add(responses.GET,
+                  RELEASE_URL_TEMPLATE.format(tag=seal.tag, asset=name), status=404)
+
+    with pytest.raises(RuntimeError):
+        ensure_binary(seal=seal)
+    assert not recording_pip, f"a current tag ran pip: {recording_pip}"
+
+
+@pytest.mark.parametrize("plat", PLATFORMS)
+@responses.activate
+def test_the_kill_switch_stops_the_upgrade_and_the_message_says_so(
+    cache, tmp_path, monkeypatch, plat, recording_pip,
+):
+    """Same escape hatch as every other repair in this package. Somebody who does
+    not want a library touching site-packages sets it once and gets the command
+    to run instead."""
+    from invisible_core import pin
+
+    monkeypatch.setenv(pin.AUTOFIX_ENV, "off")
+    monkeypatch.setattr(sys, "platform", plat)
+    seal, name, archive_bytes, _ = publish(tmp_path, plat)
+    old = load_seal(write_seal(tmp_path / "old.json", tag="firefox-13",
+                               sha_for={(plat, host_arch()):
+                                        hashlib.sha256(archive_bytes).hexdigest()}))
+    responses.add(responses.GET,
+                  RELEASE_URL_TEMPLATE.format(tag="firefox-13", asset=name), status=404)
+
+    with pytest.raises(RuntimeError) as exc:
+        ensure_binary(seal=old)
+    assert not recording_pip, "the kill switch did not stop the install"
+    msg = str(exc.value)
+    assert "pip install --upgrade" in msg, ("with the repair off, the user has to "
+                                            "be told what to run:\n" + msg)
+    assert pin.AUTOFIX_ENV in msg, msg
+
+
+@pytest.mark.parametrize("plat", PLATFORMS)
+@responses.activate
+def test_an_editable_consumer_is_never_overwritten(
+    cache, tmp_path, monkeypatch, plat, recording_pip,
+):
+    """The rule that cost three corrupted measurements on 2026-07-27: a working
+    tree is never replaced by a published wheel, and an ABSENCE of evidence does
+    not read as permission."""
+    from invisible_core import _env
+
+    class Verdict:
+        state, path, why = _env.EDITABLE, "C:/checkout", "direct_url.json says editable"
+        safe_to_reinstall = False
+
+    monkeypatch.setattr("invisible_core._env._editable_of", lambda facts: Verdict())
+    monkeypatch.setattr(sys, "platform", plat)
+    seal, name, archive_bytes, _ = publish(tmp_path, plat)
+    old = load_seal(write_seal(tmp_path / "old.json", tag="firefox-13",
+                               sha_for={(plat, host_arch()):
+                                        hashlib.sha256(archive_bytes).hexdigest()}))
+    responses.add(responses.GET,
+                  RELEASE_URL_TEMPLATE.format(tag="firefox-13", asset=name), status=404)
+
+    with pytest.raises(RuntimeError) as exc:
+        ensure_binary(seal=old)
+    assert not recording_pip, "an editable install was about to be overwritten"
+    assert "EDITABLE" in str(exc.value), str(exc.value)
