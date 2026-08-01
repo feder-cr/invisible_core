@@ -41,7 +41,7 @@ def _repair(monkeypatch, verdict, *, ran=None):
     calls = []
     monkeypatch.setattr(_pin, "INSTALL_RUNNER",
                         lambda cmd, execute=False: calls.append((cmd, execute))
-                        or _pin.RunOutcome(False, "stubbed", _pin.format_command(cmd)))
+                        or _pin.InstallOutcome(False, _pin.format_command(cmd), "stubbed"))
     if ran is not None:
         ran.append(calls)
     out = io.StringIO()
@@ -84,8 +84,28 @@ def test_an_ordinary_index_install_is_still_repaired(monkeypatch):
 
 
 def test_a_broken_probe_refuses_rather_than_assuming_it_is_safe(monkeypatch):
-    """If the detector itself raises, the answer is still no. An exception is an
-    absence of evidence like any other."""
+    """If the detector itself raises, the answer is still no.
+
+    THIS TEST USED TO ASSERT THE OPPOSITE OF ITS OWN NAME, and could not fail.
+    Its only assertion was `result is not None`, and `repair_core` returns a
+    `RepairResult` on every path. It also named `_pin.RunOutcome`, which does not
+    exist - the type is `InstallOutcome` - and the resulting `AttributeError` was
+    swallowed by `repair_core`'s own `except Exception` around the runner, so a
+    test standing on a stale API stayed green.
+
+    The inline comment defended the permissive branch: refusing "would brick every
+    environment whose metadata is merely unusual". Read on 2026-08-01 and weighed
+    rather than overridden - it does not hold. Refusing does not brick anything:
+    the repair declines and prints the command to run by hand, which is what every
+    other refusal in this module already does. Proceeding runs
+    `pip install --force-reinstall` over what may be a working tree, which is the
+    incident of 2026-07-27 that corrupted three measurements, and it happened
+    again during this refactor when a mutation removed the guard.
+
+    An absence of evidence is not permission. That is the rule `_env` was written
+    for and states in its own docstring, and this file's name is
+    `test_editable_is_never_overwritten`.
+    """
     monkeypatch.setattr(_pin, "_REPAIR_ATTEMPTED", False)
     monkeypatch.delenv(_pin.AUTOFIX_ATTEMPTED_ENV, raising=False)
     monkeypatch.delenv(_pin.AUTOFIX_ENV, raising=False)
@@ -97,14 +117,16 @@ def test_a_broken_probe_refuses_rather_than_assuming_it_is_safe(monkeypatch):
     calls = []
     monkeypatch.setattr(_pin, "INSTALL_RUNNER",
                         lambda cmd, execute=False: calls.append(cmd)
-                        or _pin.RunOutcome(False, "stubbed", ""))
+                        or _pin.InstallOutcome(False, "stubbed", ""))
     result = _pin.repair_core(dist_name="invisible-playwright", want="18.4.0",
                               core_preimported=False, stream=io.StringIO())
-    # A probe that cannot answer leaves the previous behaviour: the repair is
-    # attempted. That is a DELIBERATE choice and it is written here so the next
-    # reader does not "fix" it by accident - refusing on an unreadable probe
-    # would brick every environment whose metadata is merely unusual.
-    assert result is not None
+    assert not calls, (
+        "the installer ran after the probe raised - an unreadable probe is not "
+        "permission to overwrite whatever is on disk")
+    assert result.attempted is False, result
+    assert "could not determine" in result.reason, result.reason
+    assert _pin.AUTOFIX_ENV in result.reason, (
+        "a refusal must name the way out, or the user is stuck: " + result.reason)
 
 
 def test_the_strong_detector_is_the_one_the_installer_uses(monkeypatch):

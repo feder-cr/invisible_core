@@ -293,7 +293,7 @@ def test_no_install_e2e_file_imports_a_package_the_runner_does_not_have():
 
 
 def test_every_repo_runs_the_undefined_name_check():
-    """F821 and F811 in CI, in all three, or the class comes straight back.
+    """F821, F811 and F601 in CI, in all three, or the class comes straight back.
 
     Both rules earned their place on 2026-07-28. `throwaway_venv` was used at one
     line of the manager's install e2e and imported nowhere, which took that job
@@ -303,10 +303,18 @@ def test_every_repo_runs_the_undefined_name_check():
     the repository: harmless only because `from __future__ import annotations`
     never evaluates an annotation, so nothing ever tried to resolve it.
 
-    Neither is a style question and neither is findable by running tests, which
-    is why this is the pair rather than a full lint config. There were ZERO
-    violations in all three repos when the step went in, so it is a gate and not
-    a backlog - if it ever starts failing, fix the name, do not widen the select.
+    F601 joined them on 2026-08-01, for the same reason and after the same kind
+    of incident: a dict literal with a REPEATED KEY silently keeps only the last
+    one. Adding a row to the consumer contract under a key that already appeared
+    later in the same literal discarded it without a word, and the test it was
+    meant to satisfy went on failing with a message that named the very entry
+    just written. Python does not warn, and no test can see the entry that was
+    thrown away. Zero violations in all three repos when it went in.
+
+    None of the three is a style question and none is findable by running tests,
+    which is why this is a short list rather than a full lint config. All were at
+    ZERO violations in all three repos when the step went in, so it is a gate and
+    not a backlog - if it starts failing, fix the code, do not widen the select.
     """
     import re
 
@@ -321,7 +329,7 @@ def test_every_repo_runs_the_undefined_name_check():
             missing.append(f"{repo}: {rel} never runs ruff check --select")
             continue
         selected = set(m.group(1).split(","))
-        absent = sorted({"F821", "F811"} - selected)
+        absent = sorted({"F821", "F811", "F601"} - selected)
         if absent:
             missing.append(f"{repo}: {rel} selects {sorted(selected)}, missing {absent}")
     assert not missing, (

@@ -91,6 +91,14 @@ def make_core(
     # point of this fixture - the derivation under test must be the real one.
     shutil.copy2(REAL_PKG / "pin.py", pkg / "pin.py")
     shutil.copy2(REAL_PKG / "_pin.py", pkg / "_pin.py")
+    # _env.py holds the editable detector repair_core consults before it runs
+    # `pip install --force-reinstall`. It was NOT copied until 2026-08-01, so
+    # `from ._env import ...` raised ModuleNotFoundError in every synthetic site
+    # and the repair took the fallback branch - which is to say twelve tests that
+    # read as "the repair runs" were exercising a path no real install has, and
+    # the guard between them and a force-reinstall was never once executed here.
+    # test_the_stub_carries_every_module_pin_imports keeps the two in step.
+    shutil.copy2(REAL_PKG / "_env.py", pkg / "_env.py")
     if with_version:
         text = (REAL_PKG / "_version.py").read_text(encoding="utf-8")
         text = re.sub(r"(?m)^CORE_REVISION\s*=\s*\d+", f"CORE_REVISION = {revision}", text)
@@ -869,7 +877,12 @@ def run_autofix(
 def mismatched_site(tmp_path, *, name="site", tag="firefox-18", want="19.0.0",
                     direct_url=None):
     """A stub environment whose core is one engine release behind its consumer."""
-    site = tmp_path / name
+    # Under a directory literally named site-packages, because that is the one
+    # confident negative _editable_of has: no direct_url.json AND the importable
+    # files in site-packages is what an ordinary index install looks like and
+    # what no editable install looks like. A tmp dir with any other name reads as
+    # "files outside site-packages", i.e. editable, and the repair refuses.
+    site = tmp_path / name / "site-packages"
     make_core(site, tag=tag)
     make_distinfo(site, "invisible-core", "18.0.0", direct_url=direct_url)
     make_distinfo(site, "fake-consumer", "1.2.3", (f"invisible-core=={want}",))
@@ -1040,10 +1053,25 @@ def test_the_escape_hatch_still_wins_over_the_repair(tmp_path):
     assert out["after"] == "18.0.0", out
 
 
-# ── the editable case: repaired too, and recoverable ─────────────────────────
+# -- the editable case: refused, and handed the command that fixes it --------
+#
+# These four tests said "repaired too" until 2026-08-01. They were green for a
+# reason that had nothing to do with the behaviour they described: make_core did
+# not copy _env.py, so `from ._env import ...` inside repair_core raised
+# ModuleNotFoundError, the fallback set verdict = None, and the editable guard
+# was never reached in this file. In a real install _env.py always ships, so the
+# behaviour asserted here could not happen on a user's machine.
+#
+# What actually happens - and what the owner's instruction, "an editable install
+# is not a reason to stop, it is a reason to say what is being lost", now buys -
+# is that the repair REFUSES and names the exact command that reattaches the
+# tree. The saying survived; the overwriting did not, because on 2026-07-27 it
+# cost three corrupted measurements in one session, and it recurred during this
+# refactor when a mutation removed the guard.
+
 
 def editable_site(tmp_path, checkout: Path):
-    site = tmp_path / "site"
+    site = tmp_path / "site" / "site-packages"
     make_core(site, tag="firefox-18")
     dist_info = make_distinfo(
         site, "invisible-core", "18.0.0",
@@ -1052,59 +1080,61 @@ def editable_site(tmp_path, checkout: Path):
     return site, dist_info
 
 
-def test_an_editable_core_is_repaired_too(tmp_path):
-    """The owner's explicit instruction. An editable install is not a reason to
-    stop: it is a reason to say what is being lost."""
+def test_an_editable_core_is_refused_and_pip_never_runs(tmp_path):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     site, _ = editable_site(tmp_path, checkout)
     out = run_autofix(site, new_tag="firefox-19")
 
-    assert out["after"] == "19.0.0", out
-    assert out["raised"] == [None], out["raised"]
-    assert len(out["calls"]) == 1 and out["calls"][0]["execute"] is True, out["calls"]
+    assert out["calls"] == [], (
+        "pip ran against an editable install: " + str(out["calls"]))
+    assert out["after"] == "18.0.0", out
+    assert out["raised"] != [None], (
+        "the pin is still unsatisfied, so the import must not be allowed to "
+        "continue as though it had been repaired")
 
 
-def test_the_editable_repair_warns_before_it_detaches_the_working_tree(tmp_path):
+def test_the_refusal_names_the_tree_it_is_protecting(tmp_path):
+    """A refusal that does not say WHAT it found reads as a malfunction, and the
+    next person switches it off. It has to name the working tree."""
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     site, _ = editable_site(tmp_path, checkout)
-    said = run_autofix(site, new_tag="firefox-19")["said"]
+    raised = run_autofix(site, new_tag="firefox-19")["raised"][0]
 
-    warned_at = said.find("EDITABLE")
-    ran_at = said.find("repairing it now")
-    assert warned_at != -1, said
-    assert warned_at < ran_at, said
-    assert str(checkout) in said, said
+    assert "EDITABLE" in raised, raised
+    assert str(checkout) in raised, raised
 
 
-def test_the_editable_repair_prints_the_command_that_reattaches_the_tree(tmp_path):
-    """An editable install points at the owner's source tree, and installing over
-    it detaches the environment from that tree: the sources survive, but imports
-    stop coming from them and local edits stop having any effect. The undo has to
-    be handed over, not left to be worked out."""
+def test_the_refusal_hands_over_the_command_that_reattaches_the_tree(tmp_path):
+    """An editable install points at the owner's source tree. The repair no
+    longer detaches it, but the environment IS still broken - wrong core version
+    for this consumer - so the user has to fix it, and the command that does so
+    has to be handed over rather than left to be worked out."""
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     site, _ = editable_site(tmp_path, checkout)
-    said = run_autofix(site, new_tag="firefox-19")["said"]
+    raised = run_autofix(site, new_tag="firefox-19")["raised"][0]
 
-    assert f"pip install -e {checkout}" in said, said
-    assert "NO LONGER an editable install" in said, said
+    assert f"pip install -e {checkout}" in raised, raised
 
 
-def test_the_editable_path_is_read_before_the_install_destroys_the_record(tmp_path):
-    """pip replaces the .dist-info, and direct_url.json with it. Reading the path
-    after the install returns None and the recovery command would silently stop
-    being printed, on exactly the machines that need it - this project's own,
-    where all three distributions are editable."""
-    checkout = tmp_path / "checkout"
+def test_the_editable_path_comes_from_the_record_that_is_still_there(tmp_path):
+    """The old code read the checkout path AFTER pip had replaced the .dist-info
+    it lives in, which returned None and silently stopped printing the recovery
+    line on exactly the machines that needed it. Refusing removes that ordering
+    hazard entirely - nothing has been overwritten when the message is built - and
+    this asserts the path survives the trip through a subprocess."""
+    checkout = tmp_path / "a checkout with spaces"
     checkout.mkdir()
     site, dist_info = editable_site(tmp_path, checkout)
-    said = run_autofix(
-        site, new_tag="firefox-19",
-        wipe_direct_url=str(dist_info / "direct_url.json"))["said"]
+    raised = run_autofix(site, new_tag="firefox-19")["raised"][0]
 
-    assert f"pip install -e {checkout}" in said, said
+    assert (dist_info / "direct_url.json").exists(), (
+        "nothing may have been rewritten: the repair refused")
+    assert f'pip install -e "{checkout}"' in raised, (
+        "a path with spaces has to come back quoted, or it is not pasteable: "
+        + raised)
 
 
 def test_a_non_editable_repair_prints_no_reattach_command(tmp_path):
@@ -1131,3 +1161,28 @@ def test_the_module_holds_no_version_literal():
 def test_the_messages_carry_no_em_dashes():
     """Project rule: no em-dashes anywhere, including user-facing error text."""
     assert "\u2014" not in SOURCE and "\u2013" not in SOURCE
+
+
+def test_the_stub_carries_every_module_pin_imports(tmp_path):
+    """The fixture is only "real-enough" if nothing it omits changes the answer.
+
+    _env.py was missing until 2026-08-01. `from ._env import ...` inside
+    repair_core raised ModuleNotFoundError, the handler treated that as "no
+    verdict", and twelve tests in this file exercised a branch that no installed
+    environment can reach - including four that asserted an editable install gets
+    overwritten, which is the one thing the guard exists to prevent.
+
+    A missing module in a stub does not announce itself: the import is inside a
+    try, and the fallback is a working code path. So the fixture is checked
+    against the imports the shipped file actually makes, and a new `from .x
+    import y` in pin.py fails here until the stub carries x.
+    """
+    pkg = make_core(tmp_path / "site" / "site-packages")
+    source = (REAL_PKG / "pin.py").read_text(encoding="utf-8")
+    needed = set(re.findall(r"(?m)^\s*from \.(\w+) import", source))
+    assert needed, "the import scan found nothing - the regex stopped matching"
+    missing = sorted(m for m in needed if not (pkg / f"{m}.py").exists())
+    assert not missing, (
+        f"pin.py imports {missing} and make_core does not copy them, so those "
+        f"imports raise in every synthetic site and the code under test silently "
+        f"takes its fallback branch")

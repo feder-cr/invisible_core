@@ -754,21 +754,42 @@ def repair_core(
     # `safe_to_reinstall` is `state == NOT_EDITABLE`, not `state != EDITABLE`:
     # every way the old check was defeated produced an ABSENCE of evidence, and
     # that must not read as permission.
+    # A probe that RAISES used to set `verdict = None`, which then failed the
+    # `verdict is not None` guard below - so the reinstall PROCEEDED. The comment
+    # on that line said "a broken probe is not a licence" and the code did the
+    # opposite of it. Found 2026-08-01 by reading the two together.
+    #
+    # An absence of evidence is not permission, which is the rule `_env` was
+    # written for and states in its own docstring. A probe that cannot answer is
+    # the same answer as UNKNOWN: refuse.
     try:
         from ._env import _dist_facts, _editable_of
 
         verdict = _editable_of(_dist_facts(CORE_NAME))
-    except Exception:                      # a broken probe is not a licence
-        verdict = None
+    except Exception as exc:
+        return RepairResult(
+            False, False,
+            f"could not determine whether {CORE_NAME} is an editable install "
+            f"({type(exc).__name__}: {exc}), and this repair overwrites whatever "
+            f"is there. Refusing rather than guessing. Run the command above "
+            f"yourself, or set {AUTOFIX_ENV}=off for the session",
+            shown, None, None)
     if verdict is not None and not verdict.safe_to_reinstall:
         where = f" at {verdict.path}" if verdict.path else ""
+        # Hand back the exact command, with the real path, when the detector
+        # found one. That was the point of the older warn-then-repair code and
+        # it survives the change to refusing: the undo is handed over, not left
+        # to be worked out. Through format_command because a checkout path
+        # routinely contains spaces on Windows, and a recovery line that breaks
+        # on those machines helps only the people who did not need it.
+        remedy = (format_command(["pip", "install", "-e", verdict.path])
+                  if verdict.path else f"pip install -e <path-to-{CORE_NAME}>")
         return RepairResult(
             False, False,
             f"{CORE_NAME} is an EDITABLE install{where} ({verdict.why}), so the "
             f"automatic repair would overwrite a working tree with a published "
             f"wheel. Refusing. Fix the environment yourself - usually "
-            f"`pip install -e <path-to-{CORE_NAME}>` - or set {AUTOFIX_ENV}=off "
-            f"for the session",
+            f"`{remedy}` - or set {AUTOFIX_ENV}=off for the session",
             shown, None, None)
 
     # Set BEFORE the attempt, both flags, so a crash, a hang killed from outside

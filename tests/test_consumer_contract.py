@@ -66,9 +66,6 @@ CONTRACT = {
         "resolve_session_locale", "resolve_session_timezone",
         "translate_profile_to_prefs", "tz_env",
     },
-    "invisible_core.__main__": {
-        "main",
-    },
     "invisible_core._fpforge": {
         "Profile", "_network", "_sampler", "generate_profile", "profile",
     },
@@ -76,7 +73,17 @@ CONTRACT = {
         "BINARY_VERSION",
     },
     "invisible_core.download": {
-        "cache_root", "clear_cache", "engine_status", "ensure_binary",
+        "cache_root", "engine_status", "ensure_binary",
+        # Two rows left on 2026-08-01 with the CLI reduction that removed the
+        # `clear-cache` subcommand: download.clear_cache, and __main__.main with
+        # the whole module row. Neither is deleted from the core - the core's own
+        # tests still cover them - they are simply no longer load-bearing for a
+        # consumer, and a contract that over-claims freezes this package for
+        # nobody.
+        # iter_cached_engines joined the contract on 2026-08-01: the wrapper's
+        # `fetch` checks every cached tree against the seal on every run, which
+        # is what the removed `doctor` subcommand used to do on request.
+        "iter_cached_engines",
     },
     "invisible_core.pin": {
         "AUTOFIX_ENV", "CORE_NAME", "PinDeclaration", "Requirement",
@@ -92,7 +99,11 @@ CONTRACT = {
         "terminate", "wait_until_gone",
     },
     "invisible_core.seal": {
-        "EngineMismatch", "active_seal", "verify_engine",
+        # engine_problems joined on 2026-08-01, with iter_cached_engines above:
+        # the wrapper's `fetch` checks every cached tree against the seal on
+        # every run and prints WHY a tree does not match, which is what the
+        # removed `doctor` subcommand used to do on request.
+        "EngineMismatch", "active_seal", "engine_problems", "verify_engine",
     },
 }
 
@@ -166,16 +177,17 @@ def test_the_private_modules_in_the_contract_are_named_as_such():
     on 2026-07-28 when both consumers had to be reverted to `_pin` - an exact
     pin means they may only use what the INDEX has, and the rename carried no
     version bump. Publish, move the pin, then use the name: all three happened
-    and it is 6 across two now. What remains is `_fpforge` (the sampler,
-    aliased wholesale by the wrapper's own shim) and `__main__` (the CLI the
-    wrapper's `cli` delegates to). Both real, both small. What remains is `_fpforge` (the sampler package, aliased wholesale by
-    the wrapper's own back-compat shim) and `__main__` (the CLI entry point the
-    wrapper's `cli` delegates to). Both are real and both are small; this test
-    is what stops the number climbing back without somebody deciding to.
+    and it was 6 across two.
+
+    It is 5 across ONE since 2026-08-01. `__main__` left with the CLI reduction:
+    the wrapper's `cli` used to delegate to the core's entry point and now owns
+    its two commands outright. What remains is `_fpforge`, the sampler package,
+    aliased wholesale by the wrapper's own back-compat shim. This test is what
+    stops the number climbing back without somebody deciding to.
     """
     private = {m: len(n) for m, n in CONTRACT.items()
                if m.split(".")[-1].startswith("_")}
-    assert private == {'invisible_core._fpforge': 5, 'invisible_core.__main__': 1}, (
+    assert private == {'invisible_core._fpforge': 5}, (
         f"the set of PRIVATE modules the consumers depend on changed: {private}.\n"
         "If it grew, a refactor that looks internal now breaks two published "
         "packages. If it shrank, update this test - that is progress worth "
