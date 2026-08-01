@@ -144,8 +144,7 @@ def build_launch_plan(
     from .download import ensure_binary
     from ._fpforge import generate_profile
     from ._geo import prepare_session_geo, resolve_session_locale
-    from ._proxy import configure_proxy
-    from .prefs import translate_profile_to_prefs
+    from .prefs import compose_session_prefs
 
     binary = str(ensure_binary(binary_ver) if binary_ver else ensure_binary())
     # Resolves timezone="auto" from the egress AND discovers the egress IP;
@@ -155,15 +154,13 @@ def build_launch_plan(
     if (locale or "").strip().lower() == "auto":
         loc = resolve_session_locale(geo.egress_ip, proxy)
     fp = generate_profile(seed=seed, pin=pin)
-    prefs = translate_profile_to_prefs(fp, locale=loc, timezone=geo.timezone)
-    configure_proxy(proxy, prefs)  # SOCKS-auth prefs (no-op for http/https/None)
-    # Persistent-profile direct launch: the browser can be hard-killed (a manager
-    # Stop, or killed mid-startup on a rapid relaunch). Keep Firefox from counting
-    # that as a startup crash (the "closed unexpectedly / Safe Mode" prompt) or
-    # offering to restore a "crashed" session. A caller can override either by
-    # setting the pref in ``pin``/prefs beforehand (setdefault below).
-    prefs.setdefault("toolkit.startup.max_resumed_crashes", -1)
-    prefs.setdefault("browser.sessionstore.resume_from_crash", False)
+    # One composition for all three entry points (prefs.py). This path takes the
+    # proxy layer and the hard-kill layer; it does NOT write the humanize prefs,
+    # which is what humanize=None means - see compose_session_prefs.
+    prefs = compose_session_prefs(
+        fp, locale=loc, timezone=geo.timezone,
+        proxy=proxy, survive_hard_kill=True,
+    ).prefs
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)
     env = build_launch_env(prefs, timezone=geo.timezone or None, egress_ip=geo.egress_ip)

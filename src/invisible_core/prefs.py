@@ -18,11 +18,13 @@ The translation is split into:
 from __future__ import annotations
 
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import USER_AGENT
 from ._fpforge import Profile
 from ._webgl_personas import render_noise_seed, select_persona
+from ._headless import cloak_prefs
+from ._proxy import configure_proxy
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -761,3 +763,134 @@ def translate_profile_to_prefs(
     _apply_caller_overlay(prefs, extra_prefs)
 
     return prefs
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  One composition, not three
+# ──────────────────────────────────────────────────────────────────────
+#
+# `translate_profile_to_prefs` is the fingerprint. It is never the whole prefs
+# dict a session runs with: a proxy, a cloak, a humanize toggle and two crash
+# prefs sit on top of it, and until 2026-08-01 each of the three entry points
+# added its own subset in its own order.
+#
+#     build_launch_plan          proxy, crash prefs
+#     _session.build_prefs       cloak, humanize          (invisible-playwright)
+#     get_default_stealth_prefs  humanize
+#
+# Measured consequence: a caller using `get_default_stealth_prefs` with a SOCKS
+# proxy got no `network.proxy.*` pref at all, so the auth prefs the patched
+# binary reads were simply absent. Nothing compared the three dicts.
+#
+# The layers and their order are the union of what the three did, unchanged:
+#
+#   1. the fingerprint          translate_profile_to_prefs (extra_prefs last)
+#   2. the proxy                configure_proxy, mutating
+#   3. the cloak                setdefault, so extra_prefs still wins
+#   4. humanize                 update, so it wins over extra_prefs
+#   5. surviving a hard kill    setdefault, so a caller can override
+#
+# setdefault vs update is not a detail: each one is the precedence the layer had
+# before, and swapping either silently changes what a caller's extra_prefs can
+# reach.
+
+#: Cap on a binary-drawn mouse path when `humanize=True`, in seconds.
+HUMANIZE_MAX_SECONDS = 1.5
+
+
+class ComposedPrefs(NamedTuple):
+    """The prefs, and the proxy Playwright still has to be told about.
+
+    Two returns because `configure_proxy` has two outputs: it writes the SOCKS
+    auth prefs (which the binary reads) and hands back the HTTP/HTTPS dict
+    (which only Playwright can act on). A composer that returned prefs alone
+    would force every caller to run the proxy step a second time to recover it.
+    """
+    prefs: Dict[str, Any]
+    playwright_proxy: Optional[Dict[str, str]]
+
+
+def humanize_max_seconds(humanize: Any) -> float:
+    """The motion cap implied by a `humanize=` value, for any value.
+
+    Anything unusable falls back to the default rather than raising or being
+    written through. `get_default_stealth_prefs` used to do `float(humanize)`
+    bare: `humanize="fast"` raised ValueError out of a pref builder, and
+    `humanize=-1` wrote `stealthfox.humanize.maxTime = "-1.0"` into the profile.
+    The wrapper's own copy of this function had been robust since 0.4.0; this is
+    that behaviour, in the one place both now read.
+    """
+    if humanize is True:
+        return HUMANIZE_MAX_SECONDS
+    try:
+        value = float(humanize)
+    except (TypeError, ValueError):
+        return HUMANIZE_MAX_SECONDS
+    return value if value > 0 else HUMANIZE_MAX_SECONDS
+
+
+def humanize_prefs(humanize: Any) -> Dict[str, Any]:
+    """The `stealthfox.*` prefs implied by a `humanize=` value.
+
+    Falsy turns the binary's own path expansion OFF and writes no cap, which is
+    what a caller drawing its own trajectories needs: with both generators live
+    the browser expands a path between each pair of the caller's waypoints.
+    """
+    if not humanize:
+        return {"stealthfox.humanize": False}
+    return {
+        "stealthfox.humanize": True,
+        "stealthfox.humanize.maxTime": str(humanize_max_seconds(humanize)),
+    }
+
+
+def compose_session_prefs(
+    profile: Profile,
+    *,
+    locale: Optional[str] = None,
+    timezone: Optional[str] = None,
+    extra_prefs: Optional[Dict[str, Any]] = None,
+    virtual_display: bool = False,
+    proxy: Optional[Dict[str, str]] = None,
+    cloak: bool = False,
+    humanize: Any = None,
+    survive_hard_kill: bool = False,
+) -> ComposedPrefs:
+    """Every pref a session runs with, in one place.
+
+    Each layer above the fingerprint is a flag, and a flag left at its default
+    means that layer is not applied - so a caller that wants only the
+    fingerprint gets exactly what `translate_profile_to_prefs` returns.
+
+    `humanize=None` is not the same as `humanize=False`: None leaves the two
+    `stealthfox.humanize*` prefs untouched, which is what the direct-launch path
+    has always done, and False writes the pref off. The distinction matters
+    because the pref has a default compiled into the binary, and never writing
+    it is not the same as writing it false.
+
+    What each caller still owns is DELIVERY, which is the part that genuinely
+    differs: the direct-launch path writes a `user.js`, the Playwright path
+    passes a dict to `firefox_user_prefs=`.
+    """
+    prefs = translate_profile_to_prefs(
+        profile,
+        locale=locale,
+        timezone=timezone,
+        extra_prefs=extra_prefs,
+        virtual_display=virtual_display,
+    )
+    playwright_proxy = configure_proxy(proxy, prefs) if proxy else None
+    if cloak:
+        # setdefault: an explicit caller override wins over the cloak.
+        for key, value in cloak_prefs().items():
+            prefs.setdefault(key, value)
+    if humanize is not None:
+        prefs.update(humanize_prefs(humanize))
+    if survive_hard_kill:
+        # A persistent profile can be hard-killed - a manager Stop, or a kill
+        # mid-startup on a rapid relaunch. Keep Firefox from counting that as a
+        # startup crash (the "closed unexpectedly / Safe Mode" prompt) or
+        # offering to restore a "crashed" session.
+        prefs.setdefault("toolkit.startup.max_resumed_crashes", -1)
+        prefs.setdefault("browser.sessionstore.resume_from_crash", False)
+    return ComposedPrefs(prefs, playwright_proxy)

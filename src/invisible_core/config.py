@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from ._fpforge import generate_profile
 from ._webgl_personas import forced_gpu_class
-from .prefs import translate_profile_to_prefs
+from .prefs import compose_session_prefs
 
 
 def get_default_stealth_prefs(
@@ -51,6 +51,7 @@ def get_default_stealth_prefs(
     extra_prefs: Optional[Dict[str, Any]] = None,
     humanize: Union[bool, float] = True,
     virtual_display: bool = False,
+    proxy: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Build a complete ``firefox_user_prefs`` dict for ``firefox.launch()``.
 
@@ -102,6 +103,12 @@ def get_default_stealth_prefs(
         virtual_display: When True on Windows, apply GPU-disabling prefs
             to prevent GPU process crashes on virtual desktops without
             D3D11 backend.
+        proxy: Optional endpoint dict. A SOCKS endpoint writes the
+            ``network.proxy.*`` auth prefs the patched binary reads; an
+            HTTP/HTTPS one is Playwright's to apply, so pass it to
+            ``launch(proxy=...)`` yourself. Added 2026-08-01: before it,
+            this function returned a prefs dict with no proxy configuration
+            whatever endpoint you were about to use.
 
     Returns:
         Dict ready to pass as ``firefox_user_prefs=`` to
@@ -109,19 +116,24 @@ def get_default_stealth_prefs(
     """
     resolved_seed = int(seed) if seed is not None else secrets.randbits(31)
     profile = generate_profile(resolved_seed, pin=pin, fixed_gpu_class=forced_gpu_class(resolved_seed))
-    prefs = translate_profile_to_prefs(
+    # One composition for all three entry points (prefs.py). Two things this
+    # function did NOT do before 2026-08-01 and now does, both by taking the
+    # shared layers rather than rebuilding them:
+    #   * `proxy=` reaches configure_proxy, so a SOCKS endpoint produces the
+    #     network.proxy.* auth prefs. Without it a caller driving Playwright
+    #     themselves got a prefs dict with no proxy configuration at all;
+    #   * humanize accepts any value the way the wrapper always has. `float()`
+    #     bare raised ValueError on humanize="fast", out of a pref builder, and
+    #     wrote maxTime = "-1.0" for humanize=-1.
+    return compose_session_prefs(
         profile,
         locale=locale,
         timezone=timezone,
         extra_prefs=extra_prefs,
         virtual_display=virtual_display,
-    )
-    # stealthfox.* is the namespace the binary's Juggler reads (see launcher.py note).
-    prefs["stealthfox.humanize"] = bool(humanize)
-    if humanize:
-        max_seconds = float(humanize) if not isinstance(humanize, bool) else 1.5
-        prefs["stealthfox.humanize.maxTime"] = str(max_seconds)
-    return prefs
+        proxy=proxy,
+        humanize=humanize,
+    ).prefs
 
 
 def get_default_args() -> List[str]:
