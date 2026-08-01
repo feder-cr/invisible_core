@@ -91,6 +91,18 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip build hatchling
+      - name: the package's own runtime dependencies
+        # Both steps below run repo scripts that import invisible_core, and
+        # importing the package reaches download.py, which imports
+        # platformdirs. Without this the gate dies on ModuleNotFoundError
+        # before it can judge anything.
+        #
+        # It had never been noticed because this job had never RUN: the two
+        # publish runs before it show `gate: skipped`, because their version
+        # was already on the index and `already-published` short-circuits
+        # exactly that case. A workflow that only ever no-ops is green in the
+        # same way an unexecuted branch is covered.
+        run: python -m pip install -e . --quiet
       - name: the hooks are installed for anyone who clones this
         # The local pre-push layer is only real if .githooks is wired up. CI
         # cannot check somebody else's clone, but it can check that the wiring
@@ -120,6 +132,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip build hatchling twine
+      - run: python -m pip install -e . --quiet   # version_gate imports the package
       - name: gate, upload, record
         # Not `twine upload` directly: `publish` re-runs the gate in-process and
         # returns its exit code without reaching twine on a refusal, and it
