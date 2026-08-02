@@ -1091,3 +1091,60 @@ def test_the_index_cross_check_asks_about_THIS_project(monkeypatch):
     R.main(["--project-root", str(REPO_ROOT), "check",
             "--index-json-url", "https://example.invalid/pypi/x/json"])
     assert seen and seen[0] == "https://example.invalid/pypi/x/json", seen
+
+
+def test_a_recorded_entry_carries_every_field_the_ledger_promises():
+    """The ledger had two shapes, and nine of eleven entries had the richer one.
+
+    `record` wrote seven fields; the entries back-filled by hand from the index
+    carried eight, the extra one being `requires_dist`. Nothing broke, because
+    `check` reads requires_dist out of the artifact it just built and never out
+    of the ledger - which is exactly why the drift could last: a field that is
+    written by one path, absent from another and read by neither.
+
+    It matters anyway. The ledger is the only record of what a published version
+    DECLARED it needed once the tag has moved on, and this project's entire
+    coupling is an exact pin, so "which core did 0.4.4 ask for" is the first
+    question asked about any release that behaved oddly.
+
+    Asserted as an exact set, not a subset: a subset check passes while the entry
+    quietly grows a field that half the readers do not know about, which is the
+    shape this test exists to close.
+    """
+    import inspect
+
+    from invisible_core import release
+
+    src = inspect.getsource(release.cmd_record)
+    start = src.index('ledger["released"].append(')
+    written = set(re.findall(r'"(\w+)":', src[start:src.index("})", start)]))
+
+    expected = {"version", "seal_tag", "published_at", "requires_dist",
+                "wheel_filename", "sdist_filename", "wheel", "sdist"}
+    assert written == expected, (
+        f"the recorded entry writes {sorted(written)}; the ledger's shape is "
+        f"{sorted(expected)}. Adding a field means every reader of an older entry "
+        f"has to tolerate its absence; removing one means a published version "
+        f"stops being able to answer a question about itself.")
+
+
+def test_every_ledger_entry_in_this_repo_has_the_fields_the_gate_needs():
+    """The gate refuses a ledger entry with no `wheel_filename` by name: "it is
+    the only thing in the entry that corroborates the version string - without it
+    one edited field turns a published version into an unpublished one".
+
+    That refusal was met by a hand-written back-fill on 2026-08-02, which is the
+    only way an entry gets written outside `record`. This walks what is actually
+    on disk rather than what the writer intends.
+    """
+    import json
+
+    ledger = json.loads((REPO_ROOT / "PUBLISHED.json").read_text(encoding="utf-8"))
+    required = {"version", "published_at", "wheel_filename", "sdist_filename",
+                "wheel", "sdist"}
+    bad = {}
+    for entry in ledger["released"]:
+        missing = sorted(required - set(entry))
+        if missing:
+            bad[entry.get("version", "?")] = missing
+    assert not bad, f"ledger entries missing fields the gate reads: {bad}"

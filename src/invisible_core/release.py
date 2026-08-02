@@ -740,6 +740,18 @@ def cmd_record(args) -> int:
         "version": version,
         "seal_tag": info["seal_tag"],
         "published_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        # What that version DECLARED it needed. Nothing reads it back yet -
+        # `check` takes requires_dist from the artifact it just built, never from
+        # the ledger - and it is here because the ledger is the only record of a
+        # published version's dependencies once the tag has moved on, and this
+        # project's whole coupling is an exact pin. Without it the ledger cannot
+        # answer "which core did 0.4.4 ask for", which is the first question
+        # asked about any release that behaved oddly.
+        #
+        # It was also the one field the back-filled entries carried and the
+        # recorded ones did not: nine of eleven entries had it, which is the
+        # half-true-record shape this project keeps paying for.
+        "requires_dist": info["requires_dist"],
         "wheel_filename": info["wheel_filename"],
         "sdist_filename": info["sdist_filename"],
         "wheel": info["wheel"],
