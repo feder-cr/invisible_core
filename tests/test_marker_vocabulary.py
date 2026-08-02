@@ -817,3 +817,58 @@ def test_no_workflow_reads_a_version_its_pyproject_does_not_have():
     assert not problems, (
         "a workflow reads a version that does not exist in its pyproject:"
         + "".join(chr(10) + "  " + p for p in problems))
+
+
+def test_the_workbench_docs_name_no_test_that_does_not_exist():
+    """A doc that cites a test by name is claiming that test exists.
+
+    This is the D1 defect `18-gate-inventory.md` records about itself, and on
+    2026-08-02 it was found alive in three more places, the largest being the
+    CENTRAL TABLE of the release runbook: `17-release-seal-spec.md` mapped
+    fourteen audit cells to fourteen test names, and not one of the names
+    existed. The file existed and every assertion described was real - the table
+    had simply stopped matching its subject while reading as authoritative, in
+    the document somebody follows to cut a release.
+
+    A stale name costs more than a missing one. It sends the next reader to
+    `grep`, the grep returns nothing, and the honest conclusions available are
+    "the doc is wrong" or "the coverage was deleted" - and telling those two
+    apart is the afternoon this gate exists to save.
+
+    THE CONVENTION: a name in BACKTICKS is a claim that it exists. A historical
+    mention - "it was called X until it was renamed" - goes without them. That
+    keeps the rule mechanical instead of asking a scanner to understand tense.
+
+    Skipped outside the workbench: these docs are not part of any package.
+    """
+    import re
+
+    workbench = _RELEASE.parent
+    docs = workbench / "docs" / "firefox-stealth-architecture"
+    if not docs.is_dir():
+        pytest.skip("not the workbench - the architecture docs are not here")
+
+    defined = set()
+    for repo in _DEFAULT_SUITE_WORKFLOW:
+        tests = _RELEASE / repo / "tests"
+        if not tests.is_dir():
+            pytest.skip("not the workbench - the sibling repos are not here")
+        for path in tests.rglob("test_*.py"):
+            defined.update(re.findall(r"(?m)^\s*def (test_[a-z0-9_]+)",
+                                      path.read_text(encoding="utf-8", errors="replace")))
+            defined.add(path.stem)          # docs cite files by name too
+
+    phantom = {}
+    for doc in sorted(docs.glob("*.md")):
+        cited = set(re.findall(r"`(test_[a-z0-9_]+)`",
+                               doc.read_text(encoding="utf-8")))
+        gone = sorted(cited - defined)
+        if gone:
+            phantom[doc.name] = gone
+
+    assert not phantom, (
+        "these docs name tests that do not exist, which sends the next reader to "
+        "a grep that returns nothing:\n  "
+        + "\n  ".join(f"{f}: {names}" for f, names in phantom.items())
+        + "\nEither the name changed and the doc did not follow, or the coverage "
+          "went. If the mention is HISTORICAL, write it without backticks.")
