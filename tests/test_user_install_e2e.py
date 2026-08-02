@@ -289,6 +289,33 @@ def test_the_published_version_has_a_github_release():
             empty.append(version)
 
     problems = []
+    # The LEDGER is the fourth record, and it costs no API call: it is a file in
+    # this repository. `version_gate check` compares it to the index too, but
+    # only on a release - so a version published outside the gate stays invisible
+    # until the NEXT release is refused by it, which is how the gap from
+    # 2026-08-02 was found. Here it surfaces on every run of this job.
+    ledger_path = Path(__file__).resolve().parents[1] / "PUBLISHED.json"
+    recorded = {}
+    if ledger_path.is_file():
+        recorded = {e["version"]: e for e in
+                    json.loads(ledger_path.read_text(encoding="utf-8"))["released"]}
+
+    unrecorded = [v for v in live if recorded and v not in recorded]
+    thin = {v: [k for k in ("published_at", "requires_dist", "wheel_filename",
+                            "sdist_filename", "wheel", "sdist")
+                if k not in recorded[v]]
+            for v in live if v in recorded}
+    thin = {v: missing for v, missing in thin.items() if missing}
+
+    if unrecorded:
+        problems.append(
+            f"on the index and NOT in PUBLISHED.json: {unrecorded}. Those were "
+            f"published outside the gate, so nothing records what shipped under "
+            f"them; back-fill from the artifacts the index serves, never from the "
+            f"tree, which has moved on")
+    if thin:
+        problems.append(f"ledger entries missing fields: {thin}")
+
     if missing:
         problems.append(
             f"on the index with NO release: {missing}. Create each at the commit "
