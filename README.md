@@ -11,6 +11,10 @@ proxy config, and geo/timezone resolution. Importing it does not start a browser
 which is the point: the same fingerprint config backs an automation wrapper and a
 desktop profile manager without either depending on the other.
 
+There is a Telegram group for people working on this: browser fingerprinting,
+profile setup, proxies, and what actually works in practice.
+[Join here](https://t.me/scrapingtheweb).
+
 The shared foundation used by:
 
 - **[invisible_playwright](https://github.com/feder-cr/invisible_playwright)** - the
