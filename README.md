@@ -1,8 +1,11 @@
+<p align="center">
+  <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Telegram: join the group"></a>
+</p>
+
 # invisible_core
 
 <p>
   <a href="https://github.com/feder-cr/invisible_core/actions/workflows/ci.yml"><img src="https://github.com/feder-cr/invisible_core/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
-  <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Telegram: join the group"></a>
 </p>
 
 Pure config for a patched Firefox stealth profile - **zero Playwright dependency**.
