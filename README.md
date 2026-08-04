@@ -2,6 +2,7 @@
 
 <p>
   <a href="https://github.com/feder-cr/invisible_core/actions/workflows/ci.yml"><img src="https://github.com/feder-cr/invisible_core/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Telegram: join the group"></a>
 </p>
 
 Pure config for a patched Firefox stealth profile - **zero Playwright dependency**.
@@ -10,10 +11,6 @@ Pure config for a patched Firefox stealth profile - **zero Playwright dependency
 proxy config, and geo/timezone resolution. Importing it does not start a browser,
 which is the point: the same fingerprint config backs an automation wrapper and a
 desktop profile manager without either depending on the other.
-
-There is a Telegram group for people working on this: browser fingerprinting,
-profile setup, proxies, and what actually works in practice.
-[Join here](https://t.me/scrapingtheweb).
 
 The shared foundation used by:
 
