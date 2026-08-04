@@ -1,5 +1,7 @@
 <p align="center">
-  <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Telegram: join the group"></a>
+  <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Telegram: join the community"></a>
+  <br>
+  <sub>Proxies, fingerprints, captchas, and what actually works in practice. Ask anything.</sub>
 </p>
 
 # invisible_core
