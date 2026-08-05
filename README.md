@@ -6,6 +6,8 @@
   <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Join on Telegram" height="38"></a>
 </p>
 
+---
+
 # invisible_core
 
 Pure config for a patched Firefox stealth profile - **zero Playwright dependency**.
