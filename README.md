@@ -1,7 +1,9 @@
 <p align="center">
-  <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Telegram: join the community"></a>
-  <br>
-  <sub>Proxies, fingerprints, captchas, and what actually works in practice. Ask anything.</sub>
+  <b>Trouble with captchas? With proxies? Is your browser detected every time?</b><br>
+  <sub>Join the group and ask. Someone in there has already solved it.</sub>
+</p>
+<p align="center">
+  <a href="https://t.me/scrapingtheweb"><img src="https://raw.githubusercontent.com/feder-cr/invisible_core/main/docs/badges/telegram.svg" alt="Join on Telegram" height="38"></a>
 </p>
 
 # invisible_core
