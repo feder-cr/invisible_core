@@ -173,16 +173,50 @@ def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
     return chr(10).join(lines)
 
 
+#: Wall-clock bound on ONE download, in seconds. `requests`' own ``timeout=`` is
+#: per socket operation, not per transfer: a connection that delivers a byte
+#: every 59 seconds never trips a ``timeout=60`` and the download runs for as
+#: long as whatever is above it allows. On 2026-08-04 a CI job produced zero
+#: output for 39.4 minutes and was killed at its 40-minute limit; the same job
+#: re-run took 4.6 minutes. This matters more off CI than on it, because
+#: ``ensure_binary`` runs on the user's machine and a hang there has no log at
+#: all. The default leaves room for the 110 MB engine at about 60 KB/s.
+DOWNLOAD_DEADLINE_ENV = "INVISIBLE_DOWNLOAD_DEADLINE"
+DOWNLOAD_DEADLINE_DEFAULT = 1800.0
+
+
+def _download_deadline() -> float:
+    """Seconds allowed for one download. Zero or negative removes the bound."""
+    raw = os.environ.get(DOWNLOAD_DEADLINE_ENV)
+    if raw is None or not raw.strip():
+        return DOWNLOAD_DEADLINE_DEFAULT
+    try:
+        return float(raw)
+    except ValueError:
+        # Not a silent fall back to the default: an unreadable value here means
+        # the caller believes a bound is in force that is not the one they set.
+        raise RuntimeError(
+            f"{DOWNLOAD_DEADLINE_ENV}={raw!r} is not a number of seconds. "
+            f"Unset it for the default of {DOWNLOAD_DEADLINE_DEFAULT:.0f}s, "
+            f"or set it to 0 to remove the bound entirely."
+        ) from None
+
+
 def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
     """Download ``url`` to ``dst``. If ``progress`` is given it is called with
     ``(bytes_done, total_bytes)`` as the download proceeds (total is 0 when the
-    server sends no Content-Length)."""
+    server sends no Content-Length).
+
+    Bounded by ``DOWNLOAD_DEADLINE_ENV`` across the whole transfer; see that
+    constant for why the per-read timeout below cannot do it."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     headers: dict[str, str] = {}
     token = _github_token()
     if token and url.startswith("https://api.github.com/"):
         headers["Authorization"] = f"token {token}"
         headers["Accept"] = "application/octet-stream"
+    limit = _download_deadline()
+    started = time.monotonic()
     with requests.get(url, stream=True, timeout=60, headers=headers) as r:
         r.raise_for_status()
         total = int(r.headers.get("Content-Length") or 0)
@@ -197,6 +231,21 @@ def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None
                             progress(done, total)
                         except Exception:
                             pass
+                # OUTSIDE the `if chunk` on purpose: iter_content yields b"" for
+                # a keep-alive, so a stream that holds the socket open while
+                # sending no payload would otherwise never reach this check.
+                elapsed = time.monotonic() - started
+                if limit > 0 and elapsed > limit:
+                    f.close()
+                    dst.unlink(missing_ok=True)
+                    raise RuntimeError(
+                        f"the download of {url.rsplit('/', 1)[-1]} passed its "
+                        f"{limit:.0f}s deadline: {done} of "
+                        f"{total or 'an unknown number of'} bytes after "
+                        f"{elapsed:.0f}s. The per-read timeout cannot catch "
+                        f"this - a connection that trickles never trips one. "
+                        f"Raise {DOWNLOAD_DEADLINE_ENV} if the link really is "
+                        f"this slow, or set it to 0 to remove the bound.")
 
 
 def _sha256_file(path: Path) -> str:

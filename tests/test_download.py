@@ -45,6 +45,7 @@ import pytest
 import requests
 import responses
 
+from invisible_core import download
 from invisible_core.constants import RELEASE_URL_TEMPLATE
 from invisible_core.download import (
     _download_file,
@@ -600,3 +601,126 @@ def test_parse_owner_repo_handles_repos_with_dashes_and_underscores():
 # not and cannot exist. The engine itself is still refused on every launch route,
 # with a better message, by
 # invisible_core/tests/test_seal_engine_guard.py::test_tree_without_juggler_is_refused.
+
+
+# ---------------------------------------------------------------------------
+# The total download deadline.
+#
+# `requests` timeouts are per socket operation. A connection delivering one byte
+# every 59 seconds satisfies `timeout=60` forever, so before this bound existed
+# `_download_file` had no upper limit at all: on 2026-08-04 a CI job sat silent
+# for 39.4 minutes and was killed at 40. Off CI it is worse - `ensure_binary`
+# runs on the user's machine, where a hang produces no log to read afterwards.
+#
+# The clock is faked rather than slept: a test that proves a 1800s bound by
+# waiting 1800s is a test nobody runs.
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    """Minimal stand-in for a streamed `requests` response."""
+
+    def __init__(self, chunks, total=None):
+        self._chunks = list(chunks)
+        self.headers = {} if total is None else {"Content-Length": str(total)}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size):
+        for c in self._chunks:
+            yield c
+
+
+def _fake_clock(readings):
+    """A monotonic() returning `readings` in order, ABSOLUTE seconds, holding
+    the last one once they run out. Absolute rather than per-call increments:
+    the first version accumulated, so the seconds a test asserted on were not
+    the seconds it had written down, and the test failed against correct code."""
+    state = {"i": 0}
+
+    def clock():
+        i = min(state["i"], len(readings) - 1)
+        state["i"] = state["i"] + 1
+        return float(readings[i])
+
+    return clock
+
+
+def test_a_trickling_download_is_refused_when_it_passes_the_deadline(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(download, "_github_token", lambda: None)
+    monkeypatch.setattr(
+        download.requests, "get",
+        lambda *a, **k: _FakeResponse([b"a", b"b", b"c"], total=3))
+    # started=0, first chunk at 5s (under the bound), second at 25s (over it)
+    monkeypatch.setattr(download.time, "monotonic", _fake_clock([0, 5, 25]))
+    monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "10")
+    dst = tmp_path / "engine.zip"
+    with pytest.raises(RuntimeError) as exc:
+        download._download_file("https://example.com/engine.zip", dst)
+    msg = str(exc.value)
+    assert "10s deadline" in msg          # the bound that was in force
+    assert "25s" in msg                   # the elapsed time
+    assert "2 of 3 bytes" in msg          # what actually arrived before it tripped
+    assert download.DOWNLOAD_DEADLINE_ENV in msg
+    assert not dst.exists(), "a partial file must not be left where a cache looks"
+
+
+def test_a_download_inside_the_deadline_completes(tmp_path, monkeypatch):
+    monkeypatch.setattr(download, "_github_token", lambda: None)
+    monkeypatch.setattr(
+        download.requests, "get",
+        lambda *a, **k: _FakeResponse([b"ab", b"cd"], total=4))
+    monkeypatch.setattr(download.time, "monotonic", _fake_clock([0, 1, 1, 1]))
+    monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "10")
+    dst = tmp_path / "engine.zip"
+    download._download_file("https://example.com/engine.zip", dst)
+    assert dst.read_bytes() == b"abcd"
+
+
+def test_a_keepalive_that_sends_no_payload_still_trips_the_deadline(
+        tmp_path, monkeypatch):
+    # iter_content yields b"" for a keep-alive. If the check sat inside
+    # `if chunk:` this stream would hold the socket open forever.
+    monkeypatch.setattr(download, "_github_token", lambda: None)
+    monkeypatch.setattr(
+        download.requests, "get",
+        lambda *a, **k: _FakeResponse([b"", b"", b""], total=99))
+    monkeypatch.setattr(download.time, "monotonic", _fake_clock([0, 99, 99, 99]))
+    monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "10")
+    with pytest.raises(RuntimeError, match="deadline"):
+        download._download_file("https://example.com/e.zip", tmp_path / "e.zip")
+
+
+def test_deadline_zero_removes_the_bound(tmp_path, monkeypatch):
+    monkeypatch.setattr(download, "_github_token", lambda: None)
+    monkeypatch.setattr(
+        download.requests, "get",
+        lambda *a, **k: _FakeResponse([b"x"], total=1))
+    monkeypatch.setattr(download.time, "monotonic", _fake_clock([0, 10**9]))
+    monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "0")
+    dst = tmp_path / "e.zip"
+    download._download_file("https://example.com/e.zip", dst)
+    assert dst.read_bytes() == b"x"
+
+
+def test_an_unreadable_deadline_is_refused_rather_than_ignored(monkeypatch):
+    # Falling back to the default would leave the caller believing a bound they
+    # set is in force when a different one is.
+    monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "half an hour")
+    with pytest.raises(RuntimeError) as exc:
+        download._download_deadline()
+    assert "not a number of seconds" in str(exc.value)
+
+
+def test_an_unset_deadline_is_the_documented_default(monkeypatch):
+    monkeypatch.delenv(download.DOWNLOAD_DEADLINE_ENV, raising=False)
+    assert download._download_deadline() == download.DOWNLOAD_DEADLINE_DEFAULT
+    monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "   ")
+    assert download._download_deadline() == download.DOWNLOAD_DEADLINE_DEFAULT
