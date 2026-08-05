@@ -9,7 +9,7 @@ reset it: pip compares with != , not <.
 import json
 import pathlib
 
-CORE_REVISION = 12
+CORE_REVISION = 13
 
 _seal = json.loads(
     pathlib.Path(__file__).with_name("seal.json").read_text(encoding="utf-8")
