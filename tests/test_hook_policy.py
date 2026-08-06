@@ -31,6 +31,15 @@ pytestmark = pytest.mark.unit
 
 _PIN = "sync_core_pin.py"
 _NAME = "check_forbidden_names.py"
+_DISCLOSURE = "check_internal_disclosure.py"
+
+#: Named rather than inlined because writing them inline needs escapes, and the
+#: first attempt at these three tests went through a shell heredoc where every
+#: backslash-n became a real newline and the module stopped parsing. Constants
+#: cost nothing and cannot be corrupted that way.
+_NO_PYTEST_NO_PIN = "pytest = false" + chr(10) + "pin = false"
+_A_BRANCH_PUSH = "refs/heads/main aaa refs/heads/main bbb" + chr(10)
+_A_RANGE_PUSH = "refs/heads/main NEW refs/heads/main OLD" + chr(10)
 
 
 class FakeRun:
@@ -92,7 +101,7 @@ def make_repo(tmp_path: Path, *, block: str | None = "pytest = false\npin = fals
     if workbench:
         scripts = tmp_path / "scripts"
         scripts.mkdir(exist_ok=True)
-        for name in (_PIN, _NAME):
+        for name in (_PIN, _NAME, _DISCLOSURE):
             (scripts / name).write_text("import sys; sys.exit(0)\n", encoding="utf-8")
             if name not in untested:
                 (scripts / f"test_{name}").write_text("import sys; sys.exit(0)\n",
@@ -306,6 +315,40 @@ def test_a_red_scanner_stops_an_ordinary_branch_push(tmp_path):
     assert code == 1
 
 
+def test_a_red_disclosure_scanner_refuses_the_push(tmp_path):
+    """The twin of the name-scanner case above, and it was missing.
+
+    Written because a mutation survived: replacing the `return rc` after the
+    internal-disclosure gate with `pass` left the whole hook suite green, so
+    the hook could run the gate, be told REFUSED, and push anyway. Running a
+    gate and ignoring its verdict is worse than not running it, because the
+    summary line then claims it ran."""
+    root = make_repo(tmp_path, block=_NO_PYTEST_NO_PIN)
+    code, run = run_policy(root, refs=_A_BRANCH_PUSH,
+                           run=FakeRun({_DISCLOSURE: 1}))
+    assert code == 1, "a refused disclosure scan let the push through"
+    assert run.ran(_DISCLOSURE)
+
+
+def test_skipping_the_disclosure_scan_says_so(tmp_path, capsys):
+    root = make_repo(tmp_path, block=_NO_PYTEST_NO_PIN)
+    code, run = run_policy(root, INVISIBLE_DISCLOSURE_CHECK="skip")
+    assert code == 0
+    assert not run.ran(_DISCLOSURE)
+    out = capsys.readouterr().out
+    assert "INVISIBLE_DISCLOSURE_CHECK=skip" in out
+    assert "SKIPPED: disclosure scan" in out
+
+
+def test_the_disclosure_scan_is_diff_scoped_when_a_range_exists(tmp_path):
+    """Whole-corpus mode would fail on a long-standing phrase, and a gate that
+    refuses things nobody just wrote is a gate people switch off."""
+    root = make_repo(tmp_path, block=_NO_PYTEST_NO_PIN)
+    _, run = run_policy(root, refs=_A_RANGE_PUSH)
+    call = run.call_for(_DISCLOSURE)
+    assert "--range" in call and "OLD..NEW" in call
+
+
 def test_skipping_the_scan_says_what_it_costs(tmp_path, capsys):
     root = make_repo(tmp_path, block="pytest = false\npin = false")
     code, run = run_policy(root, INVISIBLE_NAME_CHECK="skip")
@@ -447,6 +490,9 @@ def test_the_summary_lists_exactly_what_ran(tmp_path, capsys):
     assert code == 0
     line = [l for l in capsys.readouterr().out.splitlines() if "push proceeding" in l][0]
     assert "tests" in line and "pin" in line and "names" in line and "publish gate" in line
+    assert "internals" in line, (
+        "the internal-disclosure gate ran but the summary does not say so: "
+        + line)
     assert "SKIPPED" not in line
 
 

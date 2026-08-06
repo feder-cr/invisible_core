@@ -85,6 +85,13 @@ GATE_NOTHING_TO_DO = 5
 #: tools, and one of them reads a word list that must never enter a public repo.
 _PIN_CHECKER = "sync_core_pin.py"
 _NAME_CHECKER = "check_forbidden_names.py"
+#: A third, and it is a different question from the name scan rather than more
+#: tokens for it. That one asks "does this name somebody else's product"; this
+#: one asks "does this describe our own engine from the inside". Its pattern
+#: list is itself internal material - it spells the private sampler package and
+#: the seed-pool constants - so like the word list it can never live in a public
+#: repo, which is why it is looked up in the workbench and skipped when absent.
+_DISCLOSURE_CHECKER = "check_internal_disclosure.py"
 
 _DEFAULTS: Dict[str, object] = {"pytest": True, "pin": True, "release_tags": ["v"]}
 
@@ -347,6 +354,47 @@ def main(
             if rc:
                 return rc
             ran.append("names")
+
+    # --- our own internals, which the word list cannot see ---------------
+    # Same shape as the block above and a different question. 296 files and
+    # 40,367 lines of public documentation went out on 2026-08-05 with the name
+    # scanner as their only gate, and that scanner reads 23 vendor names: a page
+    # can be clean on every one of them and still print the private sampler's
+    # package name or a line number in the patched tree. Diff-scoped, so it asks
+    # whether THIS push discloses something new rather than whether the whole
+    # corpus is perfect - a gate that fails on a long-standing phrase is a gate
+    # people learn to skip.
+    setting = env.get("INVISIBLE_DISCLOSURE_CHECK")
+    if setting == "skip":
+        _say("WARNING: INVISIBLE_DISCLOSURE_CHECK=skip. Nothing checked this "
+             "push for internal symbols, engine source lines or local paths.")
+        skipped.append("disclosure scan")
+    else:
+        scanner = Path(setting) if setting else workbench / _DISCLOSURE_CHECKER
+        if setting and not scanner.is_file():
+            _say("", err=True)
+            _say("REFUSED - INVISIBLE_DISCLOSURE_CHECK is set but points at "
+                 "nothing.", err=True)
+            _say(f"  looked for: {scanner}", err=True)
+            _say("Fix the path, or set INVISIBLE_DISCLOSURE_CHECK=skip to state "
+                 "on the record that this push is going out unscanned.", err=True)
+            return 1
+        if not scanner.is_file():
+            _say("no internal-disclosure scanner here, so nothing scanned this "
+                 "push for our own internals.")
+            _say("(that scan is a maintainer gate; it lives outside this repo.)")
+            skipped.append("disclosure scan")
+        else:
+            rng = push_range(refs)
+            rc = _run_gate_with_its_own_tests(
+                scanner, "internal-disclosure", py, root,
+                run, args=[".", "--range", rng] if rng else ["."],
+                require_tests=True,
+                fail_msg="see above. The lines are named and so is what matched, "
+                         "because both are already in the diff you are pushing.")
+            if rc:
+                return rc
+            ran.append("internals")
 
     # --- the publish gate, on release tags only ------------------------
     # Only release tags: the gate builds the project twice, and a hook that
