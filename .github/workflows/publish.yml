@@ -61,7 +61,12 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=$(python -c "import sys;sys.path.insert(0,'src');from invisible_core._version import __version__;print(__version__)")
+            # Loaded as a FILE, never imported as `invisible_core._version`:
+            # importing a submodule runs the package first and this job installs
+            # no dependencies, so the import form dies on platformdirs. It has
+            # never shown here because this branch only runs on
+            # workflow_dispatch, which is exactly why it went unnoticed.
+            VERSION=$(python -c "import importlib.util as u;s=u.spec_from_file_location('_v','src/invisible_core/_version.py');m=u.module_from_spec(s);s.loader.exec_module(m);print(m.__version__)")
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           CODE=$(curl -s -o /dev/null -w '%{http_code}'                  "https://pypi.org/pypi/invisible-core/$VERSION/json")

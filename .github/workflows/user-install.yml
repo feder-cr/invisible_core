@@ -199,10 +199,21 @@ jobs:
           # this from the index and launch it had never once executed. Found
           # 2026-08-01 by reading a red run that had been red all along.
           #
-          # Derived the way the package derives it, which is also what
-          # publish.yml already does.
-          sys.path.insert(0, "src")
-          from invisible_core._version import __version__ as version
+          # Derived the way the package derives it - but LOADED AS A FILE, not
+          # imported as `invisible_core._version`, which is what the fix for the
+          # KeyError above did and what broke this step the next time it ran.
+          # Importing a submodule executes the PACKAGE first, and this job
+          # installs pip, pytest and packaging only, so `invisible_core/__init__`
+          # died on `No module named 'platformdirs'` - one line below a comment
+          # explaining the previous fix. `_version.py` needs nothing but json,
+          # pathlib and the seal.json sitting beside it, so loading the file
+          # directly is both correct and dependency-free.
+          import importlib.util
+          _spec = importlib.util.spec_from_file_location(
+              "_core_version", "src/invisible_core/_version.py")
+          _mod = importlib.util.module_from_spec(_spec)
+          _spec.loader.exec_module(_mod)
+          version = _mod.__version__
           url = f"https://pypi.org/pypi/{dist}/{version}/json"
           deadline = time.monotonic() + 300
           n = 0
