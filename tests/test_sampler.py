@@ -257,7 +257,11 @@ def test_forge_sample_field_types():
     assert isinstance(out["hw_concurrency"], int)
     assert isinstance(out["webdriver"], bool)
     assert isinstance(out["av1_enabled"], bool)
-    assert isinstance(out["max_touch_points"], int)
+    # max_touch_points is NOT a sampler field: it is a declared constant on
+    # HardwareProfile since 2026-08-08. It was asserted here because a stale
+    # copy in _sampler._LOCKED still injected it, which is exactly the
+    # shadowing this test would have hidden rather than caught - the value
+    # travelled but the constant that was supposed to own it was dead.
 
 
 @pytest.mark.unit

@@ -66,7 +66,15 @@ _LOCKED: Dict[str, Any] = {
     "app_version": "5.0 (Windows)",
     "product_sub": "20100101",
     "webdriver": False,
-    "max_touch_points": 0,
+    # max_touch_points USED TO BE HERE, and had to go. It became
+    # HardwareProfile.max_touch_points on 2026-08-08, with its own constant
+    # and its own raw key, and this older copy silently won: the raw dict is
+    # built by spreading _LOCKED, so the setdefault that seeds
+    # MAX_TOUCH_POINTS found the key already there and did nothing. Both were
+    # 0, so nothing was wrong and nothing could be SEEN to be wrong - proved
+    # by setting MAX_TOUCH_POINTS to 7 and watching the profile still answer
+    # 0, while SCREEN_COLOR_DEPTH set to 30 came through. Two sources of
+    # truth for one number, agreeing by luck.
 }
 
 

@@ -300,3 +300,50 @@ def test_generate_profile_pin_to_raw_keymap_complete():
     # 'dark_theme' is top-level and present in _PIN_TO_RAW.
     missing = dotted - set(_PIN_TO_RAW.keys())
     assert missing == set(), f"pin keys without raw mapping: {sorted(missing)}"
+
+
+def test_no_profile_constant_is_shadowed_by_the_sampler_s_locked_dict():
+    """Changing a declared constant must change the profile it declares.
+
+    _LOCKED is spread into the raw dict before the setdefault() calls that seed
+    the invariant constants, so a key present in BOTH silently keeps _LOCKED's
+    value and the constant becomes dead. Found 2026-08-09: max_touch_points was
+    in both, the two values were 0, and nothing was wrong until somebody changed
+    one of them - measured by setting MAX_TOUCH_POINTS to 7 and watching the
+    profile still answer 0.
+
+    This asserts the property rather than the one key, so the next duplicate is
+    caught the day it is added rather than the day it disagrees.
+    """
+    from invisible_core._fpforge import _sampler, profile as prof
+
+    seeded = {
+        "screen_color_depth": "SCREEN_COLOR_DEPTH",
+        "max_touch_points": "MAX_TOUCH_POINTS",
+        "font_ui_family": "FONT_UI_FAMILY",
+        "font_ui_size": "FONT_UI_SIZE",
+        "font_monospace_size": "FONT_MONOSPACE_SIZE",
+        "font_alpha_ladder": "FONT_ALPHA_LADDER",
+        "font_cleartype_gamma": "FONT_CLEARTYPE_GAMMA",
+        "font_cleartype_contrast": "FONT_CLEARTYPE_CONTRAST",
+        "font_cleartype_level": "FONT_CLEARTYPE_LEVEL",
+        "font_cleartype_pixel_structure": "FONT_CLEARTYPE_PIXEL_STRUCTURE",
+        "font_cleartype_rendering_mode": "FONT_CLEARTYPE_RENDERING_MODE",
+        "font_freetype_gamma": "FONT_FREETYPE_GAMMA",
+        "font_freetype_contrast": "FONT_FREETYPE_CONTRAST",
+    }
+    clashing = sorted(k for k in seeded if k in _sampler._LOCKED)
+    assert not clashing, (
+        f"these raw keys are seeded from a constant in profile.py AND injected "
+        f"by _sampler._LOCKED: {clashing}. _LOCKED wins, so the constant is "
+        f"dead and the two will disagree the first time one of them moves"
+    )
+
+def test_declared_hardware_constants_have_the_right_types():
+    """The types the sampler test used to assert, asserted where they live now."""
+    from invisible_core._fpforge.profile import generate_profile
+
+    p = generate_profile(seed=42)
+    assert isinstance(p.hardware.max_touch_points, int)
+    assert isinstance(p.screen.color_depth, int)
+    assert isinstance(p.font.cleartype_gamma, int)

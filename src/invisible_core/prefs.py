@@ -639,6 +639,50 @@ def _accept_language(locale: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: WebGL enums whose getParameter answer is a Float32Array by SPECIFICATION,
+#: even when every value in it happens to be a whole number.
+#:
+#: They have to be listed because the pool JSON cannot carry the distinction:
+#: the generator buckets a two-element answer by Python type, JSON has one
+#: number type, and [1.0, 1024.0] round-trips as [1, 1024]. So all three landed
+#: in int2_params, and the engine's int2 branch builds an Int32Array.
+#:
+#: Measured 2026-08-09 against stock Firefox 151 on the same machine:
+#:
+#:     DEPTH_RANGE                stock Float32Array   ours Int32Array
+#:     ALIASED_POINT_SIZE_RANGE   stock Float32Array   ours Int32Array
+#:     ALIASED_LINE_WIDTH_RANGE   stock Float32Array   ours Int32Array
+#:
+#: The VALUES agreed - [0,1], [1,1024], [1,1] - only the type was wrong, and the
+#: type is what a page reads with one instanceof, no reference data and no
+#: second machine. MAX_VIEWPORT_DIMS (3386) is deliberately NOT here: the
+#: specification really does make that one an Int32Array.
+_WEBGL_FLOAT_PAIR_ENUMS = ("2928", "33901", "33902")
+
+
+def _route_float_pairs(prefs: Dict[str, Any]) -> None:
+    """Move the spec-float pairs out of int2_params and into float_params.
+
+    Done here rather than in the pool data so it holds for every persona and for
+    any pool regenerated later, and so the reason travels with the code instead
+    of with fourteen JSON rows.
+    """
+    src = str(prefs.get("zoom.stealth.webgl.int2_params", "") or "")
+    if not src:
+        return
+    keep, moved = [], []
+    for entry in src.split(","):
+        enum = entry.split("|", 1)[0]
+        (moved if enum in _WEBGL_FLOAT_PAIR_ENUMS else keep).append(entry)
+    if not moved:
+        return
+    prefs["zoom.stealth.webgl.int2_params"] = ",".join(keep)
+    existing = str(prefs.get("zoom.stealth.webgl.float_params", "") or "")
+    prefs["zoom.stealth.webgl.float_params"] = ",".join(
+        ([existing] if existing else []) + moved)
+
+
+
 def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
     """The validated WebGL persona, and the reason it is applied on every host.
 
@@ -674,6 +718,7 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
                 prefs["webgl.enable-webgl2"] = bool(_v)
             else:
                 prefs[_k] = _v
+        _route_float_pairs(prefs)
     else:
         prefs["zoom.stealth.webgl.renderer"] = ""
         prefs["zoom.stealth.webgl.vendor"]   = ""
