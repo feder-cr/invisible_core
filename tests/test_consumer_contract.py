@@ -81,6 +81,16 @@ CONTRACT = {
     "invisible_core.constants": {
         "BINARY_VERSION",
     },
+    "invisible_core.launch": {
+        # The font manifest handover, added 2026-08-08. The engine builds its
+        # font list during app startup, before the caller's prefs exist on the
+        # Juggler path, so the manifest travels as an env var pointing at a
+        # content-addressed file - and it is verified against the engine's own
+        # face files first, because metrics for a font that is not there do not
+        # raise, they just lay the page out wrong.
+        "FontManifestMismatch", "cached_font_manifest_path",
+        "verify_font_manifest",
+    },
     "invisible_core.download": {
         "cache_root", "engine_status", "ensure_binary",
         # Two rows left on 2026-08-01 with the CLI reduction that removed the

@@ -18,6 +18,7 @@ The translation is split into:
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import USER_AGENT
@@ -172,6 +173,109 @@ _WIN_VOICES = ",".join([
     "Microsoft David Desktop - English (United States)|en-US|0|1",
     "Microsoft Zira Desktop - English (United States)|en-US|0|1",
 ])
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  Declared media answers
+#
+#  What canPlayType and MediaSource.isTypeSupported report, decided HERE
+#  rather than by what the running build can decode. The engine's own answer
+#  is host-dependent on Linux: the bundled ffvpx has H.264 compiled out and
+#  the platform decoder loads the USER'S libavcodec, so two users of the same
+#  build tell themselves apart. Windows answers through WMF and says
+#  "probably". Measured 2026-08-08, one seed on both hosts, 14 types probed
+#  four ways: exactly the three avc1 rows differed.
+#
+#  Values are what a Windows Firefox reports. "yes" -> "probably",
+#  "maybe" -> "maybe", "no" -> "". A type absent from this table is left to
+#  the media stack untouched, so this is an override list and not a
+#  replacement for it.
+#
+#  THE COST, recorded so nobody re-derives it as a surprise: declaring
+#  "probably" for a codec the Linux build cannot decode means a site picks
+#  H.264 and the video does not play, where today it falls back to WebM and
+#  plays. Fidelity to what a Windows Firefox REPORTS is bought with a broken
+#  playback. Shipping the decoder is the way out; changing this answer back
+#  is not.
+# ──────────────────────────────────────────────────────────────────────
+
+#  Measured against retail Firefox 152 on Windows over a 62-type corpus
+#  (`C:/tmp/mime_corpus.py`, 2026-08-08), not guessed. What that measurement
+#  found is why the list below is longer than it was: DecoderTraits falls
+#  through to the real decoders for anything NOT declared here, and on Windows
+#  the real decoders answer the same as retail - because it IS Windows. On Linux
+#  they do not have H.264 or HEVC at all, so they answer "" where retail says
+#  "probably". The three-entry version leaked exactly 8 types cross-OS:
+#
+#      avc1.42001E  avc1.4D4028  avc1.640028  avc1.640033
+#      avc3.42E01E  hvc1.1.6.L93.B0  hev1.1.6.L93.B0  "avc1.42E01E, mp4a.40.2"
+#
+#  A fallback that happens to be right on one platform is the worst kind: it
+#  makes the surface look finished on the host you develop on. `yes` renders as
+#  "probably" through canPlayType, which is what retail returns for all of these.
+#
+#  NOT YET TOTAL, and the binary's fallthrough must not be closed until it is.
+#  The corpus covers the codec strings that appear in the wild, not the whole
+#  AVC/HEVC profile-level space, which is finite (profile_idc x constraint-set x
+#  level_idc) and enumerable - that enumeration is what turns this from an
+#  override list into a declaration.
+#  NEWLINE-separated: a comma is what a multi-codec type carries inside its own
+#  value, so a comma separator silently swallowed every combined entry. The
+#  binary's parser was moved to '\n' in the same change (DecoderTraits.cpp).
+_WIN_MEDIA_ANSWERS = "\n".join([
+    # H.264: baseline, main, high, and the levels a player actually probes
+    'video/mp4; codecs="avc1.42E01E"|yes',
+    'video/mp4; codecs="avc1.42001E"|yes',
+    'video/mp4; codecs="avc1.4D401E"|yes',
+    'video/mp4; codecs="avc1.4D4028"|yes',
+    'video/mp4; codecs="avc1.64001E"|yes',
+    'video/mp4; codecs="avc1.640028"|yes',
+    'video/mp4; codecs="avc1.640033"|yes',
+    'video/mp4; codecs="avc3.42E01E"|yes',
+    'video/mp4; codecs="avc1.42E01E, mp4a.40.2"|yes',
+    # HEVC: retail on Windows answers through the OS decoder; Linux has none
+    'video/mp4; codecs="hvc1.1.6.L93.B0"|yes',
+    'video/mp4; codecs="hev1.1.6.L93.B0"|yes',
+    # containers and AAC
+    "video/mp4|maybe",
+    "audio/mp4|maybe",
+    'audio/mp4; codecs="mp4a.40.2"|yes',
+])
+
+# ──────────────────────────────────────────────────────────────────────
+#  Windows system-font surface
+#
+#  These 26 also live in the binary's all.js, and the duplication is
+#  deliberate: the binary must stay correct when launched WITHOUT this
+#  package (invisible_firefox direct-launch, a manual run), because the
+#  fallback is not a subtle drift - Gecko's own defaults name "Sans" at
+#  13.3333px on Linux, a family that does not exist on Windows, and that
+#  is what drove FpJS Pro tampering=True on 2026-08-07. all.js is the
+#  compiled floor; this is the source of truth that can move without a
+#  Firefox rebuild.
+#
+#  THE SIZES ARE STRINGS ON PURPOSE. nsXPLookAndFeel reads them through
+#  Preferences::GetFloat, which in Gecko parses float prefs from their
+#  STRING form; declared as a bare int the pref does not fail, it is
+#  silently ignored and the UI falls back to StyleFONT_MEDIUM_PX (16px).
+#  The monospace sizes below are genuine ints - different pref type, and
+#  `_pref_literal` serialises the two differently.
+# ──────────────────────────────────────────────────────────────────────
+
+#: The CSS system-font keywords Gecko resolves through ui.font.*, plus the
+#: four -moz- widget fonts. getComputedStyle on `font: menu` reads these.
+_UI_FONT_ELEMENTS = (
+    "caption", "icon", "menu", "message-box", "small-caption", "status-bar",
+    "-moz-pull-down-menu", "-moz-button", "-moz-list", "-moz-field",
+)
+
+#: The language groups whose monospace default Firefox sets differently on
+#: Windows (13) and in its Unix block (12). The gap is directly readable: it is
+#: the width FingerprintJS's fontPreferences probe measures for the monospace
+#: generic at the default size, with no font-size set.
+_MONOSPACE_LANG_GROUPS = (
+    "ar", "el", "he", "x-cyrillic", "x-unicode", "x-western",
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -339,6 +443,21 @@ _BASELINE: Dict[str, Any] = {
     # Update channels.
     "app.update.enabled":                                 False,
     "app.update.auto":                                    False,
+
+    # Media devices: a FIXED pair (one audioinput, one videoinput) on every
+    # host. navigator.mediaDevices.enumerateDevices is only reachable in a
+    # secure context, which is why an earlier probe on about:blank read it as
+    # absent on both platforms and saw nothing. Measured properly 2026-08-08:
+    # Linux enumerated 0 devices and Windows 2, and a Windows desktop with
+    # neither microphone nor camera is the unusual one.
+    #
+    # But the Windows 2 came from THIS machine's hardware, so it was
+    # host-dependent in the first place - a Windows box with no webcam would
+    # have reported 1, and two of our own identities would have differed. The
+    # fake pair is the invariant: 2 on every host, unchanged on a machine that
+    # already had 2. Labels stay empty and device ids stay empty without
+    # permission, exactly as a real browser reports them.
+    "media.navigator.streams.fake":                       True,
 
     # Speech synth: enabled (the C++ patch fabricates voices from the
     # comma list above) regardless of the host OS.
@@ -611,9 +730,67 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # The real switches are media.webm.enabled and media.mp4.enabled.
     prefs["media.webm.enabled"]               = profile.codec.mediasource_webm
     prefs["media.mp4.enabled"]                = profile.codec.mediasource_mp4
+    # The DECLARED answers, consulted by the engine before any decoder is
+    # asked. The four toggles above are the other pattern: they switch a real
+    # capability on or off, which cannot make a decoder the build does not
+    # carry exist - and that is exactly why H.264 stayed divergent while every
+    # other codec in a 14-type probe agreed.
+    prefs["zoom.stealth.media.mime_answers"]  = _WIN_MEDIA_ANSWERS
 
 
-# Fonts - NOTHING to configure here, which is why there is no _apply_fonts. The
+def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
+    """The Windows system-font surface, from `profile.font`.
+
+    This used to be a comment saying there was nothing to configure (below),
+    and that was true only of the FONT LIST. The system-font surface is a
+    different thing and it was not covered: with these prefs absent, Gecko
+    answers `font: menu` from its own per-OS defaults, which on Linux name
+    "Sans" at 13.3333px - a family that does not exist on Windows, on a build
+    whose every other signal says Windows. Measured 2026-08-07, that single
+    disagreement is what drove FpJS Pro to tampering=True on Linux with
+    Windows clean, same seed and same IP.
+
+    The 26 prefs also ship compiled into the binary's all.js. The duplication
+    is deliberate: the binary has to stay right when launched WITHOUT this
+    package, and the failure mode is not a subtle drift but a family name no
+    Windows machine has. all.js is the floor; this layer is the source of
+    truth that can move without a Firefox rebuild, and being a layer it can be
+    overridden by `extra_prefs` like every other surface.
+    """
+    for element in _UI_FONT_ELEMENTS:
+        prefs[f"ui.font.{element}"] = profile.font.ui_family
+        # Kept as the string the profile carries: Preferences::GetFloat reads
+        # float prefs from their text form, and an int here is not an error,
+        # it is silently ignored in favour of StyleFONT_MEDIUM_PX (16px).
+        prefs[f"ui.font.{element}.size"] = profile.font.ui_size
+    for lang in _MONOSPACE_LANG_GROUPS:
+        prefs[f"font.size.monospace.{lang}"] = profile.font.monospace_size
+    # The glyph-edge coverage ladder. It used to live in the binary's font
+    # manifest, which was the wrong home twice over: it is not a property of any
+    # font FILE (it is what the rasteriser does to an edge), and putting it
+    # there meant changing it required a Firefox rebuild. Empty string disables
+    # the snap, which is what a caller wants when measuring the tell itself.
+    prefs["zoom.stealth.canvas.alpha_ladder"] = ",".join(
+        str(int(v)) for v in profile.font.alpha_ladder)
+    # The whole font manifest - families, per-face vertical metrics, the alias
+    # table and the per-script fallback lists - carried by this package and
+    # handed to the binary, which prefers it over the copy in its own
+    # directory. One pref rather than six: the binary already has a parser for
+    # this exact text, so moving the CONTENT costs one code path instead of a
+    # new format per table.
+    #
+    # It is a COPY of what the binary ships, and a copy can drift. What stops
+    # it drifting silently is the seal: the manifest hash belongs there next to
+    # the UA and the BuildID, so a core describing one font generation and a
+    # binary carrying another is refused rather than rendered. Until that check
+    # exists this is the riskier half of the trade, and it is the reason the
+    # binary keeps its own file as the floor.
+    if profile.font.manifest:
+        prefs["zoom.stealth.fonts.manifest"] = profile.font.manifest
+
+
+# Font LIST - nothing to configure, and that is a different question from the
+# system-font surface above, which _apply_fonts does own. The
 # patched binary is self-contained: it is always bundle-only (host system fonts
 # never enter the font list), exposes exactly the bundled standard-Windows
 # families, and bakes system-ui -> "Segoe UI" and the CSS generics -> Windows
@@ -752,6 +929,7 @@ def translate_profile_to_prefs(
     _apply_screen(prefs, profile)
     _apply_hardware(prefs, profile)
     _apply_audio(prefs, profile)
+    _apply_fonts(prefs, profile)
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
     _apply_locale(prefs, locale)

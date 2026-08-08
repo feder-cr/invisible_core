@@ -369,3 +369,138 @@ def test_the_pool_still_offers_real_per_session_diversity():
 
     seen = {render_noise_seed(s) for s in range(3000)}
     assert len(seen) >= 6, f"only {len(seen)} distinct hardware seeds: {sorted(seen)}"
+
+
+# ── the Windows system-font surface (a Profile field, not a constant) ───────
+#
+# `font: menu` and friends resolve through ui.font.*, and nsXPLookAndFeel tries
+# those prefs BEFORE asking the platform. With them absent Gecko answers from
+# its own per-OS defaults, which in the Unix block name "Sans" at 13.3333px - a
+# family no Windows machine has, on a build whose every other signal says
+# Windows. Measured 2026-08-07: that one disagreement drove FpJS Pro to
+# tampering=True on Linux with Windows clean, same seed and same IP.
+
+_UI_ELEMENTS = (
+    "caption", "icon", "menu", "message-box", "small-caption", "status-bar",
+    "-moz-pull-down-menu", "-moz-button", "-moz-list", "-moz-field",
+)
+_MONO_LANGS = ("ar", "el", "he", "x-cyrillic", "x-unicode", "x-western")
+
+
+def test_every_system_font_element_is_emitted():
+    prefs = _prefs()
+    missing = [f"ui.font.{e}" for e in _UI_ELEMENTS if f"ui.font.{e}" not in prefs]
+    assert not missing, f"system-font prefs not emitted: {missing}"
+    missing_sizes = [f"ui.font.{e}.size" for e in _UI_ELEMENTS
+                     if f"ui.font.{e}.size" not in prefs]
+    assert not missing_sizes, f"sizes not emitted: {missing_sizes}"
+
+
+def test_the_ui_font_sizes_are_strings_because_gecko_parses_float_prefs_from_text():
+    """The type IS the behaviour here, which is why it gets its own test.
+
+    Preferences::GetFloat reads a float pref from its STRING form. Declared as
+    a bare int the pref does not fail and does not warn - it is ignored, and
+    the UI silently falls back to StyleFONT_MEDIUM_PX (16px). A page reading
+    `getComputedStyle(el).fontSize` after `el.style.font = "menu"` sees 16px
+    where Windows says 12px. Nothing else in the suite would notice.
+    """
+    prefs = _prefs()
+    for element in _UI_ELEMENTS:
+        value = prefs[f"ui.font.{element}.size"]
+        assert isinstance(value, str), (
+            f"ui.font.{element}.size is {type(value).__name__} {value!r}; it "
+            f"must be a string or Preferences::GetFloat ignores it")
+        assert value.strip() and float(value) > 0
+
+
+def test_the_monospace_default_size_is_an_int_and_is_the_windows_13():
+    prefs = _prefs()
+    for lang in _MONO_LANGS:
+        value = prefs[f"font.size.monospace.{lang}"]
+        assert isinstance(value, int) and not isinstance(value, bool), (
+            f"font.size.monospace.{lang} is {type(value).__name__}")
+        assert value == 13, (
+            f"font.size.monospace.{lang} is {value}; Firefox ships 13 on "
+            f"Windows and 12 in its Unix block, and we always claim Windows")
+
+
+def test_the_ui_font_family_is_never_a_host_derived_name():
+    """The specific failure this exists for: "Sans".
+
+    Any name that is not a real Windows family is a tell, but "Sans" is the one
+    that actually shipped - it is what fontconfig answers, and it reached a
+    page through `font: menu` on every Linux run before 2026-08-07.
+    """
+    prefs = _prefs()
+    forbidden = {"sans", "sans-serif", "serif", "monospace", "system-ui", ""}
+    for element in _UI_ELEMENTS:
+        family = prefs[f"ui.font.{element}"]
+        assert family.strip().lower() not in forbidden, (
+            f"ui.font.{element} = {family!r} is a generic or host-derived name")
+
+
+def test_the_font_surface_does_not_vary_with_the_seed():
+    """Unlike gpu/screen/hardware, and deliberately.
+
+    Sampling this would manufacture diversity that does not exist: every
+    Windows machine answers Segoe UI at 12px. A fleet whose system font varied
+    per identity would be the signal, not the camouflage. The gpu assertion is
+    here so the test cannot pass by the profile being constant overall.
+    """
+    from invisible_core._fpforge import generate_profile
+    a, b = generate_profile(1), generate_profile(999_999)
+    assert a.font == b.font, f"font surface varied: {a.font} vs {b.font}"
+    assert a.gpu != b.gpu, "two seeds produced the same GPU - test is not probing"
+
+
+def test_the_font_surface_is_pinnable_like_every_other_group():
+    from invisible_core._fpforge import generate_profile
+    profile = generate_profile(42, pin={"font.ui_family": "Tahoma",
+                                        "font.monospace_size": 11})
+    prefs = translate_profile_to_prefs(profile)
+    assert prefs["ui.font.menu"] == "Tahoma"
+    assert prefs["font.size.monospace.ar"] == 11
+
+
+def test_a_caller_override_still_wins_over_the_font_layer():
+    """`extra_prefs` is applied last for every other surface; fonts are not
+    special. An A/B harness has to be able to unset this to measure what the
+    tell looked like."""
+    prefs = _prefs(extra_prefs={"ui.font.menu": "Arial"})
+    assert prefs["ui.font.menu"] == "Arial"
+
+
+def test_the_font_manifest_travels_with_the_profile():
+    """Families, per-face metrics, aliases, ladder and the per-script fallback
+    lists all live in one field, so the profile is the single object that says
+    what Windows looks like."""
+    from invisible_core._fpforge import generate_profile
+    manifest = generate_profile(42).font.manifest
+    assert manifest.count("\nF|") >= 60, "famiglie assenti dal manifest"
+    assert manifest.count("\nA|") >= 40, "tabella alias assente"
+    assert manifest.count("\nS|") >= 100, "tabella fallback per script assente"
+    assert "\nL|" in manifest, "scala di copertura assente"
+    prefs = _prefs()
+    assert prefs["zoom.stealth.fonts.manifest"] == manifest
+
+
+def test_the_manifest_is_ascii_and_carries_no_control_bytes():
+    """The C++ reader is a getline plus a split, kept deliberately trivial, and
+    the manifest is now a Python literal rather than a file - which is exactly
+    where this project has corrupted text before, by letting an escape sequence
+    through. A raw string keeps the two backslashes in the alias comment as
+    backslashes; this checks the result rather than trusting the prefix."""
+    from invisible_core._fpforge.profile import FONT_MANIFEST
+    assert FONT_MANIFEST.isascii()
+    # chr(), not escapes: a literal like the one this line used to hold
+    # EVALUATES to a control character, and test_marker_vocabulary rejects that
+    # on sight - correctly, because it cannot tell a test naming the byte from a
+    # Windows path that lost its backslash. It caught this file on the first run.
+    for code in (8, 12, 0, 13):   # backspace, formfeed, NUL, carriage return
+        assert chr(code) not in FONT_MANIFEST, (
+            f"byte di controllo 0x{code:02X} nel manifest")
+    assert "HKLM\\" in FONT_MANIFEST, (
+        "i backslash del commento sul registro sono stati mangiati: il letterale "
+        "non e' piu' raw")
+    assert FONT_MANIFEST.endswith("\n")
