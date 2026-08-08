@@ -504,3 +504,46 @@ def test_the_manifest_is_ascii_and_carries_no_control_bytes():
         "i backslash del commento sul registro sono stati mangiati: il letterale "
         "non e' piu' raw")
     assert FONT_MANIFEST.endswith("\n")
+
+
+def test_screen_colour_depth_is_declared_not_read_from_the_host():
+    """The panel depth is a declared field, not whatever display is attached.
+
+    This is the field the 2026-08-08 audit caught, and it is worth a test rather
+    than a comment because of HOW it hid. `nsScreen::PixelDepth` fell through to
+    `nsDeviceContext::GetDepth()`, the real display, and every cross-OS
+    comparison we ran said the field agreed - because both development machines
+    are 24-bit. Agreement is not declaration. A user on a 30-bit panel would
+    have reported 30 under a persona that claims a particular Windows machine.
+
+    The mutation the gate has to survive: a profile carrying a depth the host
+    could not produce must reach the pref unchanged. If the translation ever
+    drops the field, the pref goes missing, the binary falls back to the panel,
+    and the value silently becomes correct-on-this-machine again.
+    """
+    from invisible_core._fpforge import generate_profile
+    from invisible_core.prefs import translate_profile_to_prefs
+
+    profile = generate_profile(seed=42)
+    prefs = translate_profile_to_prefs(profile)
+
+    key = "zoom.stealth.screen.color_depth"
+    assert key in prefs, (
+        "the colour depth pref is missing, so the binary reads the real panel"
+    )
+    assert prefs[key] == 24, f"expected the Windows-canonical 24, got {prefs[key]}"
+
+    # Known-bad input: a depth no mainstream Windows desktop reports. It has to
+    # survive the translation, otherwise the field is decorative.
+    odd = replace_screen_depth(profile, 30)
+    assert translate_profile_to_prefs(odd)[key] == 30, (
+        "a declared depth did not reach the pref, so the field is not wired"
+    )
+
+
+def replace_screen_depth(profile, depth):
+    """Return a copy of ``profile`` whose screen declares ``depth`` bits."""
+    import dataclasses
+
+    screen = dataclasses.replace(profile.screen, color_depth=depth)
+    return dataclasses.replace(profile, screen=screen)

@@ -27,6 +27,15 @@ class ScreenProfile:
     avail_height: int
     dpr: float
     tier: str
+    #: Screen colour depth in bits. NOT sampled: 24 is what every mainstream
+    #: Windows desktop reports, and a persona that varied it would be varying a
+    #: thing real machines do not vary. It is a FIELD rather than a constant in
+    #: the binary because of what the field-by-field audit found: without it
+    #: nsScreen::PixelDepth reads nsDeviceContext::GetDepth(), the real panel,
+    #: and it went unnoticed for as long as it did because both development
+    #: machines are 24-bit, so it agreed cross-OS by coincidence. Pinnable and
+    #: overridable like every other surface (rule 6, tutto allo stesso livello).
+    color_depth: int = 24
 
 
 @dataclass(frozen=True)

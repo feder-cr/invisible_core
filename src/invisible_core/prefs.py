@@ -692,6 +692,7 @@ def _apply_canvas_and_msaa(prefs: Dict[str, Any], profile: Profile) -> None:
 def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.screen.width"]        = profile.screen.width
     prefs["zoom.stealth.screen.height"]       = profile.screen.height
+    prefs["zoom.stealth.screen.color_depth"]  = profile.screen.color_depth
     # DEAD, and kept only so the next reader does not re-add them. Neither name
     # is declared in StaticPrefList.yaml, and nsScreen::GetAvailRect ignores
     # them outright: it reads zoom_stealth_screen_width/height and subtracts a
