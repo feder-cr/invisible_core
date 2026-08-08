@@ -161,21 +161,36 @@ class FontProfile:
 #      "webgl.msaa_samples"
 #      "font.ui_family", "font.ui_size", "font.monospace_size",
 #      "font.alpha_ladder"
+#      "font.cleartype_gamma", "font.cleartype_contrast",
+#      "font.cleartype_level", "font.cleartype_pixel_structure",
+#      "font.cleartype_rendering_mode", "font.freetype_gamma",
+#      "font.freetype_contrast"
+#      "screen.color_depth"
+#      "hardware.max_touch_points"
 #      "dark_theme"
 # ──────────────────────────────────────────────────────────────────────
 
 _PIN_GROUPS = {
     "gpu": {"vendor", "renderer", "class_tier"},
-    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier"},
-    "hardware": {"concurrency", "storage_quota_mb"},
+    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier",
+               "color_depth"},
+    "hardware": {"concurrency", "storage_quota_mb", "max_touch_points"},
     "audio": {"sample_rate", "output_latency_ms", "max_channel_count"},
     "codec": {
         "av1_enabled", "webm_encoder_enabled",
         "mediasource_webm", "mediasource_mp4", "webspeech_synth",
     },
     "webgl": {"msaa_samples"},
+    # The seven rasterisation parameters belong here for the same reason every
+    # other surface does: a declared value that cannot be pinned, inspected or
+    # overridden is a constant buried in a different file, not a field. They
+    # were added to FontProfile on 2026-08-08 and left out of this table, and
+    # the test below is what said so.
     "font": {"ui_family", "ui_size", "monospace_size", "alpha_ladder",
-             "manifest"},
+             "manifest",
+             "cleartype_gamma", "cleartype_contrast", "cleartype_level",
+             "cleartype_pixel_structure", "cleartype_rendering_mode",
+             "freetype_gamma", "freetype_contrast"},
 }
 _PIN_TOP = {"dark_theme"}
 
@@ -262,8 +277,41 @@ _PIN_TO_RAW = {
     "font.monospace_size": "font_monospace_size",
     "font.alpha_ladder": "font_alpha_ladder",
     "font.manifest": "font_manifest",
+    # The rasterisation parameters travel the same way for the same reason:
+    # invariant, so not sampled, but seeded into the raw dict below so a pin
+    # overwrites them through the one mechanism instead of a second one.
+    "font.cleartype_gamma": "font_cleartype_gamma",
+    "font.cleartype_contrast": "font_cleartype_contrast",
+    "font.cleartype_level": "font_cleartype_level",
+    "font.cleartype_pixel_structure": "font_cleartype_pixel_structure",
+    "font.cleartype_rendering_mode": "font_cleartype_rendering_mode",
+    "font.freetype_gamma": "font_freetype_gamma",
+    "font.freetype_contrast": "font_freetype_contrast",
+    "screen.color_depth": "screen_color_depth",
+    "hardware.max_touch_points": "max_touch_points",
     "dark_theme": "dark_theme",
 }
+
+#: The rasterisation parameters a Windows machine reports, and the FreeType
+#: equivalents that make the Linux build produce the same coverage curve.
+#: Invariant, so not sampled: DirectWrite reads them from the machine's own
+#: ClearType settings, which differ per monitor and per user, and a value that
+#: varies with the host is the thing being closed here, not a knob.
+FONT_CLEARTYPE_GAMMA = 2200
+FONT_CLEARTYPE_CONTRAST = 100
+FONT_CLEARTYPE_LEVEL = 100
+FONT_CLEARTYPE_PIXEL_STRUCTURE = 1
+FONT_CLEARTYPE_RENDERING_MODE = 5
+FONT_FREETYPE_GAMMA = 220
+FONT_FREETYPE_CONTRAST = 100
+
+#: 24 is what every ordinary Windows desktop reports. Declared rather than read
+#: from the panel: a wide-gamut monitor answers 30, and a persona claiming an
+#: office laptop with a 30-bit display is a contradiction a page can read.
+SCREEN_COLOR_DEPTH = 24
+
+#: A desktop without a touchscreen. Was a constant compiled into the binary.
+MAX_TOUCH_POINTS = 0
 
 #: The canonical Windows values. Not sampled - see FontProfile for why.
 FONT_UI_FAMILY = "Segoe UI"
@@ -369,6 +417,15 @@ def generate_profile(
     raw.setdefault("font_monospace_size", FONT_MONOSPACE_SIZE)
     raw.setdefault("font_alpha_ladder", FONT_ALPHA_LADDER)
     raw.setdefault("font_manifest", FONT_MANIFEST)
+    raw.setdefault("font_cleartype_gamma", FONT_CLEARTYPE_GAMMA)
+    raw.setdefault("font_cleartype_contrast", FONT_CLEARTYPE_CONTRAST)
+    raw.setdefault("font_cleartype_level", FONT_CLEARTYPE_LEVEL)
+    raw.setdefault("font_cleartype_pixel_structure", FONT_CLEARTYPE_PIXEL_STRUCTURE)
+    raw.setdefault("font_cleartype_rendering_mode", FONT_CLEARTYPE_RENDERING_MODE)
+    raw.setdefault("font_freetype_gamma", FONT_FREETYPE_GAMMA)
+    raw.setdefault("font_freetype_contrast", FONT_FREETYPE_CONTRAST)
+    raw.setdefault("screen_color_depth", SCREEN_COLOR_DEPTH)
+    raw.setdefault("max_touch_points", MAX_TOUCH_POINTS)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
 
@@ -386,10 +443,12 @@ def generate_profile(
             avail_height=int(raw["screen_avail_h"]),
             dpr=float(raw["dpr"]),
             tier=str(raw.get("screen_tier", "")),
+            color_depth=int(raw["screen_color_depth"]),
         ),
         hardware=HardwareProfile(
             concurrency=int(raw["hw_concurrency"]),
             storage_quota_mb=int(raw["storage_quota_mb"]),
+            max_touch_points=int(raw["max_touch_points"]),
         ),
         audio=AudioProfile(
             sample_rate=int(raw["audio_sample_rate"]),
@@ -412,6 +471,13 @@ def generate_profile(
             monospace_size=int(raw["font_monospace_size"]),
             alpha_ladder=tuple(int(v) for v in raw["font_alpha_ladder"]),
             manifest=str(raw["font_manifest"]),
+            cleartype_gamma=int(raw["font_cleartype_gamma"]),
+            cleartype_contrast=int(raw["font_cleartype_contrast"]),
+            cleartype_level=int(raw["font_cleartype_level"]),
+            cleartype_pixel_structure=int(raw["font_cleartype_pixel_structure"]),
+            cleartype_rendering_mode=int(raw["font_cleartype_rendering_mode"]),
+            freetype_gamma=int(raw["font_freetype_gamma"]),
+            freetype_contrast=int(raw["font_freetype_contrast"]),
         ),
         dark_theme=bool(raw["dark_theme"]),
         browsing_history=list(raw.get("browsing_history") or []),

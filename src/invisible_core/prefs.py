@@ -178,68 +178,92 @@ _WIN_VOICES = ",".join([
 # ──────────────────────────────────────────────────────────────────────
 #  Declared media answers
 #
-#  What canPlayType and MediaSource.isTypeSupported report, decided HERE
-#  rather than by what the running build can decode. The engine's own answer
-#  is host-dependent on Linux: the bundled ffvpx has H.264 compiled out and
-#  the platform decoder loads the USER'S libavcodec, so two users of the same
-#  build tell themselves apart. Windows answers through WMF and says
-#  "probably". Measured 2026-08-08, one seed on both hosts, 14 types probed
-#  four ways: exactly the three avc1 rows differed.
+#  WHERE THE HOST-DEPENDENCE ACTUALLY IS, measured 2026-08-08 over four arms
+#  (retail Windows headed, retail Windows headless, our Windows, our Linux),
+#  45 media types and 12 decodingInfo configurations:
 #
-#  Values are what a Windows Firefox reports. "yes" -> "probably",
-#  "maybe" -> "maybe", "no" -> "". A type absent from this table is left to
-#  the media stack untouched, so this is an override list and not a
-#  replacement for it.
+#      our Windows vs retail Windows    45/45 and 8/8 identical
+#      our Linux   vs retail Windows    12 canPlayType rows differ - every
+#                                       avc1 with a supported profile, plus
+#                                       hev1 and hvc1
 #
-#  THE COST, recorded so nobody re-derives it as a surprise: declaring
-#  "probably" for a codec the Linux build cannot decode means a site picks
-#  H.264 and the video does not play, where today it falls back to WebM and
-#  plays. Fidelity to what a Windows Firefox REPORTS is bought with a broken
-#  playback. Shipping the decoder is the way out; changing this answer back
-#  is not.
-# ──────────────────────────────────────────────────────────────────────
-
-#  Measured against retail Firefox 152 on Windows over a 62-type corpus
-#  (`C:/tmp/mime_corpus.py`, 2026-08-08), not guessed. What that measurement
-#  found is why the list below is longer than it was: DecoderTraits falls
-#  through to the real decoders for anything NOT declared here, and on Windows
-#  the real decoders answer the same as retail - because it IS Windows. On Linux
-#  they do not have H.264 or HEVC at all, so they answer "" where retail says
-#  "probably". The three-entry version leaked exactly 8 types cross-OS:
+#  So exactly one question is host-dependent: does this build have an H.264 or
+#  HEVC decoder. The Linux build ships ffvpx with H.264 compiled out and reaches
+#  for the user's libavcodec, so two Linux users differ from EACH OTHER, which
+#  is worse than differing from Windows.
 #
-#      avc1.42001E  avc1.4D4028  avc1.640028  avc1.640033
-#      avc3.42E01E  hvc1.1.6.L93.B0  hev1.1.6.L93.B0  "avc1.42E01E, mp4a.40.2"
+#  WHY THIS IS NOT A TABLE OF TYPE STRINGS ANY MORE. It was until this date, and
+#  it held 14 whole strings matched against `canPlayType`'s argument. A list of
+#  strings can only hold the strings somebody has seen: measured that day it
+#  covered 3 of the 12 rows that actually differed, and the space it was trying
+#  to enumerate has no end (profile x constraint x level x container x whichever
+#  audio codec travels along).
 #
-#  A fallback that happens to be right on one platform is the worst kind: it
-#  makes the surface look finished on the host you develop on. `yes` renders as
-#  "probably" through canPlayType, which is what retail returns for all of these.
+#  One layer down the key space is finite and tiny. The binary now consults this
+#  in PDMFactory::Supports, which is asked about a TRACK mime type - video/avc,
+#  video/hevc, a dozen names Gecko defines itself. Declaring those covers every
+#  string that can be built out of them, and everything above (container rules,
+#  the codec-list AND, the profile and level windows) stays Gecko's own
+#  host-independent logic.
 #
-#  NOT YET TOTAL, and the binary's fallthrough must not be closed until it is.
-#  The corpus covers the codec strings that appear in the wild, not the whole
-#  AVC/HEVC profile-level space, which is finite (profile_idc x constraint-set x
-#  level_idc) and enumerable - that enumeration is what turns this from an
-#  override list into a declaration.
+#  AND THE CORRECTION THAT MADE THAT POSSIBLE: the rule that baseline, main,
+#  extended and high answer while high10, high422 and high444 do not, and that
+#  the level must sit in [1, 6.2], is IsAllowedH264Codec in VideoUtils.cpp - a
+#  COMPILED GECKO CONSTANT, applied identically on every platform. Measuring it
+#  on retail Windows and reading it as a Windows fact produced a 112-vs-84 split
+#  that looked like a rule worth declaring and was Gecko's own arithmetic.
+#  Verified at the edges: avc1.644000 (level 0) and avc1.64403F (level 6.3)
+#  answer empty on retail, exactly as that function says they must.
+#
+#  ONLY THE TWO DIVERGENT NAMES ARE DECLARED. Every audio codec, VP8, VP9 and
+#  AV1 are bundled with the build, agree cross-OS in the measurement, and so
+#  carry nothing to declare away. A pref entry that cannot move a measurement is
+#  not a safety margin, it is an untested code path.
+#
+#  THE COST, recorded so nobody re-derives it as a surprise: declaring support
+#  for a codec the Linux build cannot decode means a site picks H.264 and the
+#  video does not play, where today it falls back to WebM and plays. Fidelity to
+#  what a Windows Firefox REPORTS is bought with a broken playback. Shipping the
+#  decoder is the way out; changing this answer back is not.
+#
 #  NEWLINE-separated: a comma is what a multi-codec type carries inside its own
-#  value, so a comma separator silently swallowed every combined entry. The
-#  binary's parser was moved to '\n' in the same change (DecoderTraits.cpp).
-_WIN_MEDIA_ANSWERS = "\n".join([
-    # H.264: baseline, main, high, and the levels a player actually probes
-    'video/mp4; codecs="avc1.42E01E"|yes',
-    'video/mp4; codecs="avc1.42001E"|yes',
-    'video/mp4; codecs="avc1.4D401E"|yes',
-    'video/mp4; codecs="avc1.4D4028"|yes',
-    'video/mp4; codecs="avc1.64001E"|yes',
-    'video/mp4; codecs="avc1.640028"|yes',
-    'video/mp4; codecs="avc1.640033"|yes',
-    'video/mp4; codecs="avc3.42E01E"|yes',
-    'video/mp4; codecs="avc1.42E01E, mp4a.40.2"|yes',
-    # HEVC: retail on Windows answers through the OS decoder; Linux has none
-    'video/mp4; codecs="hvc1.1.6.L93.B0"|yes',
-    'video/mp4; codecs="hev1.1.6.L93.B0"|yes',
-    # containers and AAC
-    "video/mp4|maybe",
-    "audio/mp4|maybe",
-    'audio/mp4; codecs="mp4a.40.2"|yes',
+#  value, so a comma separator silently swallowed every combined entry.
+# ──────────────────────────────────────────────────────────────────────
+_WIN_DECODE_SUPPORT = chr(10).join([
+    "video/avc|swhw",
+    "video/hevc|swhw",
+])
+
+# ──────────────────────────────────────────────────────────────────────
+#  Declared mediaCapabilities.decodingInfo
+#
+#  A separate table because powerEfficient is NOT a property of the track mime
+#  type: on retail Windows, vp09.00.10.08 in video/mp4 reports powerEfficient
+#  true and a bare vp9 in video/webm reports false, and both build a video/vp9
+#  track. Keyed by container plus the codec family (the part before the first
+#  dot), which keeps the key space finite - eight families, not an unbounded
+#  number of strings built from them.
+#
+#  MEASURED AGAINST RETAIL RUN HEADED, and that is load-bearing. powerEfficient
+#  answers differently under -headless on the same machine: avc1, av01 and vp09
+#  all report false headless and true headed, because the hardware check has no
+#  compositor to ask. The judge is the Firefox a user runs, not the one our
+#  harness runs, so pinning the headless numbers would have pinned three wrong
+#  values.
+#
+#  Three digits: supported, smooth, powerEfficient.
+# ──────────────────────────────────────────────────────────────────────
+_WIN_DECODING_INFO = chr(10).join([
+    "video/mp4|avc1|111",
+    "video/mp4|avc3|111",
+    "video/mp4|hev1|111",
+    "video/mp4|hvc1|111",
+    "video/mp4|av01|111",
+    "video/mp4|vp09|111",
+    "video/webm|av01|111",
+    "video/webm|vp09|111",
+    "video/webm|vp8|110",
+    "video/webm|vp9|110",
 ])
 
 # ──────────────────────────────────────────────────────────────────────
@@ -737,7 +761,8 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # capability on or off, which cannot make a decoder the build does not
     # carry exist - and that is exactly why H.264 stayed divergent while every
     # other codec in a 14-type probe agreed.
-    prefs["zoom.stealth.media.mime_answers"]  = _WIN_MEDIA_ANSWERS
+    prefs["zoom.stealth.media.decode_support"] = _WIN_DECODE_SUPPORT
+    prefs["zoom.stealth.media.decoding_info"] = _WIN_DECODING_INFO
 
 
 def _apply_rasterisation(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -801,7 +826,7 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     # font FILE (it is what the rasteriser does to an edge), and putting it
     # there meant changing it required a Firefox rebuild. Empty string disables
     # the snap, which is what a caller wants when measuring the tell itself.
-    prefs["zoom.stealth.canvas.alpha_ladder"] = ",".join(
+    prefs["zoom.stealth.text.coverage_ladder"] = ",".join(
         str(int(v)) for v in profile.font.alpha_ladder)
     # The whole font manifest - families, per-face vertical metrics, the alias
     # table and the per-script fallback lists - carried by this package and
