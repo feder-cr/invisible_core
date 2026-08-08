@@ -710,6 +710,7 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     # hw_concurrency conditioned on the GPU class).
     prefs["zoom.stealth.hw_concurrency"]      = profile.hardware.concurrency
     prefs["zoom.stealth.storage.quota_mb"]    = profile.hardware.storage_quota_mb
+    prefs["zoom.stealth.max_touch_points"]    = profile.hardware.max_touch_points
 
 
 def _apply_audio(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -737,6 +738,35 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # carry exist - and that is exactly why H.264 stayed divergent while every
     # other codec in a 14-type probe agreed.
     prefs["zoom.stealth.media.mime_answers"]  = _WIN_MEDIA_ANSWERS
+
+
+def _apply_rasterisation(prefs: Dict[str, Any], profile: Profile) -> None:
+    """The glyph rasterisation parameters, declared instead of asked for.
+
+    Six values that the engine reads once at startup and then keeps for the
+    whole process. Before this they came from the machine:
+    `gfxDWriteFonts::UpdateClearTypeVars` ran defaults -> SYSTEM -> prefs, so
+    the user's own ClearType tuning survived wherever a pref was absent, and on
+    a development machine that produces the answer you wanted anyway. The
+    binary now skips the system query entirely when stealth is on, so these
+    prefs are the only source.
+
+    The FreeType pair is not a mirror for its own sake. Skia's glyph mask gamma
+    defaults to LINEAR on Linux against DWrite's 2.2, which is two different
+    coverage curves over the same outlines, and no amount of matching fonts
+    closes that. Measured 2026-08-08: setting it moves the canvas text hash on
+    every value, so the lever reaches the rasteriser, but it does not converge
+    on its own - the residual is the alpha quantisation, which is a separate
+    fix on Skia's A8 mask path.
+    """
+    f = profile.font
+    prefs["gfx.font_rendering.cleartype_params.gamma"]             = f.cleartype_gamma
+    prefs["gfx.font_rendering.cleartype_params.enhanced_contrast"] = f.cleartype_contrast
+    prefs["gfx.font_rendering.cleartype_params.cleartype_level"]   = f.cleartype_level
+    prefs["gfx.font_rendering.cleartype_params.pixel_structure"]   = f.cleartype_pixel_structure
+    prefs["gfx.font_rendering.cleartype_params.rendering_mode"]    = f.cleartype_rendering_mode
+    prefs["gfx.font_rendering.freetype.gamma"]                     = f.freetype_gamma
+    prefs["gfx.font_rendering.freetype.enhanced_contrast"]         = f.freetype_contrast
 
 
 def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -931,6 +961,7 @@ def translate_profile_to_prefs(
     _apply_hardware(prefs, profile)
     _apply_audio(prefs, profile)
     _apply_fonts(prefs, profile)
+    _apply_rasterisation(prefs, profile)
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
     _apply_locale(prefs, locale)

@@ -42,6 +42,17 @@ class ScreenProfile:
 class HardwareProfile:
     concurrency: int
     storage_quota_mb: int
+    #: navigator.maxTouchPoints. NOT sampled: a desktop Windows machine reports
+    #: 0, and the GPU personas we ship are all desktop parts, so varying this
+    #: would contradict the rest of the identity.
+    #:
+    #: It is a field rather than the literal it used to be. The binary already
+    #: forced 0 (Navigator.cpp), which is the right VALUE, but as a constant
+    #: buried in C++ it was not pinnable, not inspectable and not overridable
+    #: through extra_prefs - the thing rule 6 rejects. A touchscreen persona is
+    #: a legitimate future case (a Surface, a 2-in-1), and it must not require
+    #: a browser rebuild.
+    max_touch_points: int = 0
 
 
 @dataclass(frozen=True)
@@ -104,6 +115,34 @@ class FontProfile:
     #: like every other surface. Empty string tells the binary to use the copy
     #: in its own directory.
     manifest: str
+    #: The glyph rasterisation parameters, in the units the prefs expect.
+    #:
+    #: These six are read ONCE at startup and then stay fixed for the process,
+    #: which is precisely the case invisible_core declares. They were not
+    #: declared, and the shape of the gap is the one that keeps recurring here:
+    #: gfxDWriteFonts::UpdateClearTypeVars went defaults -> SYSTEM -> prefs, so
+    #: the machine's own ClearType tuning sat in the middle and survived
+    #: whenever a pref was absent. On the development machine that produces the
+    #: answer we want, which is exactly why it went unnoticed.
+    #:
+    #: The values are Windows canonical, not sampled: real machines vary these
+    #: with the user's ClearType Tuner, but a persona that varied them would be
+    #: varying something no two of our identities should disagree on.
+    #:
+    #: Cross-platform note that matters more than the values: Skia's glyph mask
+    #: gamma defaults to LINEAR on Linux (DrawTargetSkia.cpp:1850-1856) against
+    #: DWrite's 2.2. Two different coverage curves over the same outlines is a
+    #: structural difference, and freetype_gamma below is what aligns them.
+    #: Measured: it moves the canvas text hash on every setting, so the lever
+    #: works, but it does NOT close the gap on its own - the residual is the
+    #: alpha quantisation, not the curve.
+    cleartype_gamma: int = 2200        # /1000 -> 2.2, DWrite's own default
+    cleartype_contrast: int = 100      # /100  -> 1.0
+    cleartype_level: int = 100         # /100  -> 1.0
+    cleartype_pixel_structure: int = 1  # DWRITE_PIXEL_GEOMETRY_RGB
+    cleartype_rendering_mode: int = 5   # CLEARTYPE_NATURAL_SYMMETRIC
+    freetype_gamma: int = 220          # /100  -> 2.2, matching DWrite
+    freetype_contrast: int = 100       # /100  -> 1.0
 
 
 # ──────────────────────────────────────────────────────────────────────
