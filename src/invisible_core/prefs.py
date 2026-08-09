@@ -921,9 +921,32 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     # sessionStorage, indexedDB) come out of these two levers. Gecko has no
     # dom.indexedDB.enabled: indexedDB availability is decided by the cookie
     # behaviour and the storage-access state, which is why declaring the two
-    # levers covers all four answers. 0 is BEHAVIOR_ACCEPT.
+    # levers covers all four answers.
+    #
+    # [CORRECTED 2026-08-09] This declared 0 (BEHAVIOR_ACCEPT, accept
+    # everything). A shipped Firefox runs at **5** - dFPI, total cookie
+    # protection - which firefox.js sets over the 0 that StaticPrefList.yaml
+    # carries as the raw default. So reading the yaml and declaring 0 looked
+    # like "the Firefox default" and was the opposite of it.
+    #
+    # It was found from the wire, not from the source. Our subresource requests
+    # put `Referer` before `Connection` where stock puts `Connection` first -
+    # stable over three runs a side, and header order is one of the most read
+    # HTTP fingerprints there is. Bisected: not our netwerk patches (the bare
+    # binary matches stock), not our Juggler (our binary under plain Playwright
+    # matches stock), not the locale header override - the wrapper's PREF SET.
+    # Then a binary search over all 219 prefs landed on this one.
+    #
+    # The header order is the smaller half of the damage. BEHAVIOR_ACCEPT turns
+    # OFF the third-party cookie partitioning that every current Firefox has,
+    # and a page can test for partitioning directly. We were declaring a
+    # browser with its most distinctive protection disabled.
+    #
+    # 5 keeps the four booleans true - measured on stock 151 at its own default,
+    # which reports cookieEnabled true and a working localStorage without
+    # anybody setting anything.
     _storage = bool(profile.hardware.storage_enabled)
-    prefs["network.cookie.cookieBehavior"]    = 0 if _storage else 2
+    prefs["network.cookie.cookieBehavior"]    = 5 if _storage else 2
     prefs["dom.storage.enabled"]              = _storage
     prefs["zoom.stealth.fonts.generics"]      = profile.hardware.generics
     # The accessibility media features. Stock Firefox reads these generic prefs
