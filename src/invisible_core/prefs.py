@@ -421,9 +421,26 @@ _BASELINE: Dict[str, Any] = {
     "browser.aboutConfig.showWarning":                    False,
     "network.captive-portal-service.enabled":             False,
     "network.connectivity-service.enabled":               False,
-    "dom.push.enabled":                                   False,
+    # [CORRETTO 2026-08-09] These three were False, and the reason above is the
+    # reason they were: startup network chatter through a residential proxy.
+    # But turning them off DELETES Web APIs from the page. Measured against
+    # stock 151 with a 119-field sweep: `PushManager` was absent from `window`
+    # and `geolocation` was absent from `Navigator.prototype` on both our
+    # builds and present on stock. `'geolocation' in navigator` is one line,
+    # and a missing API is a suppressed signal, which rule 12 counts as a FAIL
+    # rather than a pass.
+    #
+    # The network goal is kept by the levers that actually carry it: the push
+    # SERVICE connection stays off (the API only opens it when a page
+    # subscribes), and geolocation only touches the network when a page calls
+    # it, which the default-deny below answers locally. A user who blocked
+    # location is the most ordinary thing on the web.
+    "dom.push.enabled":                                   True,
     "dom.push.connection.enabled":                        False,
-    "geo.enabled":                                        False,
+    "geo.enabled":                                        True,
+    #: 2 = deny. No prompt, no network request, and the API is present and
+    #: behaves exactly as it does for the many real users who said no.
+    "permissions.default.geo":                            2,
     "geo.provider.network.url":                           "",
     "browser.region.network.url":                         "",
     "browser.region.update.enabled":                      False,
@@ -854,6 +871,21 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.hw_concurrency"]      = profile.hardware.concurrency
     prefs["zoom.stealth.storage.quota_mb"]    = profile.hardware.storage_quota_mb
     prefs["zoom.stealth.max_touch_points"]    = profile.hardware.max_touch_points
+    # The Touch INTERFACES, which are a separate question from how many touch
+    # points the machine reports. Firefox exposes `Touch`, `TouchEvent` and
+    # `TouchList` on window when this is 2 (auto) and the OS looks
+    # touch-capable, which on Windows it does and on Linux it does not.
+    # Measured 2026-08-09: stock 151 on Windows has all three, our Windows had
+    # all three, our LINUX had none - three constructors that a page finds with
+    # `'ontouchstart' in window` or a typeof, differing across the two hosts of
+    # a persona that claims Windows on both.
+    #
+    # 1 = force enabled, and it is the same 1 on both platforms because the
+    # persona is the same on both. maxTouchPoints stays declared separately and
+    # stays 0: a Windows laptop without a touchscreen reports exactly that -
+    # the interfaces exist, the device has no touch points - which is why these
+    # are two fields and not one.
+    prefs["dom.w3c_touch_events.enabled"]     = 1
     prefs["zoom.stealth.voices.list"]         = profile.hardware.voices
     prefs["media.navigator.streams.fake"]     = bool(profile.hardware.fake_media_devices)
     # The four storage booleans a page reads (cookieEnabled, localStorage,

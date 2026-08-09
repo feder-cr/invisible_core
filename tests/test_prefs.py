@@ -538,3 +538,41 @@ def test_virtual_display_no_op_on_linux(monkeypatch):
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, virtual_display=True)
     assert "security.sandbox.gpu.level" not in prefs
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  Web APIs that must EXIST, which is a different question from what they
+#  answer. Added 2026-08-09 after a 119-field sweep against stock 151.
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_the_apis_a_real_firefox_has_are_not_switched_off():
+    """Three APIs were missing from the page, and none of it was on purpose.
+
+    `geo.enabled` and `dom.push.enabled` were False for a NETWORK reason -
+    startup chatter through a residential proxy - and the side effect was that
+    `navigator.geolocation` and `window.PushManager` did not exist. Stock 151
+    has both. `'geolocation' in navigator` is one line, and rule 12 counts a
+    suppressed signal as a FAIL rather than a pass.
+
+    `dom.w3c_touch_events.enabled` is the cross-OS half: at its default the
+    Touch interfaces appear on Windows and not on Linux, so a persona claiming
+    Windows had them on one host and not the other.
+
+    Asserted as the literal prefs rather than through a browser, because this
+    suite never launches one - the browser-side proof is the sweep, and this is
+    what keeps someone from switching them off again for the network reason
+    that is still written next to them.
+    """
+    prefs = translate_profile_to_prefs(generate_profile(42))
+    assert prefs["geo.enabled"] is True
+    assert prefs["dom.push.enabled"] is True
+    assert prefs["dom.w3c_touch_events.enabled"] == 1
+    # The network goal the False came from is kept by these two, so a future
+    # reader does not have to choose between the API and the quiet startup.
+    assert prefs["dom.push.connection.enabled"] is False
+    assert prefs["permissions.default.geo"] == 2
+    # Touch INTERFACES present, touch POINTS zero: a Windows laptop with no
+    # touchscreen. Two fields, and this is why.
+    assert prefs["zoom.stealth.max_touch_points"] == 0
