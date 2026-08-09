@@ -347,3 +347,31 @@ def test_declared_hardware_constants_have_the_right_types():
     assert isinstance(p.hardware.max_touch_points, int)
     assert isinstance(p.screen.color_depth, int)
     assert isinstance(p.font.cleartype_gamma, int)
+
+
+def test_the_windows_claim_has_exactly_one_source_each():
+    """platform, oscpu and the User-Agent must not be written out twice.
+
+    They are three halves of the same claim and they have to agree; the way they
+    stop agreeing is somebody editing one copy. USER_AGENT was already
+    centralised in constants.py and the other two were not, so they were the
+    pair that could drift - the same shape as the max_touch_points copy that
+    silently won over its own constant on 2026-08-09.
+
+    Asserts the values reaching BOTH consumers come from the shared constant,
+    rather than that two literals happen to match today.
+    """
+    from invisible_core import constants
+    from invisible_core._fpforge import _sampler
+    from invisible_core._fpforge.profile import generate_profile
+    from invisible_core.prefs import translate_profile_to_prefs
+
+    prefs = translate_profile_to_prefs(generate_profile(seed=42))
+    assert prefs["general.platform.override"] is constants.PLATFORM_OVERRIDE
+    assert prefs["general.oscpu.override"] is constants.OSCPU_OVERRIDE
+    assert prefs["general.useragent.override"] is constants.USER_AGENT
+
+    bundle = _sampler.sample(42)
+    assert bundle["platform"] is constants.PLATFORM_OVERRIDE
+    assert bundle["oscpu"] is constants.OSCPU_OVERRIDE
+    assert bundle["user_agent"] is constants.USER_AGENT

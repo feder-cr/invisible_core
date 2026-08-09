@@ -51,6 +51,27 @@ USER_AGENT: str = (
     f"Gecko/20100101 Firefox/{UA_VERSION}"
 )
 
+# The other two halves of the same claim. They live here, beside the
+# User-Agent they have to agree with, because they used to be written out
+# twice: once in prefs._NAVIGATOR_OVERRIDES and once in the sampler's
+# _LOCKED, with nothing tying the two together. USER_AGENT was already
+# centralised; these were not, so they were the pair that could drift.
+#
+# The drift is not hypothetical. The same shape was found and fixed on
+# 2026-08-09 for max_touch_points, where a stale second copy silently won
+# over the constant that was supposed to own the value, and it was invisible
+# because both copies said 0.
+PLATFORM_OVERRIDE: str = "Win32"
+OSCPU_OVERRIDE: str = "Windows NT 10.0; Win64; x64"
+
+# Height of the Windows taskbar in CSS pixels at 100% DPI, i.e. how much
+# shorter screen.availHeight is than screen.height. It lives here, in the
+# module both the sampler and the profile already import, because it was the
+# same number written out in three places - the generator, nsScreen.cpp and
+# nsGlobalWindowOuter.cpp - with nothing tying them together.
+TASKBAR_PX: int = 48
+
+
 
 def ARCHIVE_NAME(platform_key: str, machine: str) -> str:
     """The platform-specific archive filename, taken from the seal when it has

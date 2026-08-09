@@ -30,7 +30,8 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-from ..constants import USER_AGENT
+from ..constants import (OSCPU_OVERRIDE, PLATFORM_OVERRIDE, TASKBAR_PX,
+                         USER_AGENT)
 from ._network import Network, Node
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -52,7 +53,8 @@ def _load(filename: str) -> Any:
 #: 48, since before the split. Not an emitted pref: avail_width/height
 #: are commented out in prefs.py precisely because the engine owns them,
 #: which is why nothing caught it and why fixing it moves no seed.
-_TASKBAR_PX = 48
+# _TASKBAR_PX moved to profile.TASKBAR_PX on 2026-08-09: it was the same
+# number written out in Python and twice in C++, kept in step by hand.
 
 
 _LOCKED: Dict[str, Any] = {
@@ -60,8 +62,8 @@ _LOCKED: Dict[str, Any] = {
     # literal "Firefox/150.0.1" was a patch-versioned UA that no real Firefox
     # emits, so the spoof itself was a tell.
     "user_agent": USER_AGENT,
-    "platform": "Win32",
-    "oscpu": "Windows NT 10.0; Win64; x64",
+    "platform": PLATFORM_OVERRIDE,
+    "oscpu": OSCPU_OVERRIDE,
     "app_code_name": "Mozilla",
     "app_version": "5.0 (Windows)",
     "product_sub": "20100101",
@@ -83,7 +85,12 @@ _LOCKED: Dict[str, Any] = {
 # ═══════════════════════════════════════════════════════════════════════
 _GPU_POOL = _load("webgl_renderer_pool.json")["entries"]
 # hwc/screen/storage now keyed on (gpu_class, intra_tier) for triangulation
-_CPT_HWC = _load("cpt_hwc_given_class_tier.json")["table"]
+# _CPT_HWC was loaded here and never referenced again. hw_concurrency became a
+# ROOT marginal on 2026-06-18 - cores are an OS-level property, near-independent
+# of the GPU class - and the conditional table it used to draw from stayed
+# behind, read from disk on every import and thrown away. The JSON is kept: it
+# is measured data, and deleting a measurement to tidy an unused variable is how
+# a table gets re-derived from scratch a year later.
 _CPT_SCREEN = _load("cpt_screen_given_class_tier.json")["table"]
 _CPT_STORAGE = _load("cpt_storage_given_class_tier.json")["table"]
 # Hidden tier variable that makes hwc/screen/storage jointly coherent
@@ -331,7 +338,7 @@ class Forge:
             "screen_w": int(screen["w"]),
             "screen_h": int(screen["h"]),
             "screen_avail_w": int(screen.get("aw", screen["w"])),
-            "screen_avail_h": int(screen.get("ah", screen["h"] - _TASKBAR_PX)),
+            "screen_avail_h": int(screen.get("ah", screen["h"] - TASKBAR_PX)),
             "dpr": float(screen["dpr"]),
             # Hardware (coherent with GPU class)
             "hw_concurrency": int(bundle["hw_concurrency"]),

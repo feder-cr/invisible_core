@@ -37,6 +37,11 @@ class ScreenProfile:
     #: overridable like every other surface (rule 6, tutto allo stesso livello).
     color_depth: int = 24
 
+    #: Height of the Windows taskbar, i.e. how much shorter availHeight is
+    #: than height. It was the literal 48 in three places - two C++ files and
+    #: this generator - kept in step by hand.
+    taskbar_px: int = 48
+
 
 @dataclass(frozen=True)
 class HardwareProfile:
@@ -53,6 +58,79 @@ class HardwareProfile:
     #: a legitimate future case (a Surface, a 2-in-1), and it must not require
     #: a browser rebuild.
     max_touch_points: int = 0
+
+    #: The five speechSynthesis voices the page is handed, as the binary
+    #: parses them: "name|lang|default|localService", comma separated.
+    #:
+    #: A field rather than a constant in _BASELINE for the usual reason, and
+    #: for one specific one: they are ALWAYS the English (United States) set,
+    #: whatever locale the session resolved to. A real Windows machine running
+    #: in Italian reports Italian voices, so an it-IT session declaring only
+    #: American voices contradicts itself - and that contradiction cannot even
+    #: be expressed today, let alone fixed, because the value is not a field.
+    #:
+    #: The per-locale tables are NOT filled in here. They have to be measured
+    #: on a real Windows install of each locale, and inventing five plausible
+    #: Italian voice names would be exactly the kind of guess this codebase
+    #: keeps having to undo. Moving the level is the part that can be done
+    #: honestly today; the data is the next step and it needs a machine.
+    voices: str = ""
+
+    #: navigator.mediaDevices.enumerateDevices: one fake audio input and one
+    #: fake video input on every host, via media.navigator.streams.fake.
+    #:
+    #: Measured 2026-08-08 in a secure context (about:blank is not one, and
+    #: measuring there made the two hosts look like they agreed because both
+    #: returned nothing): Linux enumerated 0 real devices and Windows 2. The
+    #: fixed pair is the invariant we want; it was a constant in _BASELINE,
+    #: which means the device count - a fingerprint surface - was not
+    #: pinnable, not inspectable and not overridable.
+    fake_media_devices: bool = True
+
+    #: Whether cookies, localStorage, sessionStorage and indexedDB all work.
+    #:
+    #: ONE field for four booleans on purpose: they are one decision - "this
+    #: browser has working storage" - and Gecko exposes them through two
+    #: levers, not four. A page reads all four; a real desktop Firefox answers
+    #: true to all four.
+    #:
+    #: They used to be true because nobody touched network.cookie.cookieBehavior
+    #: or dom.storage.enabled, i.e. because the upstream defaults happened to be
+    #: right - not because anything declared them. An enterprise policy, a
+    #: profile carried over, or an upstream default change would have moved a
+    #: fingerprint surface with nothing in this package aware of it.
+    storage_enabled: bool = True
+
+    #: Whether the machine has accessibility overrides on: reduced motion,
+    #: reduced transparency, inverted colours.
+    #:
+    #: One field for three prefs because it is one fact about the machine, and
+    #: False is what an ordinary desktop reports. They were declared by nothing
+    #: at all until 2026-08-09: prefers-reduced-motion and friends are
+    #: content-exposed media features that read the HOST, through structurally
+    #: different code on each platform - SystemParametersInfoW on Windows,
+    #: gtk-enable-animations and the DBus portal on Linux.
+    #:
+    #: Measured the day they were found: 0 divergences on 20 features between
+    #: the two builds. That is agreement by LUCK - both machines happen to have
+    #: no accessibility settings on - not coverage, and it is the distinction
+    #: this codebase keeps having to relearn. A user with reduced motion on, or
+    #: a CI container whose GTK theme disables animations, would diverge with
+    #: nothing in this package aware of it.
+    #:
+    #: Costs nothing to close: Firefox already reads ui.prefersReducedMotion and
+    #: its siblings BEFORE the native per-platform code (nsXPLookAndFeel), so
+    #: this needs no C++ and no rebuild.
+    accessibility_overrides: bool = False
+
+    #: The CSS generic families, as "generic|lang|family" records separated by
+    #: newlines. It was ten rows compiled into gfxPlatformFontList.cpp: a finite,
+    #: perfectly known domain (four generics x five langgroups), so changing
+    #: which face answers `font-family: serif` should not cost a browser
+    #: rebuild. The x-math row is load-bearing and easy to lose: without it the
+    #: western serif answer wins and every MathML glyph renders in Times New
+    #: Roman, on EVERY host, which is why no cross-OS gate could see it.
+    generics: str = ""
 
 
 @dataclass(frozen=True)
@@ -172,9 +250,12 @@ class FontProfile:
 
 _PIN_GROUPS = {
     "gpu": {"vendor", "renderer", "class_tier"},
-    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier",
+    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier", "taskbar_px",
                "color_depth"},
-    "hardware": {"concurrency", "storage_quota_mb", "max_touch_points"},
+    "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
+                 "voices", "fake_media_devices",
+                 "storage_enabled", "generics",
+                 "accessibility_overrides"},
     "audio": {"sample_rate", "output_latency_ms", "max_channel_count"},
     "codec": {
         "av1_enabled", "webm_encoder_enabled",
@@ -288,7 +369,13 @@ _PIN_TO_RAW = {
     "font.freetype_gamma": "font_freetype_gamma",
     "font.freetype_contrast": "font_freetype_contrast",
     "screen.color_depth": "screen_color_depth",
+    "screen.taskbar_px": "taskbar_px",
     "hardware.max_touch_points": "max_touch_points",
+    "hardware.voices": "voices",
+    "hardware.fake_media_devices": "fake_media_devices",
+    "hardware.storage_enabled": "storage_enabled",
+    "hardware.generics": "generics",
+    "hardware.accessibility_overrides": "accessibility_overrides",
     "dark_theme": "dark_theme",
 }
 
@@ -309,6 +396,57 @@ FONT_FREETYPE_CONTRAST = 100
 #: from the panel: a wide-gamut monitor answers 30, and a persona claiming an
 #: office laptop with a 30-bit display is a contradiction a page can read.
 SCREEN_COLOR_DEPTH = 24
+
+#: The Windows taskbar, re-exported so a pin can reach it by the same name
+#: as every other declared constant. The value lives in constants.py, which
+#: the sampler imports too - one number, one home.
+from ..constants import TASKBAR_PX  # noqa: E402,F401
+
+#: The five Windows English (United States) voices, in the order the binary
+#: parses them. See HardwareProfile.voices for why this is not per-locale yet.
+VOICES = ",".join([
+    "Microsoft David - English (United States)|en-US|1|1",
+    "Microsoft Zira - English (United States)|en-US|0|1",
+    "Microsoft Mark - English (United States)|en-US|0|1",
+    "Microsoft David Desktop - English (United States)|en-US|0|1",
+    "Microsoft Zira Desktop - English (United States)|en-US|0|1",
+])
+
+#: One fake audio input and one fake video input, on every host.
+FAKE_MEDIA_DEVICES = True
+
+#: Cookies, localStorage, sessionStorage and indexedDB all working, which is
+#: what a real desktop Firefox reports.
+STORAGE_ENABLED = True
+
+#: An ordinary desktop with no accessibility overrides turned on.
+ACCESSIBILITY_OVERRIDES = False
+
+#: The generic-family table a Windows Firefox resolves to. Moved out of C++ on
+#: 2026-08-09; the engine keeps the same rows compiled in as the floor for a
+#: browser launched without this package.
+GENERICS = chr(10).join([
+    "cursive||Comic Sans MS",
+    "serif|x-math|Cambria Math",
+    "sans-serif|ja|Yu Gothic UI",
+    "serif|ja|Yu Gothic UI",
+    "monospace|ja|Yu Gothic UI",
+    "sans-serif|ko|Malgun Gothic",
+    "serif|ko|Malgun Gothic",
+    "monospace|ko|Malgun Gothic",
+    "sans-serif|zh-CN|Microsoft YaHei UI",
+    "serif|zh-CN|Microsoft YaHei UI",
+    "monospace|zh-CN|Microsoft YaHei UI",
+    "sans-serif|zh-TW|Microsoft JhengHei UI",
+    "serif|zh-TW|Microsoft JhengHei UI",
+    "monospace|zh-TW|Microsoft JhengHei UI",
+    "sans-serif|zh-HK|Microsoft JhengHei UI",
+    "serif|zh-HK|Microsoft JhengHei UI",
+    "monospace|zh-HK|Microsoft JhengHei UI",
+    "serif||Times New Roman",
+    "sans-serif||Arial",
+    "monospace||Consolas",
+])
 
 #: A desktop without a touchscreen. Was a constant compiled into the binary.
 MAX_TOUCH_POINTS = 0
@@ -425,7 +563,13 @@ def generate_profile(
     raw.setdefault("font_freetype_gamma", FONT_FREETYPE_GAMMA)
     raw.setdefault("font_freetype_contrast", FONT_FREETYPE_CONTRAST)
     raw.setdefault("screen_color_depth", SCREEN_COLOR_DEPTH)
+    raw.setdefault("taskbar_px", TASKBAR_PX)
     raw.setdefault("max_touch_points", MAX_TOUCH_POINTS)
+    raw.setdefault("voices", VOICES)
+    raw.setdefault("fake_media_devices", FAKE_MEDIA_DEVICES)
+    raw.setdefault("storage_enabled", STORAGE_ENABLED)
+    raw.setdefault("generics", GENERICS)
+    raw.setdefault("accessibility_overrides", ACCESSIBILITY_OVERRIDES)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
 
@@ -444,11 +588,17 @@ def generate_profile(
             dpr=float(raw["dpr"]),
             tier=str(raw.get("screen_tier", "")),
             color_depth=int(raw["screen_color_depth"]),
+            taskbar_px=int(raw["taskbar_px"]),
         ),
         hardware=HardwareProfile(
             concurrency=int(raw["hw_concurrency"]),
             storage_quota_mb=int(raw["storage_quota_mb"]),
             max_touch_points=int(raw["max_touch_points"]),
+            voices=str(raw["voices"]),
+            fake_media_devices=bool(raw["fake_media_devices"]),
+            storage_enabled=bool(raw["storage_enabled"]),
+            generics=str(raw["generics"]),
+            accessibility_overrides=bool(raw["accessibility_overrides"]),
         ),
         audio=AudioProfile(
             sample_rate=int(raw["audio_sample_rate"]),

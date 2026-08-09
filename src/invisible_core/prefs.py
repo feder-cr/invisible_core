@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
-from .constants import USER_AGENT
+from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._webgl_personas import render_noise_seed, select_persona
 from ._headless import cloak_prefs
@@ -38,8 +38,8 @@ _NAVIGATOR_OVERRIDES: Dict[str, str] = {
     # previous literal said "Firefox/150.0.1", a patch-versioned form that no
     # real Firefox emits.
     "general.useragent.override": USER_AGENT,
-    "general.platform.override":   "Win32",
-    "general.oscpu.override":      "Windows NT 10.0; Win64; x64",
+    "general.platform.override":   PLATFORM_OVERRIDE,
+    "general.oscpu.override":      OSCPU_OVERRIDE,
     # general.buildID.override removed 2026-04-28: the previous value
     # "20181001000000" was a 2018 buildID stuck on a 2026-built Firefox 150
     # binary (real BuildID=20260426192818 from application.ini). The 7.5-yr
@@ -166,13 +166,10 @@ _WEBGL2_EXTENSIONS = ",".join([
 #  speechSynthesis.getVoices() patch; empty disables it.
 # ──────────────────────────────────────────────────────────────────────
 
-_WIN_VOICES = ",".join([
-    "Microsoft David - English (United States)|en-US|1|1",
-    "Microsoft Zira - English (United States)|en-US|0|1",
-    "Microsoft Mark - English (United States)|en-US|0|1",
-    "Microsoft David Desktop - English (United States)|en-US|0|1",
-    "Microsoft Zira Desktop - English (United States)|en-US|0|1",
-])
+# _WIN_VOICES moved to HardwareProfile.voices on 2026-08-09, after verifying
+# the two copies were byte-identical. It was a constant in _BASELINE, so the
+# voice list - a fingerprint surface, and one that is wrong for every non-en
+# locale - could not be pinned, inspected or overridden.
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -481,12 +478,12 @@ _BASELINE: Dict[str, Any] = {
     # fake pair is the invariant: 2 on every host, unchanged on a machine that
     # already had 2. Labels stay empty and device ids stay empty without
     # permission, exactly as a real browser reports them.
-    "media.navigator.streams.fake":                       True,
+    # media.navigator.streams.fake -> HardwareProfile.fake_media_devices
 
     # Speech synth: enabled (the C++ patch fabricates voices from the
     # comma list above) regardless of the host OS.
     "media.webspeech.synth.enabled":                      True,
-    "zoom.stealth.voices.list":                           _WIN_VOICES,
+    # zoom.stealth.voices.list -> HardwareProfile.voices
 
     # WebGL extensions whitelist - non-empty pre-empts native enumeration.
     "zoom.stealth.webgl.extensions":                      _WEBGL1_EXTENSIONS,
@@ -762,6 +759,7 @@ def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.screen.width"]        = profile.screen.width
     prefs["zoom.stealth.screen.height"]       = profile.screen.height
     prefs["zoom.stealth.screen.color_depth"]  = profile.screen.color_depth
+    prefs["zoom.stealth.screen.taskbar_px"]   = profile.screen.taskbar_px
     # DEAD, and kept only so the next reader does not re-add them. Neither name
     # is declared in StaticPrefList.yaml, and nsScreen::GetAvailRect ignores
     # them outright: it reads zoom_stealth_screen_width/height and subtracts a
@@ -780,6 +778,25 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.hw_concurrency"]      = profile.hardware.concurrency
     prefs["zoom.stealth.storage.quota_mb"]    = profile.hardware.storage_quota_mb
     prefs["zoom.stealth.max_touch_points"]    = profile.hardware.max_touch_points
+    prefs["zoom.stealth.voices.list"]         = profile.hardware.voices
+    prefs["media.navigator.streams.fake"]     = bool(profile.hardware.fake_media_devices)
+    # The four storage booleans a page reads (cookieEnabled, localStorage,
+    # sessionStorage, indexedDB) come out of these two levers. Gecko has no
+    # dom.indexedDB.enabled: indexedDB availability is decided by the cookie
+    # behaviour and the storage-access state, which is why declaring the two
+    # levers covers all four answers. 0 is BEHAVIOR_ACCEPT.
+    _storage = bool(profile.hardware.storage_enabled)
+    prefs["network.cookie.cookieBehavior"]    = 0 if _storage else 2
+    prefs["dom.storage.enabled"]              = _storage
+    prefs["zoom.stealth.fonts.generics"]      = profile.hardware.generics
+    # The accessibility media features. Stock Firefox reads these generic prefs
+    # BEFORE the per-platform native code (nsXPLookAndFeel), so declaring them
+    # needs no patch at all - they were simply never declared, and answered from
+    # the host on both platforms.
+    _a11y = 1 if profile.hardware.accessibility_overrides else 0
+    prefs["ui.prefersReducedMotion"]          = _a11y
+    prefs["ui.prefersReducedTransparency"]    = _a11y
+    prefs["ui.invertedColors"]                = _a11y
 
 
 def _apply_audio(prefs: Dict[str, Any], profile: Profile) -> None:

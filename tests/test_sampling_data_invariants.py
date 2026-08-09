@@ -202,28 +202,47 @@ def test_every_cpt_keyed_by_gpu_class_covers_every_class():
 
 
 def test_the_available_screen_rect_matches_what_the_engine_computes():
-    """The engine derives the available rect itself - `nsScreen.cpp:114` returns
-    `{0, 0, w, h - 48}`, "matches Windows default taskbar height at 100% DPI".
-    Python said 40, in the fallback AND in all 93 data rows, so every profile
-    REPORTED a 40px taskbar while the browser would report 48.
+    """The taskbar height has ONE home now, and this asserts it reaches everyone.
 
-    It hid because `avail_width`/`avail_height` are not emitted as prefs - the
-    engine owns them - so the wrong value never reached a page. It reached
-    `Profile.screen.avail_height`, which is public API and the obvious thing for
-    a doc example or a test to assert against.
+    History, because it is why this test exists: the engine returned
+    `{0, 0, w, h - 48}` with 48 written into nsScreen.cpp, and Python said 40 -
+    in the fallback and in all 93 data rows - so every profile REPORTED a 40px
+    taskbar while the browser would report 48. It hid because avail_width and
+    avail_height are not emitted as prefs, so the wrong value never reached a
+    page; it reached Profile.screen.avail_height, which is public API.
+
+    On 2026-08-09 the number stopped being written out three times (the
+    generator, nsScreen.cpp, nsGlobalWindowOuter.cpp) and became
+    constants.TASKBAR_PX, emitted as zoom.stealth.screen.taskbar_px. So the
+    assertion is no longer "two literals happen to agree" but "the sampled rect,
+    the profile field and the pref the engine reads all come from one constant".
     """
     from invisible_core import generate_profile
-    from invisible_core._fpforge._sampler import _TASKBAR_PX
+    from invisible_core.constants import TASKBAR_PX
+    from invisible_core.prefs import translate_profile_to_prefs
 
-    assert _TASKBAR_PX == 48, "the engine's nsScreen.cpp uses 48; this must match it"
+    assert TASKBAR_PX == 48, "the value the engine compiles in as its floor"
+
     deltas = {
         generate_profile(seed=s).screen.height
         - generate_profile(seed=s).screen.avail_height
         for s in range(300)
     }
-    assert deltas == {48}, (
-        f"profiles report a taskbar of {sorted(deltas)} px while the engine "
-        f"computes {_TASKBAR_PX}")
+    assert deltas == {TASKBAR_PX}, (
+        f"profiles report a taskbar of {sorted(deltas)} px while the constant "
+        f"says {TASKBAR_PX}")
+
+    # and the number the ENGINE will use comes from the same place
+    for seed in (1, 42, 777):
+        p = generate_profile(seed=seed)
+        prefs = translate_profile_to_prefs(p)
+        assert prefs["zoom.stealth.screen.taskbar_px"] == TASKBAR_PX
+        assert p.screen.height - p.screen.avail_height == TASKBAR_PX
+
+    # a pin has to move all three together, or it is not one source
+    pinned = generate_profile(seed=42, pin={"screen.taskbar_px": 60})
+    assert pinned.screen.taskbar_px == 60
+    assert translate_profile_to_prefs(pinned)["zoom.stealth.screen.taskbar_px"] == 60
 
 
 def test_no_pool_for_any_platform_carries_a_software_renderer():
