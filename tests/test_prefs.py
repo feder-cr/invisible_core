@@ -636,7 +636,32 @@ def test_the_storage_quota_is_a_value_firefox_can_actually_report():
     Asserted in BYTES as well as MB, because the megabyte figure is the one a
     reader can talk themselves into and the byte figure is the one the page
     sees.
+
+    ASSERTED OVER THE TABLE, NOT OVER SAMPLES. The first version of this test
+    checked four seeds, and its first mutation SURVIVED: putting one CPT entry
+    back to 400 GiB changed nothing, because none of those four seeds happens
+    to draw that row. A gate that samples a distribution cannot see a value
+    that is merely rare - which is the property that let this defect last as
+    long as it did in the first place.
     """
+    import json
+    import pathlib
+
+    table_path = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "invisible_core" / "_fpforge" / "data"
+                  / "cpt_storage_given_class_tier.json")
+    data = json.loads(table_path.read_text(encoding="utf-8"))
+    bad = {}
+    for key, rows in data["table"].items():
+        for row in rows:
+            if row["value"] != 10240:
+                bad.setdefault(key, []).append(row["value"])
+    assert not bad, (
+        "these CPT entries hold a quota Firefox cannot report - the cap is "
+        f"10 GiB = 10240 MB: {bad}")
+
+    # And the sampled path on top, because a correct table reached through a
+    # broken translation is still the wrong number on the wire.
     for seed in (1, 42, 1234, 99999):
         prefs = translate_profile_to_prefs(generate_profile(seed))
         mb = prefs["zoom.stealth.storage.quota_mb"]
