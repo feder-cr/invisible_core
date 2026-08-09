@@ -76,14 +76,39 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
     # all seven with hyphens left exactly those four unset, and the measurement
     # said so - Linux went from 8 divergences to 4, and the 4 were the 4.
     "ui.-moz-cellhighlight":           "#CECECE",
-    # F0F0F0 and not FFFFFF, and the difference is a lesson rather than a
-    # typo. It was declared FFFFFF from a measurement taken against the retail
-    # in C:/tmp/ff151, a directory that holds 153.0.3 - the NAME was the only
-    # thing saying 151. Firefox 153 answers white here and 151 answers this,
-    # and 151 is the version our User-Agent claims. It is the only one of the
-    # 35 colours that moved between the two majors, which is exactly why a
-    # wrong judge is hard to catch: it agrees with the right one almost
-    # everywhere.
+    # F0F0F0. This one value was declared three times in two days, twice from a
+    # binary that was not the right judge, and the sequence is worth more than
+    # the number.
+    #
+    #   declared      FFFFFF   no measurement behind it
+    #   2026-08-09    F0F0F0   judged by C:/tmp/ff151-win2
+    #   2026-08-09    FFFFFF   judged by C:/tmp/retail151, "the signed retail"
+    #   2026-08-10    F0F0F0   judged by a binary verified to be both
+    #
+    # ff151-win2 reports 151.0 and is not retail: Get-AuthenticodeSignature
+    # says NotSigned, ProductName is "Nightly", IsPrivateBuild is true. Right
+    # version, wrong build. So the second row was rejected - correctly.
+    #
+    # C:/tmp/retail151 was then downloaded and extracted to be the answer to
+    # that, and its application.ini says Version=153.0.3: the extraction had
+    # failed and the directory kept what was already in it. Right provenance,
+    # wrong version, and the name said 151 both times. So the third row was
+    # measured against 153, which genuinely answers white here - the difference
+    # is upstream drift between the two majors, which is exactly the thing
+    # rule 4's same-major clause exists to keep out of our numbers.
+    #
+    # The fourth row is C:/tmp/ffjudge-151.0: application.ini Version=151.0
+    # BuildID=20260516144017, Authenticode Valid, CN=Mozilla Corporation,
+    # ProductName Firefox, IsPrivateBuild false. Both checks, on the same
+    # binary, before it was allowed to decide anything. It answers
+    # rgb(240,240,240), which means the FIRST correction had the right value
+    # from the wrong evidence - and a right answer from a bad judge is still
+    # not knowledge, because the next value it decides will be wrong.
+    #
+    # Measured the same day across all 35 keywords: our Windows build differs
+    # from that judge on this one field and no other, and 6 of the 35 do not
+    # resolve from content at all. That 1-of-35 is why a wrong judge survives
+    # so long - it agrees almost everywhere.
     "ui.-moz-dialog":                  "#F0F0F0",
     "ui.-moz-dialogtext":              "#000000",
     "ui.-moz_menubarhovertext":        "#15141A",
@@ -332,6 +357,26 @@ _MONOSPACE_LANG_GROUPS = (
 
 _BASELINE: Dict[str, Any] = {
     # Turn off Firefox's own resistFingerprinting; we do our own via patches.
+    # The CSS property set a page enumerates has to match retail, and ours was
+    # one short. Measured 2026-08-10 against a Firefox 151.0 downloaded from
+    # archive.mozilla.org and Authenticode-verified as signed by Mozilla:
+    # getComputedStyle(document.documentElement).length is 383 there and was 382
+    # here, the missing name being `field-sizing`, and
+    # CSS.supports("field-sizing: content") answered false where retail says
+    # true. One line of JavaScript.
+    #
+    # The cause is NOT one of our patches: `layout.css.field-sizing.enabled`
+    # defaults to false in this source tree and nothing overrides it, while the
+    # shipped 151.0 has the property live. That is a difference between our
+    # source base and the released revision - see the entry in 70-known-bugs.md,
+    # because three sibling differences (IDBRecord, PictureInPictureEvent,
+    # PictureInPictureWindow) are NOT prefs: those interfaces do not exist in
+    # our webidl at all and cannot be switched on.
+    #
+    # This one can, and it takes the count from 382 to exactly 383 with the
+    # name in the right place.
+    "layout.css.field-sizing.enabled":                    True,
+
     "privacy.resistFingerprinting": False,
     "privacy.resistFingerprinting.letterboxing": False,
 
