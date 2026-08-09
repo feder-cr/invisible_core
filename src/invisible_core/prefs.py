@@ -63,6 +63,25 @@ _NAVIGATOR_OVERRIDES: Dict[str, str] = {
 # ──────────────────────────────────────────────────────────────────────
 
 _WIN_LIGHT_COLORS: Dict[str, str] = {
+    # Measured against stock Firefox 151 on Windows, 2026-08-09, not chosen.
+    # A page resolves every one of these through getComputedStyle, and our Linux
+    # build answered GTK's values for all seven: menuhover was rgb(53,132,228)
+    # against rgba(0,0,0,0.118), oddtreerow was transparent against white,
+    # dialogtext was rgb(46,52,54) against black. Eight colours in one call is a
+    # desktop-environment readout, which is a stronger tell than any single one.
+    #
+    # The names are NOT uniform and that is upstream's doing, not a typo here:
+    # nsXPLookAndFeel.cpp spells cellhighlight with a hyphen and menuhover,
+    # menuhovertext, menubarhovertext and oddtreerow with an UNDERSCORE. Naming
+    # all seven with hyphens left exactly those four unset, and the measurement
+    # said so - Linux went from 8 divergences to 4, and the 4 were the 4.
+    "ui.-moz-cellhighlight":           "#CECECE",
+    "ui.-moz-dialog":                  "#FFFFFF",
+    "ui.-moz-dialogtext":              "#000000",
+    "ui.-moz_menubarhovertext":        "#15141A",
+    "ui.-moz_menuhover":               "#0000001E",
+    "ui.-moz_menuhovertext":           "#15141A",
+    "ui.-moz_oddtreerow":              "#FFFFFF",
     "ui.activeborder":              "#B4B4B4",
     "ui.activecaption":             "#99B4D1",
     "ui.appworkspace":              "#ABABAB",
@@ -94,7 +113,7 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
     "ui.windowtext":                "#000000",
     "ui.mark":                      "#FFFF00",
     "ui.marktext":                  "#000000",
-    "ui.accentcolor":               "#0078D4",
+    "ui.accentcolor":                  "#0060DF",
     "ui.accentcolortext":           "#FFFFFF",
     "ui.selecteditem":              "#0078D7",
     "ui.selecteditemtext":          "#FFFFFF",
