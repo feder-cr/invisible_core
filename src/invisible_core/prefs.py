@@ -377,7 +377,21 @@ _BASELINE: Dict[str, Any] = {
     "media.peerconnection.use_document_iceservers":       True,
 
     # Proxy - route DNS through SOCKS proxies to avoid local DNS leaks.
+    #
+    # There are TWO prefs and they are not aliases. `nsProtocolProxyService`
+    # reads `socks_remote_dns` into mSOCKS4ProxyRemoteDNS and
+    # `socks5_remote_dns` into mSOCKS5ProxyRemoteDNS, and `SOCKSRemoteDNS()`
+    # picks between them by the negotiated SOCKS version. This project uses
+    # SOCKS5, so the one declared here drove the branch that never runs, and
+    # the branch that DOES run took Firefox's own compiled default.
+    #
+    # That default is `true`, so nothing leaked - which is exactly why it
+    # survived: the safe behaviour was somebody else's default rather than our
+    # declaration. An upstream flip on a rebase, or a proxy that negotiates
+    # SOCKS4, and local DNS resolution comes back with nothing here asserting
+    # otherwise. Both are declared now. Added 2026-08-09.
     "network.proxy.socks_remote_dns":                     True,
+    "network.proxy.socks5_remote_dns":                    True,
     "network.proxy.failover_direct":                      False,
 
     # TLS ClientHello fingerprint - match stock Firefox byte-for-byte.
@@ -1100,6 +1114,40 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     """Dark mode, plus the Windows colours palette when the theme is light."""
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
+    # ── Three LookAndFeel values that still read the HOST ────────────────────
+    #
+    # `ui.textScaleFactor` is the one that matters, and it is not a theme
+    # setting at all - it MULTIPLIES the device pixel ratio we pin. This file
+    # sets `layout.css.devPixelsPerPx` and a comment beside it says that is
+    # where the DPR a page sees comes from; it is not the whole story.
+    # `widget/Screen.cpp` GetCSSToLayoutDeviceScale and nsIBaseWindow's
+    # UnscaledDevicePixelsPerCSSPixel both take that pinned scale and multiply
+    # it by LookAndFeel::SystemZoomSettings().mFullZoom, which equals the text
+    # scale factor whenever `browser.display.os-zoom-behavior` is 1 - and 1 is
+    # its default. On Windows that factor is the live "Make text bigger"
+    # accessibility slider read through IUISettings2; on Linux it is the GTK
+    # Xft DPI divided by 96. So a user with the slider at 125% shipped a
+    # devicePixelRatio nobody declared, readable with `window.devicePixelRatio`
+    # or one `matchMedia('(resolution: ...)')`.
+    #
+    # 1.0 is what a machine at the default setting reports, which is what the
+    # personas claim. Both development machines are at the default, so this
+    # agreed cross-OS by coincidence and no comparison could have caught it -
+    # the same shape as the colour depth, which read the real panel for months
+    # while both machines happened to be 24-bit.
+    prefs["ui.textScaleFactor"] = 1.0
+    #: 0 = let the locale decide, which is what Windows does. On Linux this
+    #: IntID reads GNOME's `org.gnome.desktop.interface clock-format` live and
+    #: OSPreferences_gtk overrides the ICU pattern with it, so a host set to
+    #: 24h changed `Intl.DateTimeFormat().resolvedOptions().hourCycle` and every
+    #: `toLocaleTimeString()`. Windows has no case for this IntID at all, so
+    #: declaring 0 is what makes the two behave the same way.
+    prefs["ui.hourCycle"] = 0
+    #: Windows hardcodes 1 (select the whole field when tabbing into it); GTK
+    #: reads the live `gtk-entry-select-on-focus` setting, which a user can turn
+    #: off. A page reads the difference with `input.selectionStart` after
+    #: focusing a pre-filled field.
+    prefs["ui.selectTextfieldsOnKeyFocus"] = 1
     if not profile.dark_theme:
         prefs.update(_WIN_LIGHT_COLORS)
 
