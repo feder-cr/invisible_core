@@ -80,6 +80,15 @@ CONTRACT = {
     },
     "invisible_core.constants": {
         "BINARY_VERSION",
+        # The Windows taskbar, added 2026-08-09. The wrapper carried its own
+        # _TASKBAR_H = 40 while this package declared 48 and the engine's
+        # compiled floor was 48, so the default viewport was derived from one
+        # number and screen.availHeight from another. The wrapper reads the
+        # profile field at the use sites and imports this only to keep the old
+        # name resolving to the same declaration. NOTE the ordering this
+        # creates: the name is new here, so the core must be on the index
+        # BEFORE a wrapper release can use it.
+        "TASKBAR_PX",
     },
     "invisible_core.launch": {
         # The font manifest handover, added 2026-08-08. The engine builds its

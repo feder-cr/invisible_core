@@ -107,3 +107,31 @@ def test_the_profile_is_still_a_pure_function_of_the_seed():
     for seed in (0, 42, 999):
         a, b = generate_profile(seed=seed), generate_profile(seed=seed)
         assert translate_profile_to_prefs(a) == translate_profile_to_prefs(b)
+
+
+def test_a_pinned_taskbar_moves_availheight():
+    """availHeight and the taskbar describe the SAME window, so a pin that
+    moves one has to move the other. It did not: the sampler derives
+    screen_avail_h from the default taskbar and the pins land afterwards,
+    so taskbar_px=72 on a 1080 screen still reported 1032 (= 1080 - 48) and
+    the two properties disagreed for anyone who read both."""
+    p = generate_profile(42, pin={"screen.taskbar_px": 72})
+    assert p.screen.taskbar_px == 72
+    assert p.screen.avail_height == p.screen.height - 72
+
+
+def test_a_pinned_availheight_outranks_the_derivation():
+    """An override must not overwrite a more specific override: if the
+    caller pinned availHeight as well, that is the value they asked for,
+    even though it no longer matches height minus the taskbar."""
+    p = generate_profile(42, pin={"screen.taskbar_px": 72,
+                                  "screen.avail_height": 900})
+    assert p.screen.avail_height == 900
+
+
+def test_availheight_matches_the_taskbar_with_no_pin_at_all():
+    """The control: the default path was already coherent, and the fix must
+    not have moved it."""
+    for seed in (0, 42, 999, 45061):
+        s = generate_profile(seed).screen
+        assert s.avail_height == s.height - s.taskbar_px

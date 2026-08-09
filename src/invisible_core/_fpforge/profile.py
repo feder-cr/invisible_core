@@ -572,6 +572,17 @@ def generate_profile(
     raw.setdefault("accessibility_overrides", ACCESSIBILITY_OVERRIDES)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
+        # The sampler derives screen_avail_h from the DEFAULT taskbar, and the
+        # pins land afterwards, so pinning the taskbar alone used to leave
+        # availHeight describing a different window from the one everything
+        # else was sized against: measured 2026-08-09, screen.taskbar_px=72 on
+        # a 1080 screen still reported avail_height 1032, which is 1080-48.
+        # Two properties of one window disagreeing is exactly the shape a page
+        # reads for free. Re-derive it here - unless avail_height was itself
+        # pinned, in which case the caller said what they wanted and an
+        # override must not overwrite a more specific override.
+        if "screen.taskbar_px" in pin and "screen.avail_height" not in pin:
+            raw["screen_avail_h"] = int(raw["screen_h"]) - int(raw["taskbar_px"])
 
     return Profile(
         seed=int(raw["stealth_seed"]),
