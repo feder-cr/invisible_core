@@ -76,7 +76,15 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
     # all seven with hyphens left exactly those four unset, and the measurement
     # said so - Linux went from 8 divergences to 4, and the 4 were the 4.
     "ui.-moz-cellhighlight":           "#CECECE",
-    "ui.-moz-dialog":                  "#FFFFFF",
+    # F0F0F0 and not FFFFFF, and the difference is a lesson rather than a
+    # typo. It was declared FFFFFF from a measurement taken against the retail
+    # in C:/tmp/ff151, a directory that holds 153.0.3 - the NAME was the only
+    # thing saying 151. Firefox 153 answers white here and 151 answers this,
+    # and 151 is the version our User-Agent claims. It is the only one of the
+    # 35 colours that moved between the two majors, which is exactly why a
+    # wrong judge is hard to catch: it agrees with the right one almost
+    # everywhere.
+    "ui.-moz-dialog":                  "#F0F0F0",
     "ui.-moz-dialogtext":              "#000000",
     "ui.-moz_menubarhovertext":        "#15141A",
     "ui.-moz_menuhover":               "#0000001E",
@@ -635,6 +643,44 @@ def _accept_language(locale: str) -> str:
     return f"{lang}, {base}" if base != lang else lang
 
 
+def _accept_language_header(locale: str) -> str:
+    """The Accept-Language header exactly as Firefox 151 puts it on the wire.
+
+    This is a DECLARATION and not a convenience: the engine used to synthesize
+    it, in JavaScript, from a hardcoded ";q=0.5" (juggler/NetworkObserver.js),
+    and the value was wrong. Measured 2026-08-09 against stock Firefox 151:
+    stock sends `en-US,en;q=0.9` on every request and we sent `q=0.5` on every
+    request, on both platforms - a constant, wire-visible difference that any
+    server sees without running a line of JavaScript.
+
+    The 0.5 came from writing the patch against a COMMENT. `PrepareAcceptLanguages`
+    in nsHttpHandler.cpp still carries a doc block promising `"en, ja"` ->
+    `"en,ja;q=0.5"`, which described the old C++ implementation; the function
+    below it now forwards to `rust_prepare_accept_languages`, whose own comment
+    says "we need to emulate chrome behavior i.e languages should get
+    q=1.0,0.9,0.8". The JS patch copied the stale sentence.
+
+    Replicated from that Rust code, not from its prose: for the token at index
+    i, `q = max(10 - min(10, i), 1)`, and no q on the first token.
+    """
+    return _q_ladder([t.strip() for t in _accept_language(locale).split(",")
+                      if t.strip()])
+
+
+def _q_ladder(tags: "list[str]") -> str:
+    """Attach q-values to an ordered tag list the way the engine does.
+
+    Split out from the caller so it can be tested on more than the one or two
+    tags a locale ever produces: the ladder is the part that was wrong, so it
+    is the part worth pinning against a list built by hand.
+    """
+    out = []
+    for i, tag in enumerate(tags):
+        q = max(10 - min(10, i), 1)
+        out.append(tag if i == 0 else "%s;q=0.%d" % (tag, q))
+    return ",".join(out)
+
+
 # ---------------------------------------------------------------------------
 #  One section of the prefs dict per function.
 #
@@ -978,6 +1024,12 @@ def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
     locale = locale or "en-US"
     lang = locale.replace("_", "-")
     prefs["intl.accept_languages"]     = _accept_language(locale)
+    # The wire header, declared rather than synthesized. Juggler has to rewrite
+    # Accept-Language because Playwright sets it from the `locale` option as a
+    # single tag, which then disagrees with navigator.languages; it used to
+    # rebuild the q-values in JavaScript from a hardcoded 0.5. It reads this
+    # instead, so the header has one source and it is this file.
+    prefs["zoom.stealth.http.accept_language"] = _accept_language_header(locale)
     prefs["general.useragent.locale"]  = lang
     prefs["intl.locale.requested"]     = lang
     prefs["privacy.spoof_english"]     = 0
