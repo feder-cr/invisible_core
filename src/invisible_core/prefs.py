@@ -1077,6 +1077,20 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
         prefs[f"ui.font.{element}.size"] = profile.font.ui_size
     for lang in _MONOSPACE_LANG_GROUPS:
         prefs[f"font.size.monospace.{lang}"] = profile.font.monospace_size
+    # The Thai minimum size, and it is the ONLY one of the 28 language groups
+    # that Firefox gives an OS-conditional default: all.js sets 10 inside the
+    # XP_WIN block and 13 inside the Unix desktop block. Gecko clamps the
+    # effective size before layout, so identical CSS lays out differently.
+    #
+    # Measured 2026-08-09 with `<span lang="th" style="font-size:5px">`, reading
+    # getBoundingClientRect().width: stock 151 and our Windows both answer
+    # 42.067 for every size at or below 10, and our Linux answers 54.683 - the
+    # width it gives at 13. One element, one property, and the answer names the
+    # operating system.
+    #
+    # 10 is the Windows value, which is what the persona claims. Declared for
+    # both platforms, so the correction lands on Linux (rule 4).
+    prefs["font.minimum-size.th"] = 10
     # The glyph-edge coverage ladder. It used to live in the binary's font
     # manifest, which was the wrong home twice over: it is not a property of any
     # font FILE (it is what the rasteriser does to an edge), and putting it
