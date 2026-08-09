@@ -74,6 +74,14 @@ CONTRACT = {
         # any more, and a contract that over-claims freezes this package for
         # nobody.
         "compose_session_prefs",
+        # consent_region_lang joined on 2026-08-09 and DELETED a table in the
+        # wrapper rather than adding one here: `_TZ_TO_REGION`, 22 IANA zones
+        # mapped to a country and a language for the Google CONSENT cookie,
+        # while the session locale is resolved in this package against 55
+        # countries. A Romanian session said `ro-RO` in navigator.language and
+        # `en+FX` in the cookie. Same ordering constraint as every new name:
+        # the core has to be on the index before a wrapper release uses it.
+        "consent_region_lang",
     },
     "invisible_core._fpforge": {
         "Profile", "_network", "_sampler", "generate_profile", "profile",

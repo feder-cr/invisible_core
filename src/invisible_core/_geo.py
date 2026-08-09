@@ -194,6 +194,45 @@ _COUNTRY_LOCALE = {
 }
 
 
+#: The EEA plus the UK and Switzerland, i.e. every country where a real Google
+#: CONSENT cookie carries `<lang>+<COUNTRY>` rather than the `en+FX` a non-EU
+#: visitor gets. A finite, knowable set; the alternative was a 22-row timezone
+#: table in the wrapper that silently answered "non-EU English" for every
+#: country it did not list.
+CONSENT_REGION_COUNTRIES = frozenset({
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
+    "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
+    "SI", "ES", "SE",            # EU 27
+    "IS", "LI", "NO",            # EEA
+    "GB", "CH",                  # UK and Switzerland behave the same way here
+})
+
+
+def consent_region_lang(locale: str) -> "tuple[str, str]":
+    """`(region_token, lang)` for a Google CONSENT cookie, from the LOCALE.
+
+    WHY IT TAKES A LOCALE. This used to live in the wrapper as a 22-row IANA
+    timezone table (`_TZ_TO_REGION`), while the locale a session actually runs
+    with is resolved HERE, from the egress country, against a 55-row table. Two
+    tables for one fact, and they drifted exactly the way two tables do: a
+    Romanian session resolved `ro-RO` for `navigator.language` and fell through
+    to `("FX", "en")` for the cookie, because `Europe/Bucharest` was not one of
+    the 22. A page that reads the cookie and the language sees a Romanian
+    browser claiming to be a non-EU English one.
+
+    Deriving from the locale removes the second table rather than extending it:
+    every locale this package can produce is covered by construction, including
+    the ones nobody has added to a list yet.
+    """
+    tag = (locale or "en-US").replace("_", "-")
+    parts = tag.split("-")
+    lang = parts[0].lower()
+    country = parts[-1].upper() if len(parts) > 1 else ""
+    if country in CONSENT_REGION_COUNTRIES:
+        return (country, lang)
+    return ("FX", lang if country else "en")
+
+
 def ip_to_locale(ip: str, mmdb_path: Any) -> str:
     """Map ``ip`` -> a BCP-47 locale via the MaxMind ``country.iso_code`` field, so the
     browser language stays consistent with the proxy egress country. Falls back to

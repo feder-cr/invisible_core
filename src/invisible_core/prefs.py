@@ -438,9 +438,20 @@ _BASELINE: Dict[str, Any] = {
     "dom.push.enabled":                                   True,
     "dom.push.connection.enabled":                        False,
     "geo.enabled":                                        True,
-    #: 2 = deny. No prompt, no network request, and the API is present and
-    #: behaves exactly as it does for the many real users who said no.
-    "permissions.default.geo":                            2,
+    #: `permissions.default.geo` is deliberately NOT SET, and this comment is
+    #: here so nobody adds it back for the reason it was added the first time.
+    #: It was 2 (deny) for a few hours on 2026-08-09: a denial is local, needs
+    #: no network, and is what plenty of real users have chosen. It is also
+    #: VISIBLE. Measured across 21 permission names, it was the ONLY divergence
+    #: from stock: `navigator.permissions.query({name:"geolocation"})` answered
+    #: `denied` where stock answers `prompt`. A profile that has never been
+    #: asked says `prompt`, and ours has never been asked - so the fix for one
+    #: tell had quietly introduced a smaller one.
+    #:
+    #: Nothing replaces it. The provider URL below is empty, so a call cannot
+    #: reach the network even if a page makes one, and Playwright grants no
+    #: permissions by default, so the call is refused exactly as it is for a
+    #: user who dismisses the prompt.
     "geo.provider.network.url":                           "",
     "browser.region.network.url":                         "",
     "browser.region.update.enabled":                      False,
@@ -870,22 +881,40 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     # hw_concurrency conditioned on the GPU class).
     prefs["zoom.stealth.hw_concurrency"]      = profile.hardware.concurrency
     prefs["zoom.stealth.storage.quota_mb"]    = profile.hardware.storage_quota_mb
-    prefs["zoom.stealth.max_touch_points"]    = profile.hardware.max_touch_points
-    # The Touch INTERFACES, which are a separate question from how many touch
-    # points the machine reports. Firefox exposes `Touch`, `TouchEvent` and
-    # `TouchList` on window when this is 2 (auto) and the OS looks
-    # touch-capable, which on Windows it does and on Linux it does not.
-    # Measured 2026-08-09: stock 151 on Windows has all three, our Windows had
-    # all three, our LINUX had none - three constructors that a page finds with
-    # `'ontouchstart' in window` or a typeof, differing across the two hosts of
-    # a persona that claims Windows on both.
+    # ── Touch: ONE declaration, three surfaces that must agree ──────────────
     #
-    # 1 = force enabled, and it is the same 1 on both platforms because the
-    # persona is the same on both. maxTouchPoints stays declared separately and
-    # stays 0: a Windows laptop without a touchscreen reports exactly that -
-    # the interfaces exist, the device has no touch points - which is why these
-    # are two fields and not one.
-    prefs["dom.w3c_touch_events.enabled"]     = 1
+    # A page can read the touch story three ways, and before 2026-08-09 they
+    # came from three places:
+    #
+    #   navigator.maxTouchPoints   <- declared here (0)
+    #   typeof window.Touch        <- dom.w3c_touch_events.enabled, whose
+    #                                 default 2 means "ask the HOST"
+    #   matchMedia("(any-pointer: coarse)")
+    #                              <- a compiled `Fine | Hover` in
+    #                                 nsMediaFeatures.cpp
+    #
+    # Measured that day, our Windows build reported the Touch interfaces
+    # PRESENT (this development machine has a digitizer, so the host said yes)
+    # with maxTouchPoints 0 and any-pointer coarse false: a machine that
+    # supports touch events, has no touch points and has no coarse pointer. No
+    # such machine exists. Our Linux build had no Touch interfaces at all, so
+    # the same persona answered differently on the two hosts.
+    #
+    # All three now come from the touch-point count. Pin max_touch_points to 10
+    # and the persona becomes a touch laptop across all three surfaces at once;
+    # leave it at 0 and it is a desktop with a mouse, coherently.
+    touch = profile.hardware.max_touch_points > 0
+    prefs["zoom.stealth.max_touch_points"]    = profile.hardware.max_touch_points
+    #: 1 = force on, 0 = force off. NEVER 2: at 2 the engine calls
+    #: PlatformSupportsTouch() and the answer is the machine we happen to be
+    #: running on (dom/events/TouchEvent.cpp).
+    prefs["dom.w3c_touch_events.enabled"]     = 1 if touch else 0
+    #: PointerCapabilities bitmask (ServoTypes.h): Coarse 1, Fine 2, Hover 4.
+    #: The PRIMARY pointer of a laptop with a touchscreen is still the mouse,
+    #: so only the union gains Coarse - which is exactly the distinction the
+    #: `pointer` / `any-pointer` pair exists to express.
+    prefs["zoom.stealth.pointer.primary"]     = 2 | 4
+    prefs["zoom.stealth.pointer.all"]         = (2 | 4 | 1) if touch else (2 | 4)
     prefs["zoom.stealth.voices.list"]         = profile.hardware.voices
     prefs["media.navigator.streams.fake"]     = bool(profile.hardware.fake_media_devices)
     # The four storage booleans a page reads (cookieEnabled, localStorage,

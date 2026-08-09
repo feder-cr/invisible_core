@@ -568,11 +568,51 @@ def test_the_apis_a_real_firefox_has_are_not_switched_off():
     prefs = translate_profile_to_prefs(generate_profile(42))
     assert prefs["geo.enabled"] is True
     assert prefs["dom.push.enabled"] is True
-    assert prefs["dom.w3c_touch_events.enabled"] == 1
     # The network goal the False came from is kept by these two, so a future
     # reader does not have to choose between the API and the quiet startup.
     assert prefs["dom.push.connection.enabled"] is False
-    assert prefs["permissions.default.geo"] == 2
-    # Touch INTERFACES present, touch POINTS zero: a Windows laptop with no
-    # touchscreen. Two fields, and this is why.
-    assert prefs["zoom.stealth.max_touch_points"] == 0
+    # And NOT permissions.default.geo. It was set to 2 (deny) to keep the
+    # network quiet, and `navigator.permissions.query({name:"geolocation"})`
+    # then answered `denied` where stock answers `prompt` - the only divergence
+    # across 21 permission names, measured. A profile that has never been asked
+    # says prompt. Asserted as an absence so the next person who wants a quiet
+    # geolocation reaches for the provider URL instead.
+    assert "permissions.default.geo" not in prefs
+
+
+@pytest.mark.unit
+def test_the_three_touch_surfaces_come_from_one_declaration():
+    """maxTouchPoints, the Touch interfaces and any-pointer must agree.
+
+    A page reads the touch story three ways, and they used to come from three
+    places: this file (0), `dom.w3c_touch_events.enabled` at its default of 2
+    which asks the HOST, and a compiled `Fine | Hover` in nsMediaFeatures.cpp.
+
+    Measured 2026-08-09: our Windows build had the Touch interfaces present
+    (this machine has a digitizer) with maxTouchPoints 0 and any-pointer coarse
+    false - a machine that supports touch events, has no touch points and has
+    no coarse pointer. Our Linux build had no Touch interfaces at all, so one
+    persona answered differently on the two hosts.
+
+    The bits are PointerCapabilities from ServoTypes.h: Coarse 1, Fine 2,
+    Hover 4.
+    """
+    desktop = translate_profile_to_prefs(generate_profile(42))
+    assert desktop["zoom.stealth.max_touch_points"] == 0
+    # NEVER 2 - at 2 the engine calls PlatformSupportsTouch() and answers with
+    # whatever machine it is running on.
+    assert desktop["dom.w3c_touch_events.enabled"] == 0
+    assert desktop["zoom.stealth.pointer.primary"] == 6
+    assert desktop["zoom.stealth.pointer.all"] == 6
+
+    # And pinning the count alone has to move all three, or they are not one
+    # declaration - they are three that happen to agree today.
+    laptop = translate_profile_to_prefs(
+        generate_profile(42, pin={"hardware.max_touch_points": 10}))
+    assert laptop["zoom.stealth.max_touch_points"] == 10
+    assert laptop["dom.w3c_touch_events.enabled"] == 1
+    # The primary pointer of a touch laptop is still the mouse; only the union
+    # gains Coarse. That distinction is the whole reason `pointer` and
+    # `any-pointer` are two different media features.
+    assert laptop["zoom.stealth.pointer.primary"] == 6
+    assert laptop["zoom.stealth.pointer.all"] == 7

@@ -34,6 +34,7 @@ from .prefs import (
 from .download import ensure_binary, ensure_geoip_mmdb
 from ._geo import (
     GeoTimezoneError,
+    consent_region_lang,
     discover_egress_ip,
     ip_to_timezone,
     prepare_session_geo,
@@ -100,6 +101,7 @@ __all__ = [
     "ensure_geoip_mmdb",
     # geo / timezone
     "resolve_session_timezone",
+    "consent_region_lang",
     "resolve_session_locale",
     "prepare_session_geo",
     "discover_egress_ip",
