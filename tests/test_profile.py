@@ -312,6 +312,11 @@ def test_no_profile_constant_is_shadowed_by_the_sampler_s_locked_dict():
     one of them - measured by setting MAX_TOUCH_POINTS to 7 and watching the
     profile still answer 0.
 
+    That key is no longer in this list because it no longer has a constant at
+    all: on 2026-08-10 max_touch_points became a SAMPLED field, drawn from
+    `cpt_touch_given_class.json`, which is the level the rest of the persona
+    lives at. The property below still guards every other seeded constant.
+
     This asserts the property rather than the one key, so the next duplicate is
     caught the day it is added rather than the day it disagrees.
     """
@@ -319,7 +324,6 @@ def test_no_profile_constant_is_shadowed_by_the_sampler_s_locked_dict():
 
     seeded = {
         "screen_color_depth": "SCREEN_COLOR_DEPTH",
-        "max_touch_points": "MAX_TOUCH_POINTS",
         "font_ui_family": "FONT_UI_FAMILY",
         "font_ui_size": "FONT_UI_SIZE",
         "font_monospace_size": "FONT_MONOSPACE_SIZE",

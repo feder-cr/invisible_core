@@ -4,7 +4,11 @@
 Everything the Firefox build exposes to JS (screen, hardwareConcurrency,
 WebGL, audio, MSAA, theme, media codecs) is sampled from a Bayesian network
 with coherent cross-field dependencies. Identity (userAgent, platform,
-oscpu, webdriver=false, maxTouchPoints=0) is locked by the compiled build.
+oscpu, webdriver=false) is locked by the compiled build.
+
+maxTouchPoints used to be in that locked list and is not any more: it is
+sampled per GPU class from `cpt_touch_given_class.json`, whose rows are all
+zero today. Same value, different level - and the level is the point.
 
 Graph:
 
@@ -17,6 +21,7 @@ Graph:
 
     audio (root, joint rate+latency+channels - marginal)
     dark_theme                     (marginal)
+    max_touch_points               (CPT per class, own seed-named stream)
     av1_enabled                    (marginal)
     webm_encoder_enabled           (marginal)
 
@@ -118,6 +123,10 @@ _CORES_MARGINAL = [
 # gpu_class (workstation → dev-heavy, integrated_old → shop+news-heavy).
 _BROWSING_POOL: list = _load("browsing_pool.json")["entries"]
 _CPT_BROWSING = _load("cpt_browsing_given_class.json")["table"]
+# navigator.maxTouchPoints, per GPU class. Every row is all-zero today and the
+# file says why; the point of the table is that the value is sampled data in
+# this package rather than a literal anywhere.
+_CPT_TOUCH = _load("cpt_touch_given_class.json")["table"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -301,6 +310,37 @@ def derive_browsing_history(gpu_class: str, rng) -> list:
 import random
 
 
+def derive_max_touch_points(gpu_class: str, seed: int) -> int:
+    """navigator.maxTouchPoints for this persona, drawn from a declared table.
+
+    Two things about this draw are deliberate.
+
+    It reads a per-class weighted pool (`cpt_touch_given_class.json`) rather
+    than a constant, so the touch story is a field of the persona like the GPU
+    or the screen: pinnable, inspectable, overridable, and changeable without
+    a browser rebuild. Every row ships all its mass on 0 and the data file
+    carries the reason - we have no measured distribution, and inventing one is
+    the mistake this codebase keeps undoing.
+
+    It draws from its OWN stream, named from the seed, and NOT from the
+    network's shared rng. Sampling is a cumulative walk over a shared sequence,
+    so a new node inside the network consumes a draw and remaps everything
+    sampled after it - which here is `derive_browsing_history`, i.e. the cookie
+    pre-seed of every existing identity. An independently named stream adds a
+    field while moving nothing. `random.Random(str)` hashes the string, so the
+    value is stable across processes and across Python's hash randomisation,
+    which `random.Random(tuple)` would not be.
+    """
+    row = _CPT_TOUCH.get(gpu_class) or _CPT_TOUCH["mid_range"]
+    r = random.Random("max_touch_points:%d" % int(seed)).random()
+    acc = 0.0
+    for entry in row:
+        acc += float(entry["prob"])
+        if r < acc:
+            return int(entry["value"])
+    return int(row[-1]["value"])
+
+
 class Forge:
     """Fingerprint forge - single seed → coherent bundle."""
 
@@ -359,6 +399,11 @@ class Forge:
             "webspeech_synth": bool(codec["webspeech_synth"]),
             # Storage quota MB (coherent with GPU class - workstation larger SSDs).
             "storage_quota_mb": int(bundle["storage_quota_mb"]),
+            # navigator.maxTouchPoints. Sampled per GPU class, from its own
+            # stream so it moves no other field. See derive_max_touch_points.
+            "max_touch_points": derive_max_touch_points(
+                bundle["gpu_class"], self.seed
+            ),
             # Independent marginals
             "dark_theme": int(bundle["dark_theme"]),
             # Bayesian browsing history (per-class P(visited|gpu_class)).

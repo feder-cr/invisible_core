@@ -470,8 +470,13 @@ GENERICS = chr(10).join([
     "monospace||Consolas",
 ])
 
-#: A desktop without a touchscreen. Was a constant compiled into the binary.
-MAX_TOUCH_POINTS = 0
+# MAX_TOUCH_POINTS was here and is gone. It was a constant compiled into the
+# binary, then a constant in this file, and it is now a SAMPLED field: the
+# forge draws it per GPU class from `data/cpt_touch_given_class.json`
+# (all rows on 0 today, and the file says why). A constant here would be the
+# second source of truth engine rule 7 refuses, and unlike the C++ one it would
+# look harmless - both were 0 once before, and the duplicate was only found by
+# setting one of them to 7 and watching the profile still answer 0.
 
 #: The canonical Windows values. Not sampled - see FontProfile for why.
 FONT_UI_FAMILY = "Segoe UI"
@@ -590,7 +595,8 @@ def generate_profile(
     raw.setdefault("chrome_h", CHROME_H)
     raw.setdefault("window_x", 0)
     raw.setdefault("window_y", 0)
-    raw.setdefault("max_touch_points", MAX_TOUCH_POINTS)
+    # No setdefault for max_touch_points: the forge samples it, and a floor
+    # here would be a second source of truth that agrees until it does not.
     raw.setdefault("voices", VOICES)
     raw.setdefault("fake_media_devices", FAKE_MEDIA_DEVICES)
     raw.setdefault("storage_enabled", STORAGE_ENABLED)

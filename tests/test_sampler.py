@@ -330,3 +330,70 @@ def test_forge_seed_coercion_to_int():
     """FS extra: Forge(seed) coerces seed to int (e.g. float 42.7 → 42)."""
     f = Forge(42.7)
     assert f.seed == 42
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  max_touch_points: a SAMPLED persona field, not a constant
+# ══════════════════════════════════════════════════════════════════════════
+@pytest.mark.unit
+def test_the_touch_table_covers_every_gpu_class_and_sums_to_one():
+    """A class missing from the table would silently borrow mid_range's row.
+
+    The lookup falls back to mid_range so an unknown class cannot crash a
+    launch, which means a MISSING row is invisible at runtime. That is exactly
+    the shape of defect this package keeps finding, so it is asserted here
+    instead: every class the classifier can produce has its own row.
+    """
+    from invisible_core._fpforge._sampler import _CPT_TOUCH, _GPU_CLASSES
+
+    assert set(_CPT_TOUCH) == set(_GPU_CLASSES)
+    for name, row in _CPT_TOUCH.items():
+        total = sum(float(e["prob"]) for e in row)
+        assert abs(total - 1.0) < 1e-9, "%s sums to %r" % (name, total)
+        for e in row:
+            assert isinstance(e["value"], int) and e["value"] >= 0
+
+
+@pytest.mark.unit
+def test_max_touch_points_is_drawn_and_is_stable_for_a_seed():
+    from invisible_core._fpforge._sampler import derive_max_touch_points, sample
+
+    for seed in (0, 7, 42, 999, 45061):
+        a = sample(seed)["max_touch_points"]
+        b = sample(seed)["max_touch_points"]
+        assert a == b == derive_max_touch_points(sample(seed)["gpu_class"], seed)
+
+
+@pytest.mark.unit
+def test_changing_the_touch_table_moves_the_field_AND_NOTHING_ELSE(monkeypatch):
+    """The mutation this field exists to survive.
+
+    Two claims are being tested at once, and the second is the one that cost
+    something to get right. First: the table really drives the value, so a data
+    edit is enough to ship a touch persona - a gate that only ever saw 0 could
+    not tell a working draw from a hardcoded zero. Second: the draw uses its own
+    seed-named stream, so turning it on moves NO other field. A node inside the
+    Bayesian network would have consumed a draw from the shared rng and remapped
+    everything sampled after it, which here is the browsing history of every
+    existing identity.
+    """
+    from invisible_core._fpforge import _sampler
+
+    seeds = [0, 7, 42, 374, 999, 12345, 45061, 31337, 65535, 123456789]
+    before = {s: _sampler.sample(s) for s in seeds}
+
+    touched = {k: [{"value": 10, "prob": 1.0}] for k in _sampler._CPT_TOUCH}
+    monkeypatch.setattr(_sampler, "_CPT_TOUCH", touched)
+    after = {s: _sampler.sample(s) for s in seeds}
+
+    for s in seeds:
+        assert before[s]["max_touch_points"] == 0
+        assert after[s]["max_touch_points"] == 10, (
+            "the table does not reach the value: the draw is not reading it"
+        )
+        moved = sorted(k for k in before[s]
+                       if k != "max_touch_points" and before[s][k] != after[s][k])
+        assert moved == [], (
+            "seed %d moved %r when only the touch table changed - the draw is "
+            "sharing the network's rng" % (s, moved)
+        )

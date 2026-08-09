@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "P(navigator.maxTouchPoints | gpu_class). One row per GPU class, each row a",
+    "weighted pool drawn like every other pool in this package: cumulative, in",
+    "order, never reordered and never shortened in place.",
+    "",
+    "EVERY ROW PUTS ALL ITS MASS ON 0, DELIBERATELY. That is a data statement,",
+    "not a placeholder: we have no measured joint distribution of touch-point",
+    "counts against GPU class on Windows, and the 474 renderers in the pool are",
+    "desktop parts, where a digitizer is rare. Inventing a plausible 12% for the",
+    "integrated rows is exactly the guess this codebase keeps having to undo -",
+    "the speech-synthesis voices carry the same note for the same reason.",
+    "",
+    "What the machinery buys today is that the value is a SAMPLED PERSONA FIELD",
+    "living in invisible_core, not a literal in C++ and not a module constant.",
+    "A touchscreen persona (a Surface, a 2-in-1) becomes an edit to this file:",
+    "no browser rebuild, no Python change, and the three surfaces a page can",
+    "read the touch story from - navigator.maxTouchPoints, typeof window.Touch,",
+    "matchMedia('(any-pointer: coarse)') - all follow from this one number,",
+    "because prefs.py derives all three from it.",
+    "",
+    "Measured to enable it: 10 is the count a Windows touch digitizer reports.",
+    "Do not put 1 here; 1 is what a pen-only or emulated device reports and it",
+    "reads as a phone or a devtools emulation to anything that checks.",
+    "",
+    "The draw uses its OWN random stream, named from the seed, NOT the network's",
+    "shared rng - see derive_max_touch_points in _sampler.py. A node inside the",
+    "network would consume a draw and remap every value sampled after it."
+  ],
+  "table": {
+    "integrated_old": [{"value": 0, "prob": 1.0}],
+    "integrated_modern": [{"value": 0, "prob": 1.0}],
+    "low_end": [{"value": 0, "prob": 1.0}],
+    "mid_range": [{"value": 0, "prob": 1.0}],
+    "high_end": [{"value": 0, "prob": 1.0}],
+    "workstation": [{"value": 0, "prob": 1.0}]
+  }
+}

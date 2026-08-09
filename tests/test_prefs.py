@@ -619,6 +619,27 @@ def test_the_three_touch_surfaces_come_from_one_declaration():
 
 
 @pytest.mark.unit
+def test_a_touch_persona_ships_from_the_data_file_with_no_pin(monkeypatch):
+    """The count is DRAWN, so the table alone decides it - no pin, no code.
+
+    The test above pins the field, which would pass just as well if the value
+    were still a constant with a pin override on top. This one changes only the
+    sampled table and asks for an ordinary profile: if the three prefs move, the
+    field is genuinely a sampled persona field and a touchscreen persona is a
+    data change. That is the whole claim of the 2026-08-10 move.
+    """
+    from invisible_core._fpforge import _sampler
+
+    monkeypatch.setattr(_sampler, "_CPT_TOUCH",
+                        {k: [{"value": 10, "prob": 1.0}] for k in _sampler._CPT_TOUCH})
+    p = translate_profile_to_prefs(generate_profile(42))
+    assert p["zoom.stealth.max_touch_points"] == 10
+    assert p["dom.w3c_touch_events.enabled"] == 1
+    assert p["zoom.stealth.pointer.primary"] == 6
+    assert p["zoom.stealth.pointer.all"] == 7
+
+
+@pytest.mark.unit
 def test_the_storage_quota_is_a_value_firefox_can_actually_report():
     """10 GiB, because Firefox caps the group limit at 10 GB and says so.
 
