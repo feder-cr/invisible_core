@@ -616,3 +616,35 @@ def test_the_three_touch_surfaces_come_from_one_declaration():
     # `any-pointer` are two different media features.
     assert laptop["zoom.stealth.pointer.primary"] == 6
     assert laptop["zoom.stealth.pointer.all"] == 7
+
+
+@pytest.mark.unit
+def test_the_storage_quota_is_a_value_firefox_can_actually_report():
+    """10 GiB, because Firefox caps the group limit at 10 GB and says so.
+
+    `QuotaManager::GetGroupLimitForLimit` in dom/quota/ActorsParent.cpp reads
+    `std::min<uint64_t>(aLimit / 5, 10 GB)`, with the comment "cap the group
+    limit to 10GB". So `navigator.storage.estimate().quota` is exactly
+    10737418240 on any machine whose disk is 100 GiB or more - which is all of
+    them - and the disk size never reaches the page at all.
+
+    The sampled pool held 13 values from 40 GiB to 3 TB, chosen to "mask the
+    real disk size while staying in a realistic range". There was nothing to
+    mask, and none of the 13 was a number a real Firefox can return. Measured
+    2026-08-09 against stock 151: stock 10737418240, ours 429496729600.
+
+    Asserted in BYTES as well as MB, because the megabyte figure is the one a
+    reader can talk themselves into and the byte figure is the one the page
+    sees.
+    """
+    for seed in (1, 42, 1234, 99999):
+        prefs = translate_profile_to_prefs(generate_profile(seed))
+        mb = prefs["zoom.stealth.storage.quota_mb"]
+        assert mb == 10240, seed
+        assert mb * 1024 * 1024 == 10737418240, seed
+
+    # Still a field and still pinnable: on a genuinely small disk the real rule
+    # is disk/10, and that persona has to remain expressible.
+    pinned = translate_profile_to_prefs(
+        generate_profile(42, pin={"hardware.storage_quota_mb": 6553}))
+    assert pinned["zoom.stealth.storage.quota_mb"] == 6553
