@@ -42,6 +42,24 @@ class ScreenProfile:
     #: this generator - kept in step by hand.
     taskbar_px: int = 48
 
+    #: Window chrome: outerWidth - innerWidth, and outerHeight - innerHeight.
+    #: They lived in the wrapper as module constants (14 and 91) where nothing
+    #: could pin or inspect them, and the 14 was fabricated - measured against
+    #: stock Firefox 151, a real browser reports 0 horizontal chrome. Same level
+    #: as every other screen surface (rule 6), so a persona with a different
+    #: toolbar layout can pin them.
+    chrome_w: int = 0
+    chrome_h: int = 85
+
+    #: Where the window sits on the screen. outerWidth/outerHeight already
+    #: claim a MAXIMIZED window filling the screen, and a maximized window is
+    #: at the origin - but the position was never declared, so it stayed
+    #: whatever the OS gave the headless widget: (4,4) on Windows, which put
+    #: the right edge of a 1920-wide window at 1924 on a 1920 screen. Stock
+    #: Firefox 151 reports 0,0 for this window shape (measured 2026-08-09).
+    window_x: int = 0
+    window_y: int = 0
+
 
 @dataclass(frozen=True)
 class HardwareProfile:
@@ -250,7 +268,7 @@ class FontProfile:
 
 _PIN_GROUPS = {
     "gpu": {"vendor", "renderer", "class_tier"},
-    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier", "taskbar_px",
+    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
                "color_depth"},
     "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
                  "voices", "fake_media_devices",
@@ -370,6 +388,10 @@ _PIN_TO_RAW = {
     "font.freetype_contrast": "font_freetype_contrast",
     "screen.color_depth": "screen_color_depth",
     "screen.taskbar_px": "taskbar_px",
+    "screen.chrome_w": "chrome_w",
+    "screen.chrome_h": "chrome_h",
+    "screen.window_x": "window_x",
+    "screen.window_y": "window_y",
     "hardware.max_touch_points": "max_touch_points",
     "hardware.voices": "voices",
     "hardware.fake_media_devices": "fake_media_devices",
@@ -400,7 +422,7 @@ SCREEN_COLOR_DEPTH = 24
 #: The Windows taskbar, re-exported so a pin can reach it by the same name
 #: as every other declared constant. The value lives in constants.py, which
 #: the sampler imports too - one number, one home.
-from ..constants import TASKBAR_PX  # noqa: E402,F401
+from ..constants import TASKBAR_PX, CHROME_W, CHROME_H  # noqa: E402,F401
 
 #: The five Windows English (United States) voices, in the order the binary
 #: parses them. See HardwareProfile.voices for why this is not per-locale yet.
@@ -564,6 +586,10 @@ def generate_profile(
     raw.setdefault("font_freetype_contrast", FONT_FREETYPE_CONTRAST)
     raw.setdefault("screen_color_depth", SCREEN_COLOR_DEPTH)
     raw.setdefault("taskbar_px", TASKBAR_PX)
+    raw.setdefault("chrome_w", CHROME_W)
+    raw.setdefault("chrome_h", CHROME_H)
+    raw.setdefault("window_x", 0)
+    raw.setdefault("window_y", 0)
     raw.setdefault("max_touch_points", MAX_TOUCH_POINTS)
     raw.setdefault("voices", VOICES)
     raw.setdefault("fake_media_devices", FAKE_MEDIA_DEVICES)
@@ -600,6 +626,10 @@ def generate_profile(
             tier=str(raw.get("screen_tier", "")),
             color_depth=int(raw["screen_color_depth"]),
             taskbar_px=int(raw["taskbar_px"]),
+            chrome_w=int(raw["chrome_w"]),
+            chrome_h=int(raw["chrome_h"]),
+            window_x=int(raw["window_x"]),
+            window_y=int(raw["window_y"]),
         ),
         hardware=HardwareProfile(
             concurrency=int(raw["hw_concurrency"]),

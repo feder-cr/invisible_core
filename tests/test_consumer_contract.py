@@ -89,6 +89,12 @@ CONTRACT = {
         # creates: the name is new here, so the core must be on the index
         # BEFORE a wrapper release can use it.
         "TASKBAR_PX",
+        # Same story, same day, and the same ordering constraint: the wrapper's
+        # _CHROME_W / _CHROME_H were module constants at 14 and 91, and the 14
+        # was not merely duplicated but WRONG - stock Firefox 151 answers
+        # outerWidth - innerWidth = 0. Measured 2026-08-09.
+        "CHROME_W",
+        "CHROME_H",
     },
     "invisible_core.launch": {
         # The font manifest handover, added 2026-08-08. The engine builds its

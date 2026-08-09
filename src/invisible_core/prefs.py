@@ -779,11 +779,22 @@ def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.screen.height"]       = profile.screen.height
     prefs["zoom.stealth.screen.color_depth"]  = profile.screen.color_depth
     prefs["zoom.stealth.screen.taskbar_px"]   = profile.screen.taskbar_px
+    # The window geometry. Four values because three getters read them in
+    # different combinations - screenX, mozInnerScreenX and outerWidth - and
+    # declaring only some of them is what produced a window whose right edge
+    # was off the screen. Measured against stock 151: 0, 0, 0, 85.
+    prefs["zoom.stealth.screen.window_x"]     = profile.screen.window_x
+    prefs["zoom.stealth.screen.window_y"]     = profile.screen.window_y
+    prefs["zoom.stealth.screen.chrome_w"]     = profile.screen.chrome_w
+    prefs["zoom.stealth.screen.chrome_h"]     = profile.screen.chrome_h
     # DEAD, and kept only so the next reader does not re-add them. Neither name
     # is declared in StaticPrefList.yaml, and nsScreen::GetAvailRect ignores
-    # them outright: it reads zoom_stealth_screen_width/height and subtracts a
-    # fixed 48px taskbar (dom/base/nsScreen.cpp:112-115). Writing them changes
-    # nothing; the available rect is already derived from the two above.
+    # them outright: it reads zoom_stealth_screen_width/height and subtracts
+    # the DECLARED taskbar_px above. (This comment said "a fixed 48px taskbar"
+    # until 2026-08-09, which was true when it was written and stopped being
+    # true the day that literal became a declaration - the hazard of describing
+    # someone else's file from memory.) Writing them changes nothing; the
+    # available rect is already derived from the values above.
     #   prefs["zoom.stealth.screen.avail_width"]  = profile.screen.avail_width
     #   prefs["zoom.stealth.screen.avail_height"] = profile.screen.avail_height
     # DEAD: appears in NO file of the engine source; the DPR that reaches a page comes from layout.css.devPixelsPerPx on the line below.

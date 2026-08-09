@@ -71,6 +71,19 @@ OSCPU_OVERRIDE: str = "Windows NT 10.0; Win64; x64"
 # nsGlobalWindowOuter.cpp - with nothing tying them together.
 TASKBAR_PX: int = 48
 
+#: Window chrome, i.e. how much wider and taller the OUTER window is than the
+#: viewport a page sees. Measured against stock Firefox 151 on 2026-08-09, not
+#: chosen: a page computes outerWidth - innerWidth and outerHeight -
+#: innerHeight in one line, and stock answers 0 and 85.
+#:
+#: The wrapper carried 14 and 91 as module constants, commented "measured
+#: empirically on a headed Firefox 150". The 14 is the one that matters: a real
+#: Firefox has NO horizontal chrome, so 14 was fabricated width that no browser
+#: reports, and it was the same 14 on both platforms - a value invented once and
+#: then agreed with itself, which is why nothing caught it.
+CHROME_W: int = 0
+CHROME_H: int = 85
+
 
 
 def ARCHIVE_NAME(platform_key: str, machine: str) -> str:
