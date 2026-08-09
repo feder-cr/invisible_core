@@ -806,6 +806,26 @@ def _apply_audio(prefs: Dict[str, Any], profile: Profile) -> None:
 
 
 def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
+    # EME, declared TRUE on every host, and it is not cosmetic.
+    #
+    # StaticPrefList gives media.eme.enabled the value false on XP_LINUX and
+    # true everywhere else - an upstream choice about DRM on free operating
+    # systems, not about us. MediaKeySystemAccessManager then rejects every
+    # non-clearkey key system outright when it is false, BEFORE it even looks
+    # for a CDM. So a Linux build claiming to be Windows answers a question
+    # that a real Windows Firefox answers differently.
+    #
+    # Measured 2026-08-09, one call to requestMediaKeySystemAccess:
+    #   our Windows  OK keySystem=com.widevine.alpha
+    #   our Linux    NotSupportedError: EME has been preffed off
+    # The error text names the cause, which is as detectable as it gets, so
+    # rule 7-bis is satisfied by that line alone: a page sees it in one call.
+    #
+    # This declares the ANSWER TO THE QUESTION, not the presence of a CDM.
+    # Whether a Widevine plugin is actually installed stays a real, dynamic
+    # fact (GMP download state) that rule 2 forbids tabling - and a fresh
+    # Windows profile sits in the same state until its first EME page.
+    prefs["media.eme.enabled"]                = True
     prefs["media.av1.enabled"]                = profile.codec.av1_enabled
     prefs["media.encoder.webm.enabled"]       = profile.codec.webm_encoder_enabled
     # NOT media.mediasource.{webm,mp4}.enabled. Those two names do not exist in
