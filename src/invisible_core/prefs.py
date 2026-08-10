@@ -1194,7 +1194,23 @@ def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     # agreed cross-OS by coincidence and no comparison could have caught it -
     # the same shape as the colour depth, which read the real panel for months
     # while both machines happened to be 24-bit.
-    prefs["ui.textScaleFactor"] = 1.0
+    #
+    # A STRING, and the quotes are the whole bug fixed on 2026-08-10. Gecko has
+    # no float pref type: `Preferences::GetFloat` reads a CHAR pref and parses
+    # the text, which is why `layout.css.devPixelsPerPx` five hundred lines up
+    # is `str(...)` and why FONT_UI_SIZE carries the note "string:
+    # Preferences::GetFloat parses text". Written as a Python float it reached
+    # the profile as a number pref, so the name existed with the wrong TYPE and
+    # the read failed - and a failed read here does not fall back quietly.
+    #
+    # What it cost, measured: opening a page in a SECOND browser context killed
+    # the browser on Windows. The first context was fine, so nothing in the
+    # normal path showed it; the e2e suite wedged at 83% for twenty-two minutes
+    # instead of failing. Isolated by a binary search over the 230 prefs the
+    # wrapper composes - 14 launches - after the engine, the window cloak, the
+    # context kwargs, the environment, the cursor layer and the process job
+    # object had each been excluded by their own measurement.
+    prefs["ui.textScaleFactor"] = "1.0"
     #: 0 = let the locale decide, which is what Windows does. On Linux this
     #: IntID reads GNOME's `org.gnome.desktop.interface clock-format` live and
     #: OSPreferences_gtk overrides the ICU pattern with it, so a host set to

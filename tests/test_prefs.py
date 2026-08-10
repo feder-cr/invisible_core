@@ -694,3 +694,36 @@ def test_the_storage_quota_is_a_value_firefox_can_actually_report():
     pinned = translate_profile_to_prefs(
         generate_profile(42, pin={"hardware.storage_quota_mb": 6553}))
     assert pinned["zoom.stealth.storage.quota_mb"] == 6553
+
+
+@pytest.mark.unit
+def test_no_pref_is_emitted_as_a_python_float():
+    """Gecko has no float pref type, so a float here is always the wrong type.
+
+    `Preferences::GetFloat` reads a CHAR pref and parses the text - that is why
+    `layout.css.devPixelsPerPx` is `str(...)` and why FONT_UI_SIZE carries the
+    note "string: Preferences::GetFloat parses text". A pref emitted as a Python
+    float arrives as a number pref, so the name exists with the wrong type and
+    the read fails.
+
+    Written as a property over the WHOLE emitted set rather than as a check on
+    the one pref that got it wrong, because the failure it catches is a habit,
+    not an instance: the next float declared will be written the same way by
+    whoever does not know this paragraph exists.
+
+    What the instance cost, on 2026-08-10: `ui.textScaleFactor = 1.0` made
+    opening a page in a SECOND browser context kill the browser on Windows. The
+    first context worked, so nothing on the normal path showed it, and the e2e
+    suite wedged for twenty-two minutes rather than failing. Fourteen launches
+    of a binary search over 230 prefs found it, after the engine, the window
+    cloak, the context kwargs, the environment, the cursor layer and the process
+    job object had each been excluded by measurement.
+    """
+    for seed in (0, 42, 999):
+        prefs = translate_profile_to_prefs(generate_profile(seed))
+        floats = {k: v for k, v in prefs.items() if isinstance(v, float)}
+        assert floats == {}, (
+            "these prefs are emitted as Python floats, and Gecko has no float "
+            "pref type - write them as strings, the way GetFloat reads them: "
+            f"{sorted(floats)}"
+        )
