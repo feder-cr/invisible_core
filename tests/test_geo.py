@@ -403,3 +403,51 @@ def test_the_country_table_is_well_formed():
         assert re.fullmatch(r"[a-z]{2}-[A-Z]{2}", tag), f"{cc}: {tag!r}"
         assert tag.split("-")[1] == cc, (
             f"{cc} maps to {tag}, whose region is {tag.split('-')[1]}")
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  Il BUDGET, che nessun test guardava e che infatti non funzionava
+# ──────────────────────────────────────────────────────────────────────
+def test_a_single_endpoint_cannot_eat_the_whole_budget(monkeypatch):
+    """Il timeout passato a requests deve essere una COPPIA che sta nel budget.
+
+    `requests` applica un timeout SCALARE alla fase di connessione e poi di
+    nuovo a quella di lettura: `timeout=10` puo' costare venti secondi in una
+    chiamata sola. Con `budget=15` il primo endpoint sfondava da solo il budget
+    e il ciclo usciva subito, quindi degli endpoint configurati ne veniva
+    provato UNO.
+
+    Misurato il 2026-08-10 su un proxy che aveva smesso di instradare: l'errore
+    diceva `20.1s` con budget 15 e "1 of 3 endpoints". La funzione documentava
+    gia' l'intento giusto - "il budget limita il passo intero" - e il codice
+    faceva un'altra cosa, che e' la ragione per cui questo test guarda il valore
+    passato e non la docstring.
+    """
+    from invisible_core import _geo
+
+    visti = []
+
+    def _get(url, **kw):
+        visti.append(kw.get("timeout"))
+        raise RuntimeError("questo endpoint tace")
+
+    monkeypatch.setattr(_geo.requests, "get", _get)
+
+    with pytest.raises(_geo.GeoTimezoneError):
+        _geo.discover_egress_ip(None, timeout=10.0, budget=15.0)
+
+    assert visti, "nessun endpoint e' stato provato"
+    # 1. ogni chiamata riceve una coppia, non uno scalare
+    for t in visti:
+        assert isinstance(t, tuple), (
+            f"timeout scalare {t!r}: requests lo applica DUE volte, "
+            "quindi una sola chiamata puo' costare il doppio del budget"
+        )
+        assert sum(t) <= 15.0 + 1e-6, (
+            f"una singola chiamata puo' spendere {sum(t)}s con un budget di 15s"
+        )
+    # 2. e la ridondanza serve davvero: piu' di un endpoint viene provato
+    assert len(visti) > 1, (
+        f"provato {len(visti)} endpoint su {len(_geo._IP_ECHO_ENDPOINTS)}: "
+        "il budget si esaurisce sul primo e gli altri non entrano mai in gioco"
+    )

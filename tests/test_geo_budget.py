@@ -37,13 +37,30 @@ def clock(monkeypatch):
     return c
 
 
+def _costo_reale(timeout):
+    """Quanto puo' costare UNA richiesta, secondo `requests` e non secondo noi.
+
+    Un timeout SCALARE non limita la richiesta: `requests` lo applica alla fase
+    di connessione e poi di nuovo a quella di lettura, quindi `timeout=10` puo'
+    spendere venti secondi. Una COPPIA `(connessione, lettura)` costa al massimo
+    la loro somma.
+
+    Questo banco modellava lo scalare come costo totale - cioe' l'intento invece
+    della libreria - ed e' la ragione per cui il difetto e' sopravvissuto sotto
+    quattro test verdi: misurato il 2026-08-10 su un proxy che non rispondeva,
+    l'errore riportava `20.1s` con `budget=15` e "1 of 3 endpoints". Il budget
+    non era mai stato rispettato in produzione, e qui risultava rispettato.
+    """
+    return sum(timeout) if isinstance(timeout, tuple) else 2.0 * timeout
+
+
 def _hang_all(monkeypatch, clock, *, cost: float):
     """Every endpoint burns its full allowed timeout, then fails."""
     seen: list[float] = []
 
     def fake_get(url, proxies=None, timeout=None):
         seen.append(timeout)
-        clock.now += min(timeout, cost)
+        clock.now += min(_costo_reale(timeout), cost)
         raise OSError("timed out")
 
     monkeypatch.setattr(_geo.requests, "get", fake_get)
@@ -62,7 +79,8 @@ def test_the_step_stops_at_the_budget_however_many_endpoints_there_are(
     seen = _hang_all(monkeypatch, clock, cost=99.0)
     with pytest.raises(_geo.GeoTimezoneError):
         _geo.discover_egress_ip(timeout=10.0, budget=15.0)
-    assert sum(seen) <= 15.0 + 1e-9, f"spent {sum(seen)}s against a 15s budget"
+    speso = sum(_costo_reale(t) for t in seen)
+    assert speso <= 15.0 + 1e-9, f"spent {speso}s against a 15s budget"
     assert clock.now - 1000.0 <= 15.0 + 1e-9
 
 
@@ -73,8 +91,8 @@ def test_a_slow_first_endpoint_shortens_the_second_instead_of_adding_to_it(
     seen = _hang_all(monkeypatch, clock, cost=99.0)
     with pytest.raises(_geo.GeoTimezoneError):
         _geo.discover_egress_ip(timeout=10.0, budget=12.0)
-    assert seen[0] == 10.0, "the first request should get the full timeout"
-    assert seen[1] == pytest.approx(2.0), (
+    assert sum(seen[0]) == 10.0, "the first request should get the full timeout"
+    assert sum(seen[1]) == pytest.approx(2.0), (
         f"the second should get only the remaining budget, got {seen[1]}"
     )
 
@@ -88,7 +106,7 @@ def test_the_budget_never_hands_a_request_a_non_positive_timeout(
     seen = _hang_all(monkeypatch, clock, cost=99.0)
     with pytest.raises(_geo.GeoTimezoneError):
         _geo.discover_egress_ip(timeout=10.0, budget=10.0)
-    assert all(t > 0 for t in seen), seen
+    assert all(sum(t) > 0 for t in seen), seen
     assert len(seen) == 1, "the budget was spent by the first request"
 
 

@@ -121,8 +121,23 @@ def discover_egress_ip(
             break
         tried += 1
         try:
+            # Una COPPIA, non uno scalare. `requests` applica un timeout scalare
+            # alla fase di CONNESSIONE e poi di nuovo a quella di LETTURA, quindi
+            # `timeout=10` puo' spendere venti secondi in una chiamata sola e
+            # sfondare da solo un budget di quindici. Misurato il 2026-08-10 con
+            # un proxy che aveva smesso di instradare: l'errore riportava
+            # `20.1s` con `budget=15` e "1 of 3 endpoints", cioe' il primo si e'
+            # mangiato tutto e la ridondanza degli altri due non e' mai entrata
+            # in gioco. Il commento della funzione descriveva gia' l'intento
+            # giusto - il budget limita il passo intero - ed era il codice a
+            # implementarne un altro.
+            #
+            # Meta' per fase garantisce che UNA chiamata non superi il rimanente,
+            # quindi il ciclo arriva davvero al secondo e al terzo endpoint
+            # quando il primo tace.
+            slice_ = min(timeout, remaining)
             resp = requests.get(
-                url, proxies=proxies, timeout=min(timeout, remaining)
+                url, proxies=proxies, timeout=(slice_ / 2, slice_ / 2)
             )
             resp.raise_for_status()
             ip = resp.text.strip()
