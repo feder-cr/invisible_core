@@ -189,15 +189,76 @@ def release_tag_in(push_refs: str, prefixes: Sequence[str] = ("v",)) -> str:
     return ""
 
 
-def push_range(push_refs: str) -> str:
-    """`git rev-list` arguments covering what is being pushed, or "".
+#: L'albero vuoto di git. Non e' una costante nostra: e' lo SHA-1 dell'oggetto
+#: albero senza voci, identico in ogni repository esistente, ed e' la base che
+#: git stesso usa quando "prima non c'era niente".
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-    An all-zero REMOTE sha means the remote has never seen this ref, so there is
-    no old..new to take: everything not already on a remote is new.
+
+def _revision_exists(rev: str, repo: Optional[Path]) -> bool:
+    if repo is None:
+        return False
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", rev],
+            capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return False
+    return out.returncode == 0
+
+
+def _commits_not_on_a_remote(local_sha: str, repo: Optional[Path]) -> list:
+    """I commit raggiunti da `local_sha` che nessun remoto ha ancora."""
+    if repo is None:
+        return []
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "rev-list", local_sha, "--not", "--remotes"],
+            capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return []
+    if out.returncode:
+        return []
+    return [r for r in out.stdout.split() if r]
+
+
+def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
+    """UN intervallo di revisioni valido per `git diff` e `git rev-list`, o "".
+
+    Il valore di ritorno e' sempre UN SOLO token, e questo e' il punto.
+
+    Prima restituiva `f"{local_sha} --not --remotes"` quando il remoto non
+    aveva mai visto il ref: tre token in una stringa sola. Chi la riceveva
+    doveva indovinare se spezzarla, e i due consumatori indovinavano diverso -
+    il name scanner sopravviveva, il gate della disclosure la passava a
+    `git diff` come singola revisione e otteneva `fatal: bad revision`. Il hook
+    allora RIFIUTAVA il push, correttamente ma per un errore proprio: misurato
+    2026-08-11 spingendo il tag v18.14.0, con la conseguenza che una release
+    non poteva partire.
+
+    Il caso che lo scatenava e' quello di sempre per un tag: il ref e' nuovo sul
+    remoto (sha remoto tutto zeri) ma i COMMIT sono gia' pubblicati. La risposta
+    giusta li' non e' un intervallo strano, e' "non c'e' niente di nuovo da
+    leggere", e si dice con "".
+
+    `repo` serve a chiederlo a git invece di dedurlo. Senza, la funzione resta
+    quella di prima per il caso normale e non inventa: un intervallo che non
+    puo' verificare non lo restituisce.
     """
     for local_sha, _remote_ref, remote_sha in _ref_lines(push_refs):
         if remote_sha and set(remote_sha) == {"0"}:
-            return f"{local_sha} --not --remotes"
+            nuovi = _commits_not_on_a_remote(local_sha, repo)
+            if not nuovi:
+                return ""
+            piu_vecchio = nuovi[-1]
+            if _revision_exists(f"{piu_vecchio}^", repo):
+                return f"{piu_vecchio}^..{local_sha}"
+            # Il piu' vecchio e' la RADICE, quindi non ha un genitore. La base
+            # giusta e' l'albero vuoto - l'hash canonico di git, uguale in ogni
+            # repository - che rende "tutto e' nuovo" un intervallo normale
+            # invece di un caso speciale. Trovato dal test: senza questo ramo
+            # git risponde "ambiguous argument <sha>^".
+            return f"{_EMPTY_TREE}..{local_sha}"
         return f"{remote_sha}..{local_sha}"
     return ""
 
@@ -338,7 +399,7 @@ def main(
             _say("(that scan is a maintainer gate; it lives outside this repo.)")
             skipped.append("name scan")
         else:
-            rng = push_range(refs)
+            rng = push_range(refs, root)
             if rng:
                 _say(f"scanning files + the commit messages in {rng} ...")
             else:
@@ -385,7 +446,7 @@ def main(
             _say("(that scan is a maintainer gate; it lives outside this repo.)")
             skipped.append("disclosure scan")
         else:
-            rng = push_range(refs)
+            rng = push_range(refs, root)
             rc = _run_gate_with_its_own_tests(
                 scanner, "internal-disclosure", py, root,
                 run, args=[".", "--range", rng] if rng else ["."],
