@@ -92,6 +92,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Every expectation in this file is written against a <tag>.0.0 baseline.
 BASELINE_REVISION = 0
 
+#: E il TAG del sigillo, per la stessa ragione della revisione qui sopra e con
+#: lo stesso costo gia' pagato una volta. Il fixture normalizzava il ledger e
+#: la revisione ma lasciava il tag AMBIENTALE, cioe' quello che il repository
+#: spedisce oggi: il giorno in cui il sigillo e' passato da firefox-18 a
+#: firefox-19 sono tornati rossi NOVE test in una volta, ognuno perche' il suo
+#: "prima" e il suo "dopo" erano diventati lo stesso valore. E' la nota qui
+#: sotto, una riga piu' in la', ripetuta un livello sopra.
+BASELINE_TAG = "firefox-18"
+
 #: "already published and byte-identical" - a NO-OP, not a refusal.
 #: It shared exit 1 with "the content changed under an unmoved version" until
 #: 2026-07-26, and the two must not look alike to a caller: the second has to
@@ -159,6 +168,10 @@ def _copy_repo(dest: Path) -> Path:
     # Pinning it here is the arrange step these cases were relying on ambient
     # state for.
     set_core_revision(dest, BASELINE_REVISION)
+    # Il tag del sigillo, per lo stesso motivo: le attese qui sotto parlano di
+    # <BASELINE_TAG>.0.0 e di spostamenti a firefox-17 e firefox-19, e nessuna
+    # di loro puo' dipendere da cosa il repository spedisce oggi.
+    edit_seal(dest, tag=BASELINE_TAG)
     return dest
 
 
