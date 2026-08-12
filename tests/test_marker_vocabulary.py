@@ -901,6 +901,59 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
           "went. If the mention is HISTORICAL, write it without backticks.")
 
 
+def test_every_open_bug_says_how_to_re_check_it():
+    """An OPEN heading is a claim about TODAY, and nothing was re-reading it.
+
+    Measured 2026-08-12, and the measurement is what this gate exists to stop
+    from repeating. Work was picked off this file by reading HEADINGS: one of
+    them said OPEN over a body that already carried the A/B closing it (6
+    sessions dead in 10 with the defect, 0 in 10 with the fix, Fisher p about
+    0.005), and the owner had to point it out. Two more headings said OPEN over
+    a body that was half closed - "Chiuso subito: `_summarize` now refuses with
+    exit 3", "RESOLVED the slowness half, and it was not ours".
+
+    The audit that followed opened all nineteen and found exactly ONE stale in
+    substance. So the entries were maintained; what was missing is that their
+    state was not in a field anyone could READ without opening 83k characters.
+
+    THE CONVENTION: every OPEN entry carries a `> **Ricontrollo:**` line saying
+    how to decide today whether it is still true - a command where one exists,
+    and an honest "not verified since it was found" where re-checking needs a
+    build, a retail judge or a proxy that is up. The date is not enforced: a
+    gate that demands a fresh measurement on nineteen entries needing browsers
+    would be permanently red, and a permanently red gate teaches people to
+    ignore it - which is the defect this same file was already carrying in
+    another test.
+
+    TRIAGE and NOTE headings are exempt: they are not claims that something is
+    still broken.
+    """
+    import re
+
+    workbench = _RELEASE.parent
+    doc = workbench / "docs" / "firefox-stealth-architecture" / "70-known-bugs.md"
+    if not doc.is_file():
+        pytest.skip("not the workbench - the architecture docs are not here")
+
+    testo = doc.read_text(encoding="utf-8")
+    voci = re.split(r"(?m)^## ", testo)
+    muti = []
+    for voce in voci:
+        if not voce.startswith("OPEN"):
+            continue
+        titolo = voce.split(chr(10))[0].strip()
+        if not re.search(r"(?m)^> \*\*Ricontrollo:\*\* \S", voce):
+            muti.append(titolo[:96])
+
+    assert not muti, (
+        "these OPEN entries do not say how to decide today whether they are "
+        "still true, so the only way to read this file is to open every entry "
+        "- which is how a closed bug got proposed as work on 2026-08-12:"
+        + "".join(chr(10) + "  " + t for t in muti)
+        + chr(10) + "Add a `> **Ricontrollo:**` line: a command where one "
+        "exists, or an honest statement of what re-checking would need.")
+
+
 def test_a_doc_that_names_a_test_function_names_the_file_holding_it():
     """Naming the function without the file is the half that costs the routing.
 
