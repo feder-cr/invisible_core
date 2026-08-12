@@ -37,6 +37,15 @@ pytestmark = pytest.mark.unit
 _REPOS = ["invisible_core", "invisible_playwright", "invisible_firefox"]
 _RELEASE = Path(__file__).resolve().parents[2]
 
+# Where the patched Firefox source lives, per `10-repo-layout.md`. Two entries
+# because the two build trees are SEPARATE clones, Windows and WSL. Only used
+# to resolve test names the workbench docs cite from that repo; a machine that
+# has neither skips those checks rather than reporting a name as missing.
+_FIREFOX_SOURCE_CANDIDATES = (
+    Path("C:/ff/source"),
+    Path.home() / "ff-build" / "firefox-150",
+)
+
 
 def _pytest_config(repo: str) -> dict:
     path = _RELEASE / repo / "pyproject.toml"
@@ -849,12 +858,30 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
         pytest.skip("not the workbench - the architecture docs are not here")
 
     defined = set()
+    alberi = []
     for repo in _DEFAULT_SUITE_WORKFLOW:
         tests = _RELEASE / repo / "tests"
         if not tests.is_dir():
             pytest.skip("not the workbench - the sibling repos are not here")
-        for path in tests.rglob("test_*.py"):
-            defined.update(re.findall(r"(?m)^\s*def (test_[a-z0-9_]+)",
+        alberi.append(tests)
+    alberi.append(_RELEASE.parent / "tests")
+    # `20-our-patches.md` cites the SOURCE repo's own validators by name, and
+    # they live outside every tree above. Scanning only `release/*/tests` made
+    # this gate RED on a citation that was perfectly true - measured 2026-08-12
+    # on `test_manifest_family_set_equals_the_68`, which does exist, in
+    # `scripts/` of the Firefox source. A gate that is red for a false positive
+    # is worse than a stale doc: it teaches the next reader to ignore it.
+    sorgente = [p for p in _FIREFOX_SOURCE_CANDIDATES if (p / "scripts").is_dir()]
+    if not sorgente:
+        pytest.skip("the Firefox source tree is not on this machine, so the "
+                    "names the docs cite from it cannot be judged")
+    alberi.append(sorgente[0] / "scripts")
+
+    for albero in alberi:
+        if not albero.is_dir():
+            continue
+        for path in albero.rglob("test_*.py"):
+            defined.update(re.findall(r"(?m)^\s*(?:async )?def (test_[a-z0-9_]+)",
                                       path.read_text(encoding="utf-8", errors="replace")))
             defined.add(path.stem)          # docs cite files by name too
 
@@ -872,3 +899,75 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
         + "\n  ".join(f"{f}: {names}" for f, names in phantom.items())
         + "\nEither the name changed and the doc did not follow, or the coverage "
           "went. If the mention is HISTORICAL, write it without backticks.")
+
+
+def test_a_doc_that_names_a_test_function_names_the_file_holding_it():
+    """Naming the function without the file is the half that costs the routing.
+
+    The gate above checks that a cited test EXISTS, which is the cheap half. It
+    says nothing about whether the reader can FIND it, and that is the half that
+    was measured to fail. On the routing bench, 2026-08-12, item 6: the docs
+    name `test_no_pref_is_emitted_as_a_python_float` in two places and never
+    name `tests/test_prefs.py`, so three runs out of three had to guess the file
+    from the function's description ("asserts the property over the whole
+    emitted surface") and three out of three guessed `test_prefs_surface.py` -
+    which exists, sits beside it, and does not hold the gate. Two of the three
+    caught themselves by grepping for the function name; the third did not, and
+    the item lost the casella in four consecutive rounds.
+
+    THE PERIMETER IS THE SECTION, not a line window. Measured while writing
+    this: a +-6 line window reports 71 orphans and a section-scoped one reports
+    45, because a list of eight names under one heading names its file once at
+    the top and a window flags the last six. A reader inside the section can see
+    the file; that is the standard the check has to hold, or it fails honest
+    prose.
+
+    A name that IS a file stem is exempt: it already names the file. A function
+    defined in more than one file passes if any of them is named.
+    """
+    import re
+
+    workbench = _RELEASE.parent
+    docs = workbench / "docs" / "firefox-stealth-architecture"
+    if not docs.is_dir():
+        pytest.skip("not the workbench - the architecture docs are not here")
+
+    alberi = [_RELEASE / repo / "tests" for repo in _DEFAULT_SUITE_WORKFLOW]
+    alberi.append(workbench / "tests")
+    definita = {}
+    stem = set()
+    for albero in alberi:
+        if not albero.is_dir():
+            continue
+        for path in albero.rglob("test_*.py"):
+            stem.add(path.stem)
+            for nome in re.findall(
+                    r"(?m)^\s*(?:async )?def (test_[a-z0-9_]+)",
+                    path.read_text(encoding="utf-8", errors="replace")):
+                definita.setdefault(nome, set()).add(path.name)
+    if not definita:
+        pytest.skip("not the workbench - the sibling repos are not here")
+
+    orfane = {}
+    for doc in sorted(docs.glob("*.md")):
+        righe = doc.read_text(encoding="utf-8").split(chr(10))
+        tagli = [i for i, r in enumerate(righe) if re.match(r"^#{1,6} ", r)]
+        tagli.append(len(righe))
+        for i, riga in enumerate(righe):
+            for m in re.finditer(r"`(test_[a-z0-9_]+)`", riga):
+                nome = m.group(1)
+                if nome in stem or nome not in definita:
+                    continue          # e' un file, o non esiste: lo dice l'altro gate
+                a = max([t for t in tagli if t <= i], default=0)
+                b = min([t for t in tagli if t > i], default=len(righe))
+                sezione = chr(10).join(righe[a:b])
+                if not any(f in sezione for f in definita[nome]):
+                    orfane.setdefault(doc.name, []).append(
+                        nome + " -> " + "/".join(sorted(definita[nome])))
+
+    assert not orfane, (
+        "these docs name a test function without naming, anywhere in the same "
+        "section, the file that holds it - so the only way to reach it is a "
+        "grep, and a plausible sibling file is what gets guessed instead:"
+        + "".join(chr(10) + "  " + f + ": " + ", ".join(sorted(set(v)))
+                  for f, v in sorted(orfane.items())))
