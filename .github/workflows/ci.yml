@@ -81,3 +81,33 @@ jobs:
               sys.exit(1)
           print(f"{passed} tests ran")
           PY
+
+  # UN SOLO CONTESTO PER LA BRANCH PROTECTION, e questa e' la ragione per cui
+  # esiste. Prima la protezione elencava `tests (windows-latest)` e
+  # `tests (ubuntu-latest)`: nomi veri quando la matrice aveva il solo asse
+  # del sistema operativo, e mai piu' emessi da quando ha guadagnato l'asse
+  # della versione di Python. Misurato 2026-08-13 sul commit c5d7179 - GitHub
+  # riceveva otto contesti `tests (<os>, <ver>)` e ne aspettava due che nessun
+  # job produce piu'. Ogni push stampava "2 of 2 required status checks are
+  # expected" e passava lo stesso, perche' enforce_admins era false: una
+  # protezione decorativa. E' la stessa forma del difetto che questo progetto
+  # registra da mesi, "un job che non gira e' indistinguibile da un job che
+  # passa", applicata alla protezione invece che al workflow.
+  #
+  # Elencare gli otto nomi veri avrebbe riparato oggi e rotto al prossimo
+  # cambio di matrice, nello stesso identico modo. Questo job dipende dalla
+  # matrice INTERA, quindi il suo nome non cambia mai: e' l'unico contesto da
+  # richiedere.
+  #
+  # `if: always()` perche' senza, un `needs` fallito SALTA questo job invece di
+  # farlo fallire - e un contesto saltato non e' un contesto rosso, e' un
+  # contesto che non arriva. Sarebbe lo stesso buco, un piano piu' in alto.
+  gate:
+    needs: [tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: refuse unless every matrix job succeeded
+        run: |
+          echo "tests: ${{ needs.tests.result }}"
+          test "${{ needs.tests.result }}" = "success"
