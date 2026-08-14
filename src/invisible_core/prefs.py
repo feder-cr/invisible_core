@@ -1574,6 +1574,37 @@ def compose_session_prefs(
         virtual_display=virtual_display,
     )
     playwright_proxy = configure_proxy(proxy, prefs) if proxy else None
+
+    # ⛔ UNCONDITIONAL, and the reason is REALNESS - not the launch bug it also
+    # happens to fix. Windows' occlusion tracker can decide our chrome window is
+    # occluded, and from that verdict the browser is treated as BACKGROUNDED. What
+    # a page then reads, with no stealth override anywhere:
+    #
+    #   * `document.visibilityState === "hidden"` and `document.hidden === true`,
+    #     plus a real `visibilitychange` event (`Document::ComputeVisibilityState`)
+    #   * `requestAnimationFrame` throttled to 1 Hz (`layout.throttled_frame_rate`)
+    #   * `setTimeout`/`setInterval` clamped to 1000 ms
+    #     (`dom.min_background_timeout_value`)
+    #   * `navigator.mediaDevices.enumerateDevices()` that NEVER RESOLVES
+    #     (`MediaDevices.cpp` returns early when the BrowsingContext is inactive)
+    #   * video suspended: `totalVideoFrames` frozen while `currentTime` advances
+    #
+    # Every one of those is a SUPPRESSED signal on a surface a detector reads, and
+    # rule 12 says a suppressed signal is a FAIL, not a pass. An automated browser
+    # must never be treated as backgrounded: nobody is looking at it, but the page
+    # is.
+    #
+    # This lived in `CLOAK_PREFS` until 2026-08-14, i.e. applied only when
+    # `cloak=True`, which requires `headless=True` - so the DEFAULT headful path
+    # ran with the tracker on. Measured that day on the persistent-relaunch path:
+    # 14 relaunches out of 14 with this pref against 6 hangs out of 9 without.
+    # The hang's own mechanism is NOT established (`70-known-bugs.md` [B150]);
+    # this pref is justified by the observable list above, which does not depend
+    # on it.
+    #
+    # setdefault, so an explicit caller override still wins.
+    prefs.setdefault("widget.windows.window_occlusion_tracking.enabled", False)
+
     if cloak:
         # setdefault: an explicit caller override wins over the cloak.
         for key, value in cloak_prefs().items():

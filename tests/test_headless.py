@@ -81,12 +81,19 @@ def test_make_virtual_display_error_mentions_offending_platform(monkeypatch):
 
 
 @pytest.mark.unit
-def test_cloak_prefs_enables_cloak_and_disables_occlusion():
-    """The cloak prefs must turn on the in-binary cloak and turn OFF Windows
-    occlusion tracking (so a hidden window keeps painting). Returns a copy."""
+def test_cloak_prefs_enables_the_cloak_and_nothing_else():
+    """The cloak prefs turn on the in-binary cloak. Returns a copy.
+
+    Occlusion tracking is deliberately NOT here any more: it used to be, and
+    since this dict is merged only when ``cloak=True`` - which requires
+    ``headless=True`` - the default headful path ran with the tracker ON. It is
+    applied unconditionally in ``prefs.compose_session_prefs`` now; the test that would
+    have caught the gap is
+    ``test_occlusion_tracking_is_off_even_without_the_cloak``.
+    """
     p = cloak_prefs()
     assert p["zoom.stealth.cloak_windows"] is True
-    assert p["widget.windows.window_occlusion_tracking.enabled"] is False
+    assert "widget.windows.window_occlusion_tracking.enabled" not in p
     assert p == CLOAK_PREFS and p is not CLOAK_PREFS
 
 
@@ -134,3 +141,40 @@ def test_linux_virtual_display_stop_without_start_is_safe():
     vd.stop()
     assert vd._proc is None
     assert vd._display is None
+
+
+@pytest.mark.unit
+def test_occlusion_tracking_is_off_even_without_the_cloak():
+    """⛔ Il test che avrebbe trovato il buco, e che non esisteva.
+
+    `widget.windows.window_occlusion_tracking.enabled` stava in `CLOAK_PREFS`,
+    che `compose_session_prefs` fonde SOLO con `cloak=True` - e `cloak` richiede
+    `headless=True`. Quindi il percorso di default, headful, girava con il tracker
+    ACCESO, e una pagina in quella sessione poteva leggere un browser messo in
+    background: `requestAnimationFrame` a 1 Hz, `setTimeout` clampato a 1000 ms,
+    `visibilityState` hidden, `enumerateDevices()` che non risolve mai. Sono
+    segnali SOPPRESSI su superfici che un rilevatore legge, cioe' un FAIL per la
+    regola 12, non un dettaglio di prestazioni.
+
+    L'input noto-cattivo e' il codice di ieri: con la pref dentro `CLOAK_PREFS`
+    questa asserzione e' rossa per `cloak=False` e verde per `cloak=True`, ed e'
+    esattamente la differenza che nessuno controllava.
+    """
+    from invisible_core._fpforge import generate_profile
+    from invisible_core.prefs import compose_session_prefs
+
+    profilo = generate_profile(seed=4242)
+    chiave = "widget.windows.window_occlusion_tracking.enabled"
+
+    senza = compose_session_prefs(profilo, cloak=False).prefs
+    assert senza[chiave] is False, (
+        "senza cloak il tracker resterebbe acceso, e la pagina leggerebbe un "
+        "browser in background")
+
+    con = compose_session_prefs(profilo, cloak=True).prefs
+    assert con[chiave] is False
+
+    # E un override esplicito del chiamante deve ancora vincere: e' un setdefault.
+    forzata = compose_session_prefs(profilo, cloak=False,
+                            extra_prefs={chiave: True}).prefs
+    assert forzata[chiave] is True
