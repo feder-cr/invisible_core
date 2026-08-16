@@ -618,6 +618,32 @@ _BASELINE: Dict[str, Any] = {
     # does nothing - the second translation is paid only where the defect is.
     "zoom.stealth.webgl.shader_output_language":          "essl",
 
+    # How FreeType loads a glyph: the hinting style, and whether antialiasing
+    # is on. DECLARED, never asked of the host.
+    #
+    # On Linux the engine built an FcPattern and read these back from it, and
+    # that pattern has had "user and system fontconfig configurations" applied
+    # to it - upstream's own words, in the comment right above the code that
+    # read them. So `/etc/fonts` decided how OUR bundled faces were
+    # rasterised. Measured 2026-08-16 THROUGH THE PRODUCT, same binary and
+    # same page: the pixel hash was 3842037683 with this machine's fontconfig,
+    # 1512591551 with an empty one, 2489286717 with `hintnone`. A page reads
+    # those bytes with getImageData on a canvas with text.
+    #
+    # Of the six parameters that function took from the pattern these are the
+    # only two that move a pixel: rgba, lcdfilter and embeddedbitmap measured
+    # identical in every configuration tried, so they stay where they are -
+    # declaring them would be code that moves no measurement.
+    #
+    # 1 = FC_HINT_SLIGHT, the fontconfig constant rather than a numbering of
+    # our own, so nothing translates in between. It is what DirectWrite's
+    # CLEARTYPE_NATURAL_SYMMETRIC - the rendering mode declared for Windows a
+    # few lines above - does on the other side: little grid fitting, the
+    # outline kept. Windows never reads these two: the declaration is ONE, and
+    # each engine reads the half that concerns it.
+    "zoom.stealth.font.freetype_hintstyle":               1,
+    "zoom.stealth.font.freetype_antialias":               1,
+
     # WebGL extensions whitelist - non-empty pre-empts native enumeration.
     "zoom.stealth.webgl.extensions":                      _WEBGL1_EXTENSIONS,
     "zoom.stealth.webgl2.extensions":                     _WEBGL2_EXTENSIONS,
