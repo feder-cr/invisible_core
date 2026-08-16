@@ -135,3 +135,61 @@ def test_availheight_matches_the_taskbar_with_no_pin_at_all():
     for seed in (0, 42, 999, 45061):
         s = generate_profile(seed).screen
         assert s.avail_height == s.height - s.taskbar_px
+
+
+# ── Il NOME, non solo la classe ─────────────────────────────────────────────
+# La classe era gia' forzata dalla persona (i test sopra). Il NOME no: veniva
+# dal pool dei 444 in `webgl_renderer_pool.json`, mentre la pagina riceve quello
+# della persona da `webgl_gpu_pool.json`. Due pool, due risposte alla stessa
+# domanda, e il profile-manager mostrava all'utente quella che il browser non
+# avrebbe mai riportato - misurato sul seme 42: GTX 1650 all'utente, Intel HD
+# Graphics alla pagina.
+
+def test_the_reported_gpu_name_is_the_one_the_page_receives():
+    """La domanda "che GPU ha questo profilo" deve avere UNA risposta.
+
+    Non e' una preferenza di stile: `invisible_firefox/manager/fingerprint.py`
+    mostra `p.gpu.renderer` nella UI, e un utente che legge un nome e ne vede un
+    altro in una pagina di test conclude che il prodotto non funziona.
+    """
+    from invisible_core.prefs import translate_profile_to_prefs
+    disaccordi = []
+    for seed in range(200):
+        p = generate_profile(seed)
+        atteso = translate_profile_to_prefs(p).get("zoom.stealth.webgl.renderer")
+        if atteso and p.gpu.renderer != atteso:
+            disaccordi.append((seed, p.gpu.renderer, atteso))
+    assert not disaccordi, (
+        "%d semi su 200 riportano un nome di GPU diverso da quello che la "
+        "pagina riceve; il primo e' %r" % (len(disaccordi), disaccordi[:1]))
+
+
+def test_the_reported_vendor_follows_the_same_source():
+    """Il vendor viene cross-controllato contro il renderer, quindi non basta
+    correggere il nome: i due devono uscire dalla stessa persona."""
+    from invisible_core._webgl_personas import select_persona
+    for seed in (0, 42, 999, 45061):
+        p = generate_profile(seed)
+        persona = select_persona(seed)
+        if persona:
+            assert p.gpu.vendor == persona["vendor"]
+            assert p.gpu.renderer == persona["renderer"]
+
+
+def test_an_explicit_pin_still_outranks_the_persona():
+    """Il caso che deve NON scattare. La persona e' la sorgente per il caso
+    non specificato; una pin esplicita resta la volonta' del chiamante, come
+    gia' vale per `gpu.class_tier`."""
+    p = generate_profile(42, pin={"gpu.renderer": "ANGLE (Prova, Scelta Mia)"})
+    assert p.gpu.renderer == "ANGLE (Prova, Scelta Mia)"
+
+
+def test_the_class_still_comes_from_the_persona_not_from_the_reported_name():
+    """Il secondo caso che deve NON scattare. Il nome riportato e' cambiato;
+    la CLASSE su cui il bundle e' condizionato non deve essersi mossa, o
+    l'estrazione pesata rimappa ogni identita'."""
+    from invisible_core._webgl_personas import forced_gpu_class
+    for seed in (0, 42, 999, 45061):
+        atteso = forced_gpu_class(seed)
+        if atteso:
+            assert generate_profile(seed).gpu.class_tier == atteso

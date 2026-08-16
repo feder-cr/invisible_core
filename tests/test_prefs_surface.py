@@ -447,11 +447,30 @@ def test_the_font_surface_does_not_vary_with_the_seed():
     Windows machine answers Segoe UI at 12px. A fleet whose system font varied
     per identity would be the signal, not the camouflage. The gpu assertion is
     here so the test cannot pass by the profile being constant overall.
+
+    ⛔ The control used to be `generate_profile(1).gpu != generate_profile(999_999).gpu`,
+    and it went red on 2026-08-16 without the font surface having moved. The
+    reported GPU name became the PERSONA's - the value the browser actually
+    presents, drawn from ~17 real Windows GPUs by prevalence - instead of a draw
+    from a 444-name pool nothing ever sent to a page ([B96] in
+    `71-bug-archive.md`). Two seeds landing on the same persona is now ordinary,
+    so a two-sample control was asking a question the declared value can answer
+    "equal" to by design. It is the same shape as the font gate that started
+    calling three loaded faces unloaded: a discriminant borrowed from a value we
+    now declare stops discriminating, silently and without being wrong.
+
+    The question is reformulated over a SET, which the persona pool cannot make
+    uniform: across 24 seeds the font surface must be one value and the GPU must
+    take more than one. That is strictly stronger than the two-sample form.
     """
     from invisible_core._fpforge import generate_profile
-    a, b = generate_profile(1), generate_profile(999_999)
-    assert a.font == b.font, f"font surface varied: {a.font} vs {b.font}"
-    assert a.gpu != b.gpu, "two seeds produced the same GPU - test is not probing"
+    profili = [generate_profile(s) for s in range(1, 25)]
+    font = {p.font for p in profili}
+    assert len(font) == 1, "font surface varied across seeds: %r" % (font,)
+    gpu = {p.gpu for p in profili}
+    assert len(gpu) > 1, (
+        "24 seeds produced ONE GPU - the test is not probing, or the persona "
+        "pool has collapsed to a single entry")
 
 
 def test_the_font_surface_is_pinnable_like_every_other_group():

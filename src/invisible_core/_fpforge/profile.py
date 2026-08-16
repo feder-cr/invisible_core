@@ -10,6 +10,7 @@ from ._sampler import sample as _sample_raw
 # module scope, so there is no cycle to work around - verified by importing the
 # package, this module and `_webgl_personas` each first in a fresh interpreter.
 from .._webgl_personas import forced_gpu_class as _forced_gpu_class
+from .._webgl_personas import select_persona as _select_persona
 
 
 @dataclass(frozen=True)
@@ -574,6 +575,31 @@ def generate_profile(
                  or fixed_gpu_class
                  or _forced_gpu_class(int(seed)))
     raw = _sample_raw(int(seed), fixed_gpu_class=eff_class)
+    # The GPU NAME the profile reports is the persona's, because the persona is
+    # what the browser actually presents.
+    #
+    # Two pools existed and disagreed. `webgl_renderer_pool.json` has 444 bare
+    # names and drives the marginal draw inside `_sample_raw`;
+    # `webgl_gpu_pool.json` has the validated Windows personas, each carrying
+    # renderer + vendor + extensions + ~100 getParameter values, and
+    # `_apply_gpu_persona` writes THAT one into `zoom.stealth.webgl.renderer`.
+    # Nothing ever wrote the sampled name into a pref - measured on seed 42, the
+    # 224 emitted prefs contain the persona (Intel HD Graphics) and no trace of
+    # the sampled GTX 1650 - so `Profile.gpu.renderer` was a label that
+    # contradicted the page for every seed with a persona, and the
+    # profile-manager showed the label to the user.
+    #
+    # The DRAW stays. Removing it would renormalise the marginal and remap every
+    # identity, which is the weighted-pool rule; and its value still feeds
+    # `classify_gpu` when no persona exists. What changes is only which of the
+    # two names gets REPORTED, so there is one source instead of two.
+    #
+    # This runs BEFORE `_apply_pins_to_raw`, so an explicit `gpu.renderer` pin
+    # still wins, exactly like `eff_class` above.
+    _persona = _select_persona(int(seed))
+    if _persona:
+        raw["webgl_renderer"] = _persona["renderer"]
+        raw["webgl_vendor"] = _persona["vendor"]
     # Seed the invariant font fields BEFORE pins, so a `font.*` pin overwrites
     # them through _apply_pins_to_raw like any sampled field, and so
     # `to_prefs_dict()` reports them alongside everything else.
