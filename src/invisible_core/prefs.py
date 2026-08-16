@@ -512,8 +512,22 @@ _BASELINE: Dict[str, Any] = {
     #: permissions by default, so the call is refused exactly as it is for a
     #: user who dismisses the prompt.
     "geo.provider.network.url":                           "",
-    "browser.region.network.url":                         "",
-    "browser.region.update.enabled":                      False,
+    #: ⛔ `browser.region.network.url` e `browser.region.update.enabled` NON
+    #: si emettono piu' - decisione del proprietario, 2026-08-17. Non e' una
+    #: dimenticanza: e' il caso in cui sopprimere ALLONTANA dal retail.
+    #:
+    #: Sono il servizio di REGIONE di Firefox, che non c'entra con la
+    #: geolocalizzazione di una pagina - quella la ferma la riga qui sopra,
+    #: che resta ed e' portante. Un Firefox standard chiede la regione UNA
+    #: volta per sessione, e noi lo facevamo comunque: misurato il
+    #: 2026-08-17, il prodotto manda quella richiesta anche con la pref vuota
+    #: emessa, mentre un lancio nudo con la stessa pref la azzera. Spedivamo
+    #: quindi una dichiarazione che prometteva cio' che non faceva.
+    #:
+    #: E c'e' una ragione di realness oltre alla somiglianza: la regione
+    #: derivata dall'uscita CONCORDA con il fuso e la lingua che dichiariamo
+    #: dalla stessa uscita, mentre una regione congelata al default puo'
+    #: contraddirli.
     #: ⛔ QUESTA RIGA NON FA NIENTE SULLA NOSTRA BUILD, e resta qui annotata
     #: invece che cancellata perche' la conoscenza costa piu' della riga.
     #:
