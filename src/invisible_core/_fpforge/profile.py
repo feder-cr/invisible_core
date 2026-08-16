@@ -904,11 +904,11 @@ A|Arabic Transparent|Arial
 A|Arial (Arabic)|Arial
 A|Arial (Hebrew)|Arial
 A|Arial Baltic|Arial
+A|Arial Black|Arial
 A|Arial CE|Arial
 A|Arial CYR|Arial
 A|Arial Greek|Arial
 A|Arial TUR|Arial
-A|Courier|Courier New
 A|Courier New (Arabic)|Courier New
 A|Courier New (Hebrew)|Courier New
 A|Courier New Baltic|Courier New
@@ -916,28 +916,31 @@ A|Courier New CE|Courier New
 A|Courier New CYR|Courier New
 A|Courier New Greek|Courier New
 A|Courier New TUR|Courier New
+A|Courier|Courier New
 A|David Transparent|David
 A|FangSong_GB2312|FangSong
 A|Fixed Miriam Transparent|Miriam Fixed
 A|Fixedsys Greek|Fixedsys
-A|Helv|Microsoft Sans Serif
+A|Franklin Gothic Medium|Franklin Gothic
 A|Helvetica|Arial
+A|Helv|Microsoft Sans Serif
 A|KaiTi_GB2312|KaiTi
-A|Miriam Transparent|Miriam
-A|MS Sans Serif|Microsoft Sans Serif
 A|MS Sans Serif Greek|Microsoft Sans Serif
-A|MS Serif|Times New Roman
+A|MS Sans Serif|Microsoft Sans Serif
 A|MS Serif Greek|Times New Roman
-A|MS Shell Dlg|Microsoft Sans Serif
+A|MS Serif|Times New Roman
 A|MS Shell Dlg 2|Tahoma
+A|MS Shell Dlg|Microsoft Sans Serif
+A|Miriam Transparent|Miriam
 A|Rod Transparent|Rod
 A|Roman|Times New Roman
 A|Script|Mistral
-A|Small Fonts|Arial
+A|Segoe UI Light|Segoe UI
+A|Segoe UI Semilight|Segoe UI
 A|Small Fonts Greek|Arial
+A|Small Fonts|Arial
 A|System Greek|System
 A|Tahoma Armenian|Tahoma
-A|Times|Times New Roman
 A|Times New Roman (Arabic)|Times New Roman
 A|Times New Roman (Hebrew)|Times New Roman
 A|Times New Roman Baltic|Times New Roman
@@ -945,7 +948,9 @@ A|Times New Roman CE|Times New Roman
 A|Times New Roman CYR|Times New Roman
 A|Times New Roman Greek|Times New Roman
 A|Times New Roman TUR|Times New Roman
+A|Times|Times New Roman
 A|Tms Rmn|Times New Roman
+A|Yu Gothic Medium|Yu Gothic
 F|Arial
 f|arial7_04.ttf|0|400|400|100|100|normal|ArialMT|2048|1854|434|67|1062|1467|-217|150|530|102
 f|arialbd7_04.ttf|0|700|700|100|100|normal|Arial-BoldMT|2048|1854|434|67|1062|1466|-217|215|530|102
