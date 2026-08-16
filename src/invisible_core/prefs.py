@@ -599,6 +599,25 @@ _BASELINE: Dict[str, Any] = {
     "media.webspeech.synth.enabled":                      True,
     # zoom.stealth.voices.list -> HardwareProfile.voices
 
+    # The language `getTranslatedShaderSource` answers the page in.
+    #
+    # We declare Windows on every host, and a Windows Firefox reaches ANGLE,
+    # which presents itself as GLES, so its translator emits ESSL. On a host
+    # whose GL context is NOT GLES - Linux through GLX - the same translator
+    # emits desktop GLSL, and the page reads `#version 450` from a browser whose
+    # RENDERER says ANGLE. ANGLE never emits desktop GLSL, so the contradiction
+    # is INTERNAL to one page: it does not need to know which OS we run on.
+    #
+    # What is declared is the LANGUAGE, never the string. The string's domain is
+    # infinite (the shader is arbitrary) so a table is forbidden; the language's
+    # domain has one element. The engine keeps translating, with the same
+    # declared resources, which is why the answer matches a Windows build by
+    # construction instead of by measured coincidence.
+    #
+    # A Windows build reads this pref, finds the language it already uses, and
+    # does nothing - the second translation is paid only where the defect is.
+    "zoom.stealth.webgl.shader_output_language":          "essl",
+
     # WebGL extensions whitelist - non-empty pre-empts native enumeration.
     "zoom.stealth.webgl.extensions":                      _WEBGL1_EXTENSIONS,
     "zoom.stealth.webgl2.extensions":                     _WEBGL2_EXTENSIONS,
