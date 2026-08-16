@@ -514,6 +514,27 @@ _BASELINE: Dict[str, Any] = {
     "geo.provider.network.url":                           "",
     "browser.region.network.url":                         "",
     "browser.region.update.enabled":                      False,
+    #: ⛔ QUESTA RIGA NON FA NIENTE SULLA NOSTRA BUILD, e resta qui annotata
+    #: invece che cancellata perche' la conoscenza costa piu' della riga.
+    #:
+    #: `services/settings/Utils.sys.mjs` rifiuta l'override del server quando
+    #: `AppConstants.RELEASE_OR_BETA` e' vero, salvo test in corso,
+    #: `MOZ_REMOTE_SETTINGS_DEVTOOLS=1` nell'ambiente, o un URL gia' nella lista
+    #: ammessa. La nostra build impacchettata dichiara `RELEASE_OR_BETA: true` -
+    #: viene da `--enable-release` nel mozconfig - e la stringa vuota non e' fra
+    #: gli URL ammessi. Quindi `Utils.SERVER_URL` ricade sul ramo `else` e
+    #: restituisce il server VERO di Mozilla, e Gecko logga "Ignoring preference
+    #: override of remote settings server".
+    #:
+    #: Conseguenza misurabile: ogni sessione interroga Remote Settings e scarica
+    #: gli attachment attraverso il proxy. Vedi `70-known-bugs.md` [B156].
+    #:
+    #: NON si spegne il poll in blocco: `webcompat-interventions` deve
+    #: continuare ad aggiornarsi ed e' FEDELTA'. E non si spegne la revoca dei
+    #: certificati per guadagnare memoria - deciso il 2026-08-16: e' un
+    #: declassamento di sicurezza su un browser che guidano utenti veri, e non e'
+    #: nemmeno invisibile, perche' un rilevatore puo' servire da un host con
+    #: certificato revocato e guardare se carichiamo.
     "services.settings.server":                           "",
     "browser.search.geoSpecificDefaults":                 False,
     "browser.contentblocking.report.lockwise.enabled":    False,
