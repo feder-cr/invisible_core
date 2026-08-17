@@ -622,3 +622,73 @@ def test_the_two_manifest_copies_are_byte_identical():
         "Rigenera con scripts/gen_bundle_font_manifest.py e ricostruisci la "
         "costante DAL FILE, invece di modificarla a mano: l'ordine e' cio' che "
         "si rompe per primo.")
+MODE_PREF = "gfx.font_rendering.cleartype_params.rendering_mode"
+
+
+def test_the_cleartype_rendering_mode_stays_DEFAULT():
+    """0 = DWRITE_RENDERING_MODE_DEFAULT, pinnata perche' un cambio sia una scelta.
+
+    ⛔ Questo valore e' stato 5 (NATURAL_SYMMETRIC) fino al 2026-08-17, e nessun
+    test lo fissava: la correzione ha cambiato la rasterizzazione del testo di
+    OGNI profilo e la suite intera e' passata in silenzio, 906 verdi. Un valore
+    che sposta il fingerprint di tutti e che nessuno asserisce e' un valore che
+    qualcuno rimettera' a posto "per pulizia".
+
+    **Perche' 0 e non un altro dei sei.** Misurato contro un retail 151.0 firmato
+    su dieci disegni con lo screenshot privilegiato: il retail varia 9-17 livelli
+    di grigio col CORPO del testo, la modalita' 5 dava 16-19 a qualunque corpo e
+    ZERO coincidenze su dieci, la 0 ne da' sei e azzecca tutti i corpi piccoli.
+    Sull'insieme dei grigi, che conta piu' del conteggio: il retail ne usa 20, con
+    la 0 ne condividiamo 17 con soli 2 estranei, con la 5 ne condividevamo 16 con
+    6 estranei.
+
+    **E 0 non e' "chiedere alla macchina".** DEFAULT dice a DirectWrite di
+    scegliere dal corpo e dalla tabella `gasp` del font: il corpo lo decide la
+    pagina, il font e' il nostro. Nessun valore entra dall'host, quindi la regola
+    7-quater regge. Le altre cinque sono costanti che sopprimono quella scelta.
+
+    Il tavolo completo dello sweep sta in `70-known-bugs.md` [B152].
+    """
+    modi = set()
+    for seme in (0xB005, 0xC0FFEE, 42, 970411, 1, 0xFFFF):
+        prefs = translate_profile_to_prefs(generate_profile(seme))
+        assert MODE_PREF in prefs, (
+            "la modalita' di rendering ClearType non e' piu' emessa. Senza di lei "
+            "DirectWrite legge le impostazioni della MACCHINA, che e' esattamente "
+            "la dipendenza dall'host che questa dichiarazione chiude")
+        modi.add(prefs[MODE_PREF])
+    assert modi == {0}, (
+        f"la modalita' di rendering ClearType emessa e' {sorted(modi)}, non 0. "
+        f"0 e' DWRITE_RENDERING_MODE_DEFAULT, l'unico valore che lascia a "
+        f"DirectWrite la scelta per CORPO del testo, che e' cio' che produce la "
+        f"variazione 9-17 di un Firefox vero. Un valore fisso la sopprime: la 5 "
+        f"misurava 0 coincidenze su 10 contro il retail. Se il cambio e' voluto, "
+        f"rimisura contro un retail della major che dichiariamo e riscrivi questo "
+        f"test con i numeri nuovi.")
+
+
+def test_the_coverage_ladder_is_still_declared_and_has_its_endpoints():
+    """La scala resta, e il 2026-08-17 ha misurato PERCHE' non va toccata.
+
+    Spegnerla migliorava il conteggio dei livelli - 9 coincidenze su 10 contro le
+    6 - e rovinava i valori: 17 grigi su 20 che un Firefox vero non produce mai,
+    contro 2. Ottimizzare il conteggio avrebbe distrutto la cosa che il conteggio
+    misura, ed e' la ragione per cui questo test esiste accanto a quello sopra.
+
+    Gli estremi non si toccano: 0 e 255 sono trasparente pieno e opaco pieno, e
+    spostarli sposterebbe il fondo e l'inchiostro invece dei bordi.
+    """
+    for seme in (0xB005, 0xC0FFEE, 42):
+        prefs = translate_profile_to_prefs(generate_profile(seme))
+        scala = prefs.get("zoom.stealth.text.coverage_ladder")
+        assert scala, (
+            "la scala di copertura non e' piu' dichiarata. Su Linux FreeType "
+            "produce 193-256 livelli dove DirectWrite ne fa 9-19: senza la scala "
+            "il conteggio dei livelli diventa un tell cross-OS che si legge "
+            "contando, senza bisogno di nessun hash")
+        v = [int(x) for x in scala.split(",")]
+        assert v[0] == 0 and v[-1] == 255, (
+            f"gli estremi della scala sono {v[0]} e {v[-1]}, non 0 e 255. "
+            f"Spostarli sposta il fondo e l'inchiostro, non i bordi")
+        assert v == sorted(v), f"la scala non e' monotona: {v}"
+        assert len(set(v)) == len(v), f"la scala ha pioli ripetuti: {v}"

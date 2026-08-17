@@ -411,7 +411,27 @@ FONT_CLEARTYPE_GAMMA = 2200
 FONT_CLEARTYPE_CONTRAST = 100
 FONT_CLEARTYPE_LEVEL = 100
 FONT_CLEARTYPE_PIXEL_STRUCTURE = 1
-FONT_CLEARTYPE_RENDERING_MODE = 5
+#: ⛔ 0 = DWRITE_RENDERING_MODE_DEFAULT, e non e' "lasciar decidere alla
+#: macchina": DEFAULT dice a DirectWrite di scegliere la modalita' dal CORPO del
+#: testo e dalla tabella `gasp` del font. Il corpo lo decide la pagina, il font e'
+#: il NOSTRO, quindi la scelta e' calcolata da cose che dichiariamo noi e nessun
+#: valore entra dall'host. Le altre cinque modalita' sono costanti che sopprimono
+#: quella scelta.
+#:
+#: Fino al 2026-08-17 qui c'era 5 (NATURAL_SYMMETRIC), che non aggancia alla
+#: griglia dei pixel a nessun corpo. Misurato contro un retail 151.0 firmato su
+#: dieci disegni, con lo screenshot privilegiato e non da canvas - i livelli di
+#: grigio distinti per disegno:
+#:
+#:   retail            varia 9-17 col CORPO (9-12 sotto i 24px, 17 sopra)
+#:   modalita' 5       16-19 a qualunque corpo, 0 coincidenze su 10
+#:   modalita' 0       6 coincidenze su 10, e AZZECCA tutti i corpi piccoli
+#:
+#: E sull'insieme dei valori, che conta piu' del conteggio: il retail usa 20
+#: grigi distinti, la modalita' 0 ne condivide 17 con soli 2 estranei, la
+#: modalita' 5 ne condivide 16 con 6 estranei. Lo sweep completo delle sei
+#: modalita' e' in `70-known-bugs.md` [B152]: la 5 e' la PEGGIORE delle sei.
+FONT_CLEARTYPE_RENDERING_MODE = 0
 FONT_FREETYPE_GAMMA = 220
 FONT_FREETYPE_CONTRAST = 100
 
