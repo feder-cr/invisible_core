@@ -424,14 +424,39 @@ def test_no_core_requirement_at_all_is_reported_as_such(tmp_path, monkeypatch):
 
 
 def test_two_disagreeing_pins_are_ambiguous_not_a_pass(tmp_path, monkeypatch):
+    """Both requirements apply, so picking one silently would be a guess.
+
+    No markers here on purpose. This used to be written with `sys_platform`
+    markers, which made it assert the OPPOSITE of what it meant: two pins under
+    mutually exclusive markers are not a disagreement at all, they are a
+    per-platform declaration pip resolves to exactly one requirement. That case
+    is the test below.
+    """
     d = declared(
         tmp_path, monkeypatch,
-        'invisible-core==18.0.0; sys_platform == "win32"',
-        'invisible-core==19.0.0; sys_platform == "linux"',
+        "invisible-core==18.0.0",
+        "invisible-core==19.0.0",
     )
     assert d.status == "ambiguous", d
     assert d.version is None
     assert "18.0.0" in (d.detail or "") and "19.0.0" in (d.detail or ""), d
+
+
+def test_per_platform_pins_resolve_to_the_one_this_host_installed(
+        tmp_path, monkeypatch):
+    """Exactly one of the two applies here, and it is the one pip resolved.
+
+    Written with `os_name`, which is decided by the interpreter rather than by
+    the runner's OS, so the assertion is the same on Windows and on Linux.
+    """
+    mio, altro = ("nt", "posix") if os.name == "nt" else ("posix", "nt")
+    d = declared(
+        tmp_path, monkeypatch,
+        f'invisible-core==18.0.0; os_name == "{mio}"',
+        f'invisible-core==19.0.0; os_name == "{altro}"',
+    )
+    assert d.status == "pinned", d
+    assert d.version == "18.0.0", d
 
 
 def test_a_source_checkout_with_no_install_record_declares_nothing():
@@ -1186,3 +1211,58 @@ def test_the_stub_carries_every_module_pin_imports(tmp_path):
         f"pin.py imports {missing} and make_core does not copy them, so those "
         f"imports raise in every synthetic site and the code under test silently "
         f"takes its fallback branch")
+
+
+def test_a_marker_false_on_this_host_is_not_a_violated_pin():
+    """The known-bad input: a pin pip never resolved must not read as violated.
+
+    `pip check` calls such an environment healthy - correctly, the requirement
+    does not apply - while this parser used to keep the requirement and report
+    `violated`. Because the guard runs at import time, that false RED makes the
+    package refuse to load on exactly the platform the marker excluded.
+
+    The markers here are chosen to be platform-independent, so the test asserts
+    the same thing on every runner: `python_version < "3.0"` is false everywhere
+    under `requires-python >=3.11`, and `>= "3.11"` is true everywhere.
+    """
+    falso = _pin.pin_from_requirements(
+        ['invisible-core==99.0.0; python_version < "3.0"'], dist_name="w")
+    assert falso.status == "no_pin", falso
+    assert falso.version is None, falso
+    assert "false on this host" in (falso.detail or ""), falso
+
+
+def test_a_marker_true_on_this_host_still_pins():
+    """The case that must NOT fire: a gate refusing everything is not a gate.
+
+    A marker is allowed on the pin line and sync_core_pin.py preserves it on
+    purpose, so a TRUE marker has to keep behaving exactly as a bare pin does.
+    """
+    vero = _pin.pin_from_requirements(
+        ['invisible-core==1.2.3; python_version >= "3.11"'], dist_name="w")
+    assert vero.status == "pinned", vero
+    assert vero.version == "1.2.3", vero
+
+
+def test_an_unevaluatable_marker_is_not_checkable_rather_than_violated():
+    """packaging is not a runtime dependency, so "cannot tell" must not be RED.
+
+    Simulated by making the import fail, which is the only way this branch is
+    reachable on a machine that has packaging installed.
+    """
+    import builtins
+    vero_import = builtins.__import__
+
+    def rifiuta(name, *a, **k):
+        if name.startswith("packaging"):
+            raise ImportError("simulated: no packaging in this environment")
+        return vero_import(name, *a, **k)
+
+    builtins.__import__ = rifiuta
+    try:
+        d = _pin.pin_from_requirements(
+            ['invisible-core==99.0.0; python_version < "3.0"'], dist_name="w")
+    finally:
+        builtins.__import__ = vero_import
+    assert d.status == "no_pin", d
+    assert "cannot evaluate" in (d.detail or ""), d
