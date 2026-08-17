@@ -512,8 +512,43 @@ _BASELINE: Dict[str, Any] = {
     #: permissions by default, so the call is refused exactly as it is for a
     #: user who dismisses the prompt.
     "geo.provider.network.url":                           "",
-    "browser.region.network.url":                         "",
-    "browser.region.update.enabled":                      False,
+    #: ⛔ `browser.region.network.url` e `browser.region.update.enabled` NON
+    #: si emettono piu' - decisione del proprietario, 2026-08-17. Non e' una
+    #: dimenticanza: e' il caso in cui sopprimere ALLONTANA dal retail.
+    #:
+    #: Sono il servizio di REGIONE di Firefox, che non c'entra con la
+    #: geolocalizzazione di una pagina - quella la ferma la riga qui sopra,
+    #: che resta ed e' portante. Un Firefox standard chiede la regione UNA
+    #: volta per sessione, e noi lo facevamo comunque: misurato il
+    #: 2026-08-17, il prodotto manda quella richiesta anche con la pref vuota
+    #: emessa, mentre un lancio nudo con la stessa pref la azzera. Spedivamo
+    #: quindi una dichiarazione che prometteva cio' che non faceva.
+    #:
+    #: E c'e' una ragione di realness oltre alla somiglianza: la regione
+    #: derivata dall'uscita CONCORDA con il fuso e la lingua che dichiariamo
+    #: dalla stessa uscita, mentre una regione congelata al default puo'
+    #: contraddirli.
+    #: ⛔ QUESTA RIGA NON FA NIENTE SULLA NOSTRA BUILD, e resta qui annotata
+    #: invece che cancellata perche' la conoscenza costa piu' della riga.
+    #:
+    #: `services/settings/Utils.sys.mjs` rifiuta l'override del server quando
+    #: `AppConstants.RELEASE_OR_BETA` e' vero, salvo test in corso,
+    #: `MOZ_REMOTE_SETTINGS_DEVTOOLS=1` nell'ambiente, o un URL gia' nella lista
+    #: ammessa. La nostra build impacchettata dichiara `RELEASE_OR_BETA: true` -
+    #: viene da `--enable-release` nel mozconfig - e la stringa vuota non e' fra
+    #: gli URL ammessi. Quindi `Utils.SERVER_URL` ricade sul ramo `else` e
+    #: restituisce il server VERO di Mozilla, e Gecko logga "Ignoring preference
+    #: override of remote settings server".
+    #:
+    #: Conseguenza misurabile: ogni sessione interroga Remote Settings e scarica
+    #: gli attachment attraverso il proxy. Vedi `70-known-bugs.md` [B156].
+    #:
+    #: NON si spegne il poll in blocco: `webcompat-interventions` deve
+    #: continuare ad aggiornarsi ed e' FEDELTA'. E non si spegne la revoca dei
+    #: certificati per guadagnare memoria - deciso il 2026-08-16: e' un
+    #: declassamento di sicurezza su un browser che guidano utenti veri, e non e'
+    #: nemmeno invisibile, perche' un rilevatore puo' servire da un host con
+    #: certificato revocato e guardare se carichiamo.
     "services.settings.server":                           "",
     "browser.search.geoSpecificDefaults":                 False,
     "browser.contentblocking.report.lockwise.enabled":    False,
@@ -598,6 +633,59 @@ _BASELINE: Dict[str, Any] = {
     # comma list above) regardless of the host OS.
     "media.webspeech.synth.enabled":                      True,
     # zoom.stealth.voices.list -> HardwareProfile.voices
+
+    # The language `getTranslatedShaderSource` answers the page in.
+    #
+    # We declare Windows on every host, and a Windows Firefox reaches ANGLE,
+    # which presents itself as GLES, so its translator emits ESSL. On a host
+    # whose GL context is NOT GLES - Linux through GLX - the same translator
+    # emits desktop GLSL, and the page reads `#version 450` from a browser whose
+    # RENDERER says ANGLE. ANGLE never emits desktop GLSL, so the contradiction
+    # is INTERNAL to one page: it does not need to know which OS we run on.
+    #
+    # What is declared is the LANGUAGE, never the string. The string's domain is
+    # infinite (the shader is arbitrary) so a table is forbidden; the language's
+    # domain has one element. The engine keeps translating, with the same
+    # declared resources, which is why the answer matches a Windows build by
+    # construction instead of by measured coincidence.
+    #
+    # A Windows build reads this pref, finds the language it already uses, and
+    # does nothing - the second translation is paid only where the defect is.
+    "zoom.stealth.webgl.shader_output_language":          "essl",
+
+    # ⛔ `zoom.stealth.text.*` e non `zoom.stealth.font.*`, e la distinzione
+    # non e' estetica: `test_fonts_are_not_configured_via_prefs` nel wrapper
+    # pretende che NESSUNA pref `zoom.stealth.font.` sia emessa, perche' il
+    # binario e' autosufficiente per i font e la loro configurazione vive
+    # nel manifest. Questi due non configurano un font: dicono come si
+    # RASTERIZZA, e quello spazio esiste gia' - `zoom.stealth.text.
+    # coverage_ladder` sta li'. Il test lo ha trovato lo stesso giorno in
+    # cui erano stati messi nello spazio sbagliato, prima che spedissero.
+    # How FreeType loads a glyph: the hinting style, and whether antialiasing
+    # is on. DECLARED, never asked of the host.
+    #
+    # On Linux the engine built an FcPattern and read these back from it, and
+    # that pattern has had "user and system fontconfig configurations" applied
+    # to it - upstream's own words, in the comment right above the code that
+    # read them. So `/etc/fonts` decided how OUR bundled faces were
+    # rasterised. Measured 2026-08-16 THROUGH THE PRODUCT, same binary and
+    # same page: the pixel hash was 3842037683 with this machine's fontconfig,
+    # 1512591551 with an empty one, 2489286717 with `hintnone`. A page reads
+    # those bytes with getImageData on a canvas with text.
+    #
+    # Of the six parameters that function took from the pattern these are the
+    # only two that move a pixel: rgba, lcdfilter and embeddedbitmap measured
+    # identical in every configuration tried, so they stay where they are -
+    # declaring them would be code that moves no measurement.
+    #
+    # 1 = FC_HINT_SLIGHT, the fontconfig constant rather than a numbering of
+    # our own, so nothing translates in between. It is what DirectWrite's
+    # CLEARTYPE_NATURAL_SYMMETRIC - the rendering mode declared for Windows a
+    # few lines above - does on the other side: little grid fitting, the
+    # outline kept. Windows never reads these two: the declaration is ONE, and
+    # each engine reads the half that concerns it.
+    "zoom.stealth.text.freetype_hintstyle":               1,
+    "zoom.stealth.text.freetype_antialias":               1,
 
     # WebGL extensions whitelist - non-empty pre-empts native enumeration.
     "zoom.stealth.webgl.extensions":                      _WEBGL1_EXTENSIONS,
@@ -1486,6 +1574,37 @@ def compose_session_prefs(
         virtual_display=virtual_display,
     )
     playwright_proxy = configure_proxy(proxy, prefs) if proxy else None
+
+    # ⛔ UNCONDITIONAL, and the reason is REALNESS - not the launch bug it also
+    # happens to fix. Windows' occlusion tracker can decide our chrome window is
+    # occluded, and from that verdict the browser is treated as BACKGROUNDED. What
+    # a page then reads, with no stealth override anywhere:
+    #
+    #   * `document.visibilityState === "hidden"` and `document.hidden === true`,
+    #     plus a real `visibilitychange` event (`Document::ComputeVisibilityState`)
+    #   * `requestAnimationFrame` throttled to 1 Hz (`layout.throttled_frame_rate`)
+    #   * `setTimeout`/`setInterval` clamped to 1000 ms
+    #     (`dom.min_background_timeout_value`)
+    #   * `navigator.mediaDevices.enumerateDevices()` that NEVER RESOLVES
+    #     (`MediaDevices.cpp` returns early when the BrowsingContext is inactive)
+    #   * video suspended: `totalVideoFrames` frozen while `currentTime` advances
+    #
+    # Every one of those is a SUPPRESSED signal on a surface a detector reads, and
+    # rule 12 says a suppressed signal is a FAIL, not a pass. An automated browser
+    # must never be treated as backgrounded: nobody is looking at it, but the page
+    # is.
+    #
+    # This lived in `CLOAK_PREFS` until 2026-08-14, i.e. applied only when
+    # `cloak=True`, which requires `headless=True` - so the DEFAULT headful path
+    # ran with the tracker on. Measured that day on the persistent-relaunch path:
+    # 14 relaunches out of 14 with this pref against 6 hangs out of 9 without.
+    # The hang's own mechanism is NOT established (`70-known-bugs.md` [B150]);
+    # this pref is justified by the observable list above, which does not depend
+    # on it.
+    #
+    # setdefault, so an explicit caller override still wins.
+    prefs.setdefault("widget.windows.window_occlusion_tracking.enabled", False)
+
     if cloak:
         # setdefault: an explicit caller override wins over the cloak.
         for key, value in cloak_prefs().items():

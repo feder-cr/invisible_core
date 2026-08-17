@@ -139,10 +139,18 @@ class _LinuxVirtualDisplay:
 # Windows & macOS: the patched Firefox cloaks its own chrome windows when this
 # pref is set (DWMWA_CLOAK / NSWindow alpha-0 + pinned occlusion-ignore), so the
 # window renders on the real GPU but never shows on screen / in the taskbar or
-# Dock. window_occlusion_tracking is disabled so a hidden window keeps painting.
+# Dock.
+#
+# ⛔ `widget.windows.window_occlusion_tracking.enabled` USED TO BE HERE, and that
+# was the defect: this dict is merged only when `cloak=True`, and `cloak` requires
+# `headless=True` (`_session.py`), so the DEFAULT headful path ran with occlusion
+# tracking ON. The knowledge was already in this comment - "so a hidden window
+# keeps painting" - attached to the wrong condition. It is now applied
+# unconditionally in `prefs.compose_session_prefs`, which is the one place every session
+# passes through. Moved 2026-08-14; see the reason there and `70-known-bugs.md`
+# [B150].
 CLOAK_PREFS = {
     "zoom.stealth.cloak_windows": True,
-    "widget.windows.window_occlusion_tracking.enabled": False,
 }
 
 

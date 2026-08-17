@@ -447,11 +447,30 @@ def test_the_font_surface_does_not_vary_with_the_seed():
     Windows machine answers Segoe UI at 12px. A fleet whose system font varied
     per identity would be the signal, not the camouflage. The gpu assertion is
     here so the test cannot pass by the profile being constant overall.
+
+    ⛔ The control used to be `generate_profile(1).gpu != generate_profile(999_999).gpu`,
+    and it went red on 2026-08-16 without the font surface having moved. The
+    reported GPU name became the PERSONA's - the value the browser actually
+    presents, drawn from ~17 real Windows GPUs by prevalence - instead of a draw
+    from a 444-name pool nothing ever sent to a page ([B96] in
+    `71-bug-archive.md`). Two seeds landing on the same persona is now ordinary,
+    so a two-sample control was asking a question the declared value can answer
+    "equal" to by design. It is the same shape as the font gate that started
+    calling three loaded faces unloaded: a discriminant borrowed from a value we
+    now declare stops discriminating, silently and without being wrong.
+
+    The question is reformulated over a SET, which the persona pool cannot make
+    uniform: across 24 seeds the font surface must be one value and the GPU must
+    take more than one. That is strictly stronger than the two-sample form.
     """
     from invisible_core._fpforge import generate_profile
-    a, b = generate_profile(1), generate_profile(999_999)
-    assert a.font == b.font, f"font surface varied: {a.font} vs {b.font}"
-    assert a.gpu != b.gpu, "two seeds produced the same GPU - test is not probing"
+    profili = [generate_profile(s) for s in range(1, 25)]
+    font = {p.font for p in profili}
+    assert len(font) == 1, "font surface varied across seeds: %r" % (font,)
+    gpu = {p.gpu for p in profili}
+    assert len(gpu) > 1, (
+        "24 seeds produced ONE GPU - the test is not probing, or the persona "
+        "pool has collapsed to a single entry")
 
 
 def test_the_font_surface_is_pinnable_like_every_other_group():
@@ -480,7 +499,14 @@ def test_the_font_manifest_travels_with_the_profile():
     assert manifest.count("\nF|") >= 60, "famiglie assenti dal manifest"
     assert manifest.count("\nA|") >= 40, "tabella alias assente"
     assert manifest.count("\nS|") >= 100, "tabella fallback per script assente"
-    assert "\nL|" in manifest, "scala di copertura assente"
+    #: ⛔ La riga `L|` NON si asserisce piu', ed e' stata tolta dal
+    #: manifest il 2026-08-17. Era dati morti protetti da un test: il
+    #: parser del motore ha rimosso quel ramo quando la scala di copertura
+    #: e' passata a `zoom.stealth.canvas.alpha_ladder`, e il manifest
+    #: IMPACCHETTATO non la conteneva gia' - quindi ogni lancio nudo girava
+    #: gia' senza. Tenerla qui rendeva le due copie diverse per una riga
+    #: sola, cioe' impediva il confronto secco che ora le sorveglia
+    #: (`test_the_two_manifest_copies_are_byte_identical`).
     prefs = _prefs()
     assert prefs["zoom.stealth.fonts.manifest"] == manifest
 
@@ -547,3 +573,122 @@ def replace_screen_depth(profile, depth):
 
     screen = dataclasses.replace(profile.screen, color_depth=depth)
     return dataclasses.replace(profile, screen=screen)
+
+
+# ── il manifest esiste in DUE copie, e devono essere la stessa ──────────────
+
+def test_the_two_manifest_copies_are_byte_identical():
+    """`FONT_MANIFEST` qui e `browser/fonts/bundle-fonts.list` nell'albero
+    Firefox sono lo stesso documento in due repository, e nessuno li confrontava.
+
+    Perche' due copie esistono: il motore legge il file IMPACCHETTATO quando e'
+    lanciato senza invisible_core (il pavimento deliberato), e legge questa
+    costante attraverso `zoom.stealth.fonts.manifest` quando il core lo lancia.
+    Due lettori, due file, e fino al 2026-08-17 nessun controllo.
+
+    Quanto vicino sia andata: lo stesso giorno le due copie sono state diverse
+    tre volte in poche ore - una volta per l'ORDINE delle famiglie, perche'
+    l'inserimento era stato fatto a mano invece che rigenerando, e due volte
+    perche' una modifica al generatore era arrivata a una sola delle due. Nessuna
+    di quelle tre e' stata trovata da un test: le ho viste confrontando a mano.
+
+    SALTA quando l'albero Firefox non c'e', perche' questo pacchetto si installa
+    anche da solo. Un salto dichiarato non e' un verde.
+    """
+    import os
+    import pathlib
+    from invisible_core._fpforge.profile import FONT_MANIFEST
+
+    src = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", "C:/ff/source"))
+    lista = src / "browser" / "fonts" / "bundle-fonts.list"
+    if not lista.is_file():
+        pytest.skip(f"nessun albero Firefox in {src}: la seconda copia non c'e'")
+
+    altra = lista.read_text(encoding="utf-8")
+    if FONT_MANIFEST == altra:
+        return
+
+    a = FONT_MANIFEST.splitlines()
+    b = altra.splitlines()
+    solo_qui = [r for r in a if r not in b][:5]
+    solo_la = [r for r in b if r not in a][:5]
+    ordine = (sorted(a) == sorted(b))
+    raise AssertionError(
+        "le due copie del manifest non coincidono.\n"
+        f"  righe qui: {len(a)}, nell'albero: {len(b)}\n"
+        f"  stesso INSIEME di righe ma ordine diverso: {ordine}\n"
+        f"  solo nella costante: {solo_qui}\n"
+        f"  solo nel file: {solo_la}\n"
+        "Rigenera con scripts/gen_bundle_font_manifest.py e ricostruisci la "
+        "costante DAL FILE, invece di modificarla a mano: l'ordine e' cio' che "
+        "si rompe per primo.")
+MODE_PREF = "gfx.font_rendering.cleartype_params.rendering_mode"
+
+
+def test_the_cleartype_rendering_mode_stays_DEFAULT():
+    """0 = DWRITE_RENDERING_MODE_DEFAULT, pinnata perche' un cambio sia una scelta.
+
+    ⛔ Questo valore e' stato 5 (NATURAL_SYMMETRIC) fino al 2026-08-17, e nessun
+    test lo fissava: la correzione ha cambiato la rasterizzazione del testo di
+    OGNI profilo e la suite intera e' passata in silenzio, 906 verdi. Un valore
+    che sposta il fingerprint di tutti e che nessuno asserisce e' un valore che
+    qualcuno rimettera' a posto "per pulizia".
+
+    **Perche' 0 e non un altro dei sei.** Misurato contro un retail 151.0 firmato
+    su dieci disegni con lo screenshot privilegiato: il retail varia 9-17 livelli
+    di grigio col CORPO del testo, la modalita' 5 dava 16-19 a qualunque corpo e
+    ZERO coincidenze su dieci, la 0 ne da' sei e azzecca tutti i corpi piccoli.
+    Sull'insieme dei grigi, che conta piu' del conteggio: il retail ne usa 20, con
+    la 0 ne condividiamo 17 con soli 2 estranei, con la 5 ne condividevamo 16 con
+    6 estranei.
+
+    **E 0 non e' "chiedere alla macchina".** DEFAULT dice a DirectWrite di
+    scegliere dal corpo e dalla tabella `gasp` del font: il corpo lo decide la
+    pagina, il font e' il nostro. Nessun valore entra dall'host, quindi la regola
+    7-quater regge. Le altre cinque sono costanti che sopprimono quella scelta.
+
+    Il tavolo completo dello sweep sta in `70-known-bugs.md` [B152].
+    """
+    modi = set()
+    for seme in (0xB005, 0xC0FFEE, 42, 970411, 1, 0xFFFF):
+        prefs = translate_profile_to_prefs(generate_profile(seme))
+        assert MODE_PREF in prefs, (
+            "la modalita' di rendering ClearType non e' piu' emessa. Senza di lei "
+            "DirectWrite legge le impostazioni della MACCHINA, che e' esattamente "
+            "la dipendenza dall'host che questa dichiarazione chiude")
+        modi.add(prefs[MODE_PREF])
+    assert modi == {0}, (
+        f"la modalita' di rendering ClearType emessa e' {sorted(modi)}, non 0. "
+        f"0 e' DWRITE_RENDERING_MODE_DEFAULT, l'unico valore che lascia a "
+        f"DirectWrite la scelta per CORPO del testo, che e' cio' che produce la "
+        f"variazione 9-17 di un Firefox vero. Un valore fisso la sopprime: la 5 "
+        f"misurava 0 coincidenze su 10 contro il retail. Se il cambio e' voluto, "
+        f"rimisura contro un retail della major che dichiariamo e riscrivi questo "
+        f"test con i numeri nuovi.")
+
+
+def test_the_coverage_ladder_is_still_declared_and_has_its_endpoints():
+    """La scala resta, e il 2026-08-17 ha misurato PERCHE' non va toccata.
+
+    Spegnerla migliorava il conteggio dei livelli - 9 coincidenze su 10 contro le
+    6 - e rovinava i valori: 17 grigi su 20 che un Firefox vero non produce mai,
+    contro 2. Ottimizzare il conteggio avrebbe distrutto la cosa che il conteggio
+    misura, ed e' la ragione per cui questo test esiste accanto a quello sopra.
+
+    Gli estremi non si toccano: 0 e 255 sono trasparente pieno e opaco pieno, e
+    spostarli sposterebbe il fondo e l'inchiostro invece dei bordi.
+    """
+    for seme in (0xB005, 0xC0FFEE, 42):
+        prefs = translate_profile_to_prefs(generate_profile(seme))
+        scala = prefs.get("zoom.stealth.text.coverage_ladder")
+        assert scala, (
+            "la scala di copertura non e' piu' dichiarata. Su Linux FreeType "
+            "produce 193-256 livelli dove DirectWrite ne fa 9-19: senza la scala "
+            "il conteggio dei livelli diventa un tell cross-OS che si legge "
+            "contando, senza bisogno di nessun hash")
+        v = [int(x) for x in scala.split(",")]
+        assert v[0] == 0 and v[-1] == 255, (
+            f"gli estremi della scala sono {v[0]} e {v[-1]}, non 0 e 255. "
+            f"Spostarli sposta il fondo e l'inchiostro, non i bordi")
+        assert v == sorted(v), f"la scala non e' monotona: {v}"
+        assert len(set(v)) == len(v), f"la scala ha pioli ripetuti: {v}"

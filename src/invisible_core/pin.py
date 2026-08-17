@@ -188,6 +188,33 @@ _PINNED_RE = re.compile(r"^==(?P<version>[^\s,;()\[\]]+)$")
 _EXTRA_MARKER_RE = re.compile(r"\bextra\s*==")
 
 
+def _marker_applies(marker: str) -> Optional[bool]:
+    """True / False when the marker can be evaluated here, None when it cannot.
+
+    A marker that is FALSE on this host means pip never installed that
+    requirement, so there is no pin here to compare. Reading it as an active pin
+    is a false RED on an environment `pip check` calls healthy, and because the
+    guard runs at import time it makes the package refuse to load on exactly the
+    platform the marker was written to exclude.
+
+    The evaluation is `packaging`'s and never a parser of ours: marker syntax is
+    a language, and a second implementation of it is the defect this module
+    already carries a comment about. `packaging` is not one of our runtime
+    dependencies, so when it is absent the honest answer is "cannot tell" - which
+    is reported as nothing-to-compare, never as a violation.
+    """
+    if not marker:
+        return True
+    try:
+        from packaging.markers import Marker
+    except ImportError:
+        return None
+    try:
+        return bool(Marker(marker).evaluate())
+    except Exception:
+        return None
+
+
 class Requirement(NamedTuple):
     """One requirement string, reduced to what it MEANS.
 
@@ -293,12 +320,21 @@ def pin_from_requirements(
     found = []
     saw_core_without_pin = False
     saw_core_under_extra = False
+    saw_core_under_false_marker = False
+    saw_core_under_unreadable_marker = False
     for raw in requires:
         parsed = parse_requirement(raw)
         if parsed is None or parsed.name != CORE_NAME:
             continue
         if _EXTRA_MARKER_RE.search(parsed.marker):
             saw_core_under_extra = True
+            continue
+        applies = _marker_applies(parsed.marker)
+        if applies is not True:
+            if applies is False:
+                saw_core_under_false_marker = True
+            else:
+                saw_core_under_unreadable_marker = True
             continue
         if parsed.pinned is None:
             saw_core_without_pin = True
@@ -312,6 +348,14 @@ def pin_from_requirements(
         elif saw_core_under_extra:
             detail = (f"{dist_name} declares {CORE_NAME} only behind an extra, "
                       f"so a default install resolves nothing to compare")
+        elif saw_core_under_false_marker:
+            detail = (f"{dist_name} declares {CORE_NAME} only under an environment "
+                      f"marker that is false on this host, so this install never "
+                      f"resolved it and there is no pin to compare")
+        elif saw_core_under_unreadable_marker:
+            detail = (f"{dist_name} declares {CORE_NAME} under an environment "
+                      f"marker this environment cannot evaluate (packaging is not "
+                      f"importable), so the pin is not checkable here")
         else:
             detail = f"{dist_name} declares no {CORE_NAME} requirement"
         return PinDeclaration(None, "no_pin", detail)
