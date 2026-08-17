@@ -499,7 +499,14 @@ def test_the_font_manifest_travels_with_the_profile():
     assert manifest.count("\nF|") >= 60, "famiglie assenti dal manifest"
     assert manifest.count("\nA|") >= 40, "tabella alias assente"
     assert manifest.count("\nS|") >= 100, "tabella fallback per script assente"
-    assert "\nL|" in manifest, "scala di copertura assente"
+    #: ⛔ La riga `L|` NON si asserisce piu', ed e' stata tolta dal
+    #: manifest il 2026-08-17. Era dati morti protetti da un test: il
+    #: parser del motore ha rimosso quel ramo quando la scala di copertura
+    #: e' passata a `zoom.stealth.canvas.alpha_ladder`, e il manifest
+    #: IMPACCHETTATO non la conteneva gia' - quindi ogni lancio nudo girava
+    #: gia' senza. Tenerla qui rendeva le due copie diverse per una riga
+    #: sola, cioe' impediva il confronto secco che ora le sorveglia
+    #: (`test_the_two_manifest_copies_are_byte_identical`).
     prefs = _prefs()
     assert prefs["zoom.stealth.fonts.manifest"] == manifest
 
@@ -566,3 +573,52 @@ def replace_screen_depth(profile, depth):
 
     screen = dataclasses.replace(profile.screen, color_depth=depth)
     return dataclasses.replace(profile, screen=screen)
+
+
+# ── il manifest esiste in DUE copie, e devono essere la stessa ──────────────
+
+def test_the_two_manifest_copies_are_byte_identical():
+    """`FONT_MANIFEST` qui e `browser/fonts/bundle-fonts.list` nell'albero
+    Firefox sono lo stesso documento in due repository, e nessuno li confrontava.
+
+    Perche' due copie esistono: il motore legge il file IMPACCHETTATO quando e'
+    lanciato senza invisible_core (il pavimento deliberato), e legge questa
+    costante attraverso `zoom.stealth.fonts.manifest` quando il core lo lancia.
+    Due lettori, due file, e fino al 2026-08-17 nessun controllo.
+
+    Quanto vicino sia andata: lo stesso giorno le due copie sono state diverse
+    tre volte in poche ore - una volta per l'ORDINE delle famiglie, perche'
+    l'inserimento era stato fatto a mano invece che rigenerando, e due volte
+    perche' una modifica al generatore era arrivata a una sola delle due. Nessuna
+    di quelle tre e' stata trovata da un test: le ho viste confrontando a mano.
+
+    SALTA quando l'albero Firefox non c'e', perche' questo pacchetto si installa
+    anche da solo. Un salto dichiarato non e' un verde.
+    """
+    import os
+    import pathlib
+    from invisible_core._fpforge.profile import FONT_MANIFEST
+
+    src = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", "C:/ff/source"))
+    lista = src / "browser" / "fonts" / "bundle-fonts.list"
+    if not lista.is_file():
+        pytest.skip(f"nessun albero Firefox in {src}: la seconda copia non c'e'")
+
+    altra = lista.read_text(encoding="utf-8")
+    if FONT_MANIFEST == altra:
+        return
+
+    a = FONT_MANIFEST.splitlines()
+    b = altra.splitlines()
+    solo_qui = [r for r in a if r not in b][:5]
+    solo_la = [r for r in b if r not in a][:5]
+    ordine = (sorted(a) == sorted(b))
+    raise AssertionError(
+        "le due copie del manifest non coincidono.\n"
+        f"  righe qui: {len(a)}, nell'albero: {len(b)}\n"
+        f"  stesso INSIEME di righe ma ordine diverso: {ordine}\n"
+        f"  solo nella costante: {solo_qui}\n"
+        f"  solo nel file: {solo_la}\n"
+        "Rigenera con scripts/gen_bundle_font_manifest.py e ricostruisci la "
+        "costante DAL FILE, invece di modificarla a mano: l'ordine e' cio' che "
+        "si rompe per primo.")

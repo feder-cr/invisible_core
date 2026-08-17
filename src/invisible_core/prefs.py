@@ -653,6 +653,14 @@ _BASELINE: Dict[str, Any] = {
     # does nothing - the second translation is paid only where the defect is.
     "zoom.stealth.webgl.shader_output_language":          "essl",
 
+    # ⛔ `zoom.stealth.text.*` e non `zoom.stealth.font.*`, e la distinzione
+    # non e' estetica: `test_fonts_are_not_configured_via_prefs` nel wrapper
+    # pretende che NESSUNA pref `zoom.stealth.font.` sia emessa, perche' il
+    # binario e' autosufficiente per i font e la loro configurazione vive
+    # nel manifest. Questi due non configurano un font: dicono come si
+    # RASTERIZZA, e quello spazio esiste gia' - `zoom.stealth.text.
+    # coverage_ladder` sta li'. Il test lo ha trovato lo stesso giorno in
+    # cui erano stati messi nello spazio sbagliato, prima che spedissero.
     # How FreeType loads a glyph: the hinting style, and whether antialiasing
     # is on. DECLARED, never asked of the host.
     #
@@ -676,8 +684,8 @@ _BASELINE: Dict[str, Any] = {
     # few lines above - does on the other side: little grid fitting, the
     # outline kept. Windows never reads these two: the declaration is ONE, and
     # each engine reads the half that concerns it.
-    "zoom.stealth.font.freetype_hintstyle":               1,
-    "zoom.stealth.font.freetype_antialias":               1,
+    "zoom.stealth.text.freetype_hintstyle":               1,
+    "zoom.stealth.text.freetype_antialias":               1,
 
     # WebGL extensions whitelist - non-empty pre-empts native enumeration.
     "zoom.stealth.webgl.extensions":                      _WEBGL1_EXTENSIONS,
