@@ -101,9 +101,14 @@ def test_the_two_thresholds_are_different_on_purpose_and_stay_where_they_are():
     stricter rule there turns a cosmetic upstream change into a launch refusal on
     every machine.
 
-    `make_seal.py` is a third value, 0/4 - it refuses only a completely unmarked
-    build - and that one is documented nowhere but `18-gate-inventory.md` D1. It
-    is not asserted here because it lives in the source repo's own test.
+    `make_seal.py` USED to be a third value, 0/4 - it refused only a completely
+    unmarked build. Raised to the producer's bar on 2026-08-17, so there are two
+    numbers now and not three, and the reason is not tidiness: at 1/4 it minted a
+    seal for a build the runtime (2/4) refuses on every machine, and for the
+    macOS legs no `validate_release.py` path runs at all, so nothing downstream
+    would have caught it. It is still not asserted here - it lives in the source
+    repo's own test, `scripts/test_make_seal.py`, which carries the 1/4 and 3/4
+    refusals and the 4/4 that must NOT fire.
     """
     assert seal.JUGGLER_MIN_MARKED == 2, (
         f"the runtime now needs {seal.JUGGLER_MIN_MARKED} of "
