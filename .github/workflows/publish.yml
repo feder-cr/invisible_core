@@ -107,12 +107,35 @@ jobs:
         # was already on the index and `already-published` short-circuits
         # exactly that case. A workflow that only ever no-ops is green in the
         # same way an unexecuted branch is covered.
-        run: python -m pip install -e . --quiet
+        # `.[dev]` e non `-e .`: da oggi questo job esegue anche la suite (passo
+        # "la suite" qui sotto), e pytest sta nell'extra. Resta un extra di
+        # SVILUPPO in un job che NON ha credenziali: quelle vivono in `upload`,
+        # che continua a installare il minimo indispensabile.
+        run: python -m pip install -e ".[dev]" --quiet
       - name: the hooks are installed for anyone who clones this
         # The local pre-push layer is only real if .githooks is wired up. CI
         # cannot check somebody else's clone, but it can check that the wiring
         # this repo ships still works, so it cannot rot unnoticed.
         run: python scripts/install_hooks.py --check || python scripts/install_hooks.py
+      - name: la suite
+        # Un push di TAG non innesca il workflow ordinario dei test, che gira su
+        # rami e pull request. Senza questo passo, taggare e' un modo di
+        # pubblicare codice che nessun job ha eseguito.
+        #
+        # Il wrapper questo passo ce l'aveva dal 2026-08-01, con questa stessa
+        # motivazione scritta accanto; il core no, e nessun documento diceva
+        # perche'. Trovato il 2026-08-18 da un audit sui gate: `pytest` non
+        # compariva in tutto questo file.
+        #
+        # ⛔ La mitigazione che esisteva NON basta, ed e' bene sapere quale
+        # era: il hook di pre-push esegue la suite anche quando si spinge un
+        # tag - misurato, il push di v20.15.0 ha impiegato quattro minuti
+        # proprio per questo. Ma i hook sono locali. Un tag creato
+        # dall'interfaccia web, dall'API, o da un clone senza `core.hooksPath`
+        # non ne incontra nessuno, e i tag non sono coperti dalla protezione
+        # del ramo. Questo passo e' l'unico che sta dalla parte del server.
+        run: python -m pytest -q
+
       - name: version gate
         # Exit codes: 0 pass, 1 refused, 2 gate broken, 4 no usable ledger.
         # Only 0 continues, and --verify-index makes the ledger's claim get
