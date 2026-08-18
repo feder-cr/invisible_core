@@ -1,10 +1,11 @@
 """The lifetime guard, and the two things measurement corrected about it.
 
-`invisible_core.process` is shared because both products launch the same
-browser and both had the same problem. The wrapper closed it on 2026-07-26; the
-profile manager had no guard at all, and on 2026-07-27 a killed manager left
-EIGHT firefox processes behind, three runs out of three - 100%, against the
-wrapper's intermittent 50%.
+`invisible_core.process` is shared by every product that launches the same
+browser - two of them when this was written, both with the same problem. The
+wrapper closed it on 2026-07-26; the profile manager had no guard at all, and
+on 2026-07-27 a killed manager left EIGHT firefox processes behind, three runs
+out of three - 100%, against the wrapper's intermittent 50%. The manager was
+deleted 2026-08-18; the wrapper is the surviving consumer.
 
 Two findings came out of measuring rather than reasoning, and both are here:
 

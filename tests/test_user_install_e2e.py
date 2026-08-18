@@ -1,16 +1,19 @@
 """Can somebody install THIS package on its own and have it work?
 
-The two consumers each grew an install test today. This one had none, and it is
-the package both of them pin: `invisible-playwright` and `invisible-firefox`
-declare an exact `invisible-core==X.Y.Z`, so a core that is broken on the index
-breaks both of them at once - and neither consumer's test would say the cause is
-upstream. It would look like two unrelated failures.
+Written when there were two consumers, both growing an install test the same
+day. This one had none, and it is the package both of them pinned:
+`invisible-playwright` and `invisible-firefox` declared an exact
+`invisible-core==X.Y.Z`, so a core that is broken on the index would break both
+of them at once - and neither consumer's test would say the cause is upstream.
+It would look like two unrelated failures. `invisible_firefox` was deleted on
+2026-08-18; `invisible-playwright` still pins this way, and is still the
+consumer whose failure this file exists to distinguish from the core's own.
 
-It is also the only one of the three whose version is DERIVED rather than
-written: `_version.py` computes it from the packaged seal. That makes "what the
-index actually serves" a question worth asking against a real install rather
-than against a checkout, because the derivation runs at build time and a seal
-that did not get packaged produces a version nobody chose.
+It is also the only one of the surviving packages whose version is DERIVED
+rather than written: `_version.py` computes it from the packaged seal. That
+makes "what the index actually serves" a question worth asking against a real
+install rather than against a checkout, because the derivation runs at build
+time and a seal that did not get packaged produces a version nobody chose.
 
 Marked `e2e`: builds a venv and talks to the index, so it is excluded from the
 default suite and runs in .github/workflows/user-install.yml and before a

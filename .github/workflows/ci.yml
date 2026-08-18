@@ -60,9 +60,11 @@ jobs:
 
       # A suite that deselected itself into a green tick is what this step
       # exists to prevent, and pytest's exit code cannot distinguish it from a
-      # pass. Both consumers have had this guard since 2026-07-25; THIS repo,
-      # the one they both pin, was the only one without it - the same asymmetry
-      # that left it as the only repo whose pre-push hook ran no tests at all.
+      # pass. Every consumer has had this guard since 2026-07-25 (both of them
+      # then - invisible_playwright and invisible_firefox, the latter deleted
+      # 2026-08-18); THIS repo, the one they pin, was the only one without it -
+      # the same asymmetry that left it as the only repo whose pre-push hook
+      # ran no tests at all.
       #
       # A FLOOR, not a target. The suite is ~805 after 322 tests moved in from
       # the wrapper on 2026-07-27; 600 is far enough below to survive a

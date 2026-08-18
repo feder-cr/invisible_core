@@ -148,9 +148,12 @@ def test_availheight_matches_the_taskbar_with_no_pin_at_all():
 def test_the_reported_gpu_name_is_the_one_the_page_receives():
     """La domanda "che GPU ha questo profilo" deve avere UNA risposta.
 
-    Non e' una preferenza di stile: `invisible_firefox/manager/fingerprint.py`
-    mostra `p.gpu.renderer` nella UI, e un utente che legge un nome e ne vede un
-    altro in una pagina di test conclude che il prodotto non funziona.
+    Non e' una preferenza di stile: `p.gpu.renderer` e' il campo che qualunque
+    consumatore mostra a un utente (`invisible_firefox/manager/fingerprint.py`
+    lo faceva nella UI del profile-manager, prima della sua cancellazione del
+    2026-08-18) - e un utente che legge un nome e ne vede un altro in una
+    pagina di test conclude che il prodotto non funziona. La proprieta' resta
+    valida per qualunque futuro consumatore, non solo per quello cancellato.
     """
     from invisible_core.prefs import translate_profile_to_prefs
     disaccordi = []

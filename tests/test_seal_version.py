@@ -264,7 +264,7 @@ def test_a_local_tagged_seal_can_actually_be_imported(tmp_path):
     assert "rv:151.0" in got["ua"], got["ua"]
     # The package version stays a property of the INSTALLED files, not of an
     # env var: a substituted seal must not be able to restate the version pip
-    # and both consumers compare.
+    # and every consumer compares.
     from invisible_core import _version
     assert got["ver"] == _version.__version__, got
 

@@ -1,4 +1,9 @@
-"""The pre-push policy, once, for all three repositories.
+"""The pre-push policy, once, for every repository that pins this package.
+
+Written for three repositories - `invisible_core`, `invisible_playwright` and
+`invisible_firefox`. The last was deleted on 2026-08-18; the design and the
+history below are unchanged by that, because the module was already indifferent
+to how many repositories use it - see WHY HERE below.
 
 WHY. The three `.githooks/pre-push` files were 743 lines of shell between them,
 and 207 of 211 comparable lines were byte-identical between two of them.
@@ -24,8 +29,8 @@ whichever file happened to be open:
 Two differences were real and are preserved as configuration - whether pytest
 runs is NOT one of them, see below - and the rest are now one implementation.
 
-WHY HERE. Same reason `invisible_core.release` lives here: both consumers pin
-this package exactly, so a module in it is reachable from all three, whereas a
+WHY HERE. Same reason `invisible_core.release` lives here: every consumer pins
+this package exactly, so a module in it is reachable from all of them, whereas a
 script in one repository is reachable from one. That asymmetry is what left the
 consumers with no publish gate when 0.4.4 went out built from the wrong tree.
 
@@ -110,7 +115,7 @@ def hook_config(root: Path) -> Dict[str, object]:
 
     Raises rather than defaulting when the block is missing: see the module
     docstring. Individual keys DO default, so adding a gate later does not
-    require touching three pyprojects before the first push can happen.
+    require touching every repo's pyproject before the first push can happen.
     """
     pyproject = Path(root) / "pyproject.toml"
     try:
@@ -307,15 +312,17 @@ def main(
     # --- the suite -----------------------------------------------------
     if cfg["pytest"]:
         _say("running the test suite before push...")
-        # The default selection is `not slow and not e2e`, identical in all
-        # three repos since 2026-07-27. `integration` deliberately RUNS: it is
+        # The default selection is `not slow and not e2e`, identical across
+        # every repo since 2026-07-27 (three of them then - invisible_core,
+        # invisible_playwright, invisible_firefox; two since the last was
+        # deleted 2026-08-18). `integration` deliberately RUNS: it is
         # in-process and fast, and it is what covers the release wiring.
         #
         # This comment said the opposite when it was written, hours earlier -
         # copied from the manager's hook, where `integration` meant "launches
         # the real binary" while meaning "no browser" in the other two. Same
         # word, two contracts, and the copy carried the wrong one into a file
-        # that now speaks for all three.
+        # that now speaks for every repo that pins this package.
         if run([py, "-m", "pytest", "-q", "--tb=short"], root):
             _say("", err=True)
             _say("TESTS FAILED - push aborted.", err=True)
@@ -330,9 +337,10 @@ def main(
     # version the core checkout actually builds. The core's version moves on its
     # own when a new engine is rolled in; the pin does not. No test downstream
     # can see a wrong pin: it only shows up at install time, on someone else's
-    # machine. The checker looks at BOTH consumers, so this re-checks the other
-    # one too - deliberate, the two pins must name the same core and the cheap
-    # moment to notice they do not is before either is pushed.
+    # machine. The checker looks at every consumer (`scripts/sync_core_pin.py`'s
+    # own CONSUMERS list), so this re-checks the others too - deliberate: when
+    # there is more than one, every pin must name the same core, and the cheap
+    # moment to notice they do not is before any is pushed.
     if cfg["pin"]:
         setting = env.get("INVISIBLE_PIN_CHECK")
         if setting == "skip":
@@ -505,8 +513,9 @@ def _run_gate_with_its_own_tests(
     period of being exactly that: the name scanner was untested until
     2026-07-27 and was returning a clean verdict over three of the four surfaces
     a public repo publishes - commit messages among them, which is where ten of
-    our own names went out. Nothing else in any of the three repos runs these
-    cases, so without this they are a runbook note wearing a gate's clothes.
+    our own names went out. Nothing else in any repo that pins this package runs
+    these cases, so without this they are a runbook note wearing a gate's
+    clothes.
     """
     own_tests = checker.with_name(f"test_{checker.name}")
     if not own_tests.is_file():

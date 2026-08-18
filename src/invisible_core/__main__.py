@@ -9,10 +9,11 @@ deliberately unequal:
     the sha256, extracts and stamps. None of that is reimplemented here.
   * The Python environment is NOT ours. --fix never installs, upgrades or
     reinstalls a distribution, in-process or out. It prints the literal command
-    and exits non-zero. On this project's own machines all three packages are
-    editable installs pointing at working trees, so a --force-reinstall would
-    replace live source with a copy from the index and destroy uncommitted
-    work. That case is detected by name and refused by name.
+    and exits non-zero. On this project's own machines the packages that still
+    have a checkout here (invisible-core, invisible-playwright) are editable
+    installs pointing at working trees, so a --force-reinstall would replace
+    live source with a copy from the index and destroy uncommitted work. That
+    case is detected by name and refused by name.
 
 Repair runs at most once. If it does not resolve the problem, doctor says so
 and stops: a diagnostic that retries hides the thing it was asked to find.
@@ -99,6 +100,12 @@ from .download import (cache_root, clear_cache, engine_status, ensure_binary,
 from .seal import (JUGGLER_ENTRIES, SUPPORTED_SEAL_SCHEMA, active_seal,
                    engine_problems, read_engine_identity, resource_root)
 
+# `invisible-firefox` stays here after its repository was deleted on
+# 2026-08-18: this list drives an `importlib.metadata` lookup against
+# WHATEVER IS ACTUALLY INSTALLED, not against a checkout, and the package is
+# still on PyPI (13 versions, unyanked). Anyone who installed it before the
+# deletion still has an environment `doctor` should be able to diagnose - a
+# pin gone stale does not stop mattering because the source repo is gone.
 CONSUMER_DISTS = ("invisible-playwright", "invisible-firefox")
 
 # doctor: everything verified, nothing to repair.
@@ -128,8 +135,8 @@ def _refuse_to_install(cmd: Sequence[str], *, execute: bool) -> str:
     execute=False means "format this for a human to run", which is the only
     thing doctor ever asks for. execute=True means somebody wired an installer
     into a diagnostic, and it raises rather than running it: on this project's
-    machines all three distributions are editable installs pointing at live
-    working trees, so an install here can destroy uncommitted work.
+    machines the packages with a checkout here are editable installs pointing
+    at live working trees, so an install here can destroy uncommitted work.
 
     The seam is deliberately used for FORMATTING as well as for running. If it
     only fired on execution it would be dead code in normal operation, and dead

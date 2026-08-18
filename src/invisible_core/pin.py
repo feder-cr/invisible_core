@@ -1,12 +1,13 @@
 """The core-pin comparison and the runtime repair, owned by the core and shared
 by every consumer.
 
-WHY IT LIVES HERE. Two distributions consume this package (the Playwright
-wrapper and the profile manager) and both ask the same question: is the
-invisible-core that is about to execute the one my own metadata declares? Two
-copies of that comparison drift, and a diagnosis that differs between the two
-products is worse than no diagnosis at all. One comparison, one message set, one
-requirement parser, parameterised by the asking distribution's name.
+WHY IT LIVES HERE. Every distribution that consumes this package asks the same
+question: is the invisible-core that is about to execute the one my own
+metadata declares? Written when two did - the Playwright wrapper and the
+profile manager, the latter deleted 2026-08-18 - and copies of that comparison
+drift, so a diagnosis that differs between products is worse than no diagnosis
+at all. One comparison, one message set, one requirement parser, parameterised
+by the asking distribution's name.
 
 WHY IT EXISTS AT RUNTIME AT ALL. Once a consumer's [project].dependencies
 carries an exact `invisible-core==N.M.0`, pip refuses the obvious ways to get

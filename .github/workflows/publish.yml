@@ -238,9 +238,10 @@ jobs:
         # `already-published` follows one job up.
         #
         # The body comes from CHANGELOG.md when the repo keeps one (only the
-        # wrapper does) and is generated otherwise. One step, both cases, so the
-        # three repos can carry the same text instead of three variants that
-        # drift.
+        # wrapper does) and is generated otherwise. One step, both cases, so
+        # every repo that pins this package can carry the same text instead of
+        # separate variants that drift (three repos, three variants, when this
+        # was written; two since invisible_firefox was deleted 2026-08-18).
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

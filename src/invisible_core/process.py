@@ -1,11 +1,14 @@
 """Make a browser tree die when the process that launched it does.
 
-SHARED BY BOTH PRODUCTS, which is why it lives here. Each of them launches the
-patched Firefox and each of them had the same problem; the automation wrapper
-solved it in 2026-07-26 and the profile manager did not, so on 2026-07-27 the
-manager still leaked its ENTIRE tree every single time it was killed - measured
-at eight surviving processes, three runs out of three, 100%. Two copies of this
-would have been two chances to fix it once.
+SHARED BY EVERY PRODUCT THAT LAUNCHES A BROWSER, which is why it lives here -
+written when there were two: each of them launched the patched Firefox and
+each of them had the same problem; the automation wrapper solved it in
+2026-07-26 and the profile manager did not, so on 2026-07-27 the manager still
+leaked its ENTIRE tree every single time it was killed - measured at eight
+surviving processes, three runs out of three, 100%. Two copies of this would
+have been two chances to fix it once. The manager was deleted 2026-08-18; the
+module is unchanged by that, because it was never written FOR a fixed count of
+consumers.
 
 THE BUG IT EXISTS FOR
 ---------------------

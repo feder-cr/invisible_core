@@ -105,10 +105,11 @@ def _no_geoip_download(monkeypatch, request):
     binary, or a display", which is this exact case, and it is already excluded
     from the default selection. A new marker was the first idea and it is
     wrong twice over: `--strict-markers` would refuse it until declared, and
-    the marker block is byte-identical across the three repositories with
-    `test_marker_vocabulary.py` failing when they drift - so one convenience
-    here would have to be copied into two other packages that have no use
-    for it.
+    the marker block is byte-identical across every repository that pins this
+    package (three when this was written, two since invisible_firefox was
+    deleted 2026-08-18) with `test_marker_vocabulary.py` failing when they
+    drift - so one convenience here would have to be copied into the other
+    package, which has no use for it.
 
     It STUBS rather than refuses, and that is the second decision. Raising
     makes the defect loud but hands every future test a rule to remember, which

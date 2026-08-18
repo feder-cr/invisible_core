@@ -362,7 +362,8 @@ def test_the_not_adopting_line_names_the_problem(cache, no_network, sealed, caps
 
 
 def test_engine_status_reports_the_problem_not_the_observation(cache, sealed):
-    """The manager renders this string next to a red dot."""
+    """The profile manager used to render this string next to a red dot,
+    until its 2026-08-18 deletion; `doctor` reads it as plain text now."""
     version_dir = cache_dir_for_seal(sealed)
     build_tree(version_dir, version=OLD_VERSION, build_id=OLD_BUILD)
 

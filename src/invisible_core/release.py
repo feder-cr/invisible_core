@@ -1,8 +1,13 @@
-"""The publish gate, for all three packages.
+"""The publish gate, for every package that pins this one.
+
+Written for three packages - invisible_core, invisible_playwright and
+invisible_firefox; the last was deleted on 2026-08-18, and the gate below is
+unchanged by that, because it was never named to a fixed count of consumers -
+see "one gate on purpose" below.
 
 Importable, so `python -m invisible_core.release` works wherever the core is
-installed - which is everywhere, since both consumers pin it exactly. It used to
-be a script in the core's repo, so the consumers had no gate at all: on
+installed - which is everywhere, since every consumer pins it exactly. It used
+to be a script in the core's repo, so the consumers had no gate at all: on
 2026-07-27 invisible-playwright 0.4.4 reached the index built from a tree that
 predated the fix it was supposed to carry, uploaded by a bare `twine upload` of
 whatever happened to be in a directory. A PyPI filename is never re-uploaded, so
@@ -44,7 +49,8 @@ LEDGER_NAME = "PUBLISHED.json"
 LEDGER_SCHEMA = 1
 # The identity of the project being gated. DEFAULTS: `main()` resolves them from
 # the pyproject.toml at --project-root before anything reads them, so one gate
-# serves all three packages.
+# serves every package that runs it - three when this was written, two since
+# invisible_firefox was deleted on 2026-08-18.
 #
 # It is one gate on purpose. On 2026-07-27 invisible-playwright 0.4.4 reached the
 # index built from a tree that predated the fix it was meant to carry, uploaded

@@ -314,3 +314,113 @@ def test_the_two_proxy_parsers_agree_on_what_is_usable():
         proxy = {"server": server}
         configure_proxy(proxy, {})          # must not raise
         assert _geo._proxies_for_requests(proxy)     # must produce a usable URL
+
+
+# ---------------------------------------------------------------------------
+# delegates_auth: il chiamante dichiara se ha un Playwright a cui delegare
+#
+# Il difetto che questi casi difendono e' vissuto sei settimane in 17 versioni
+# pubblicate: `build_launch_plan` chiamava configure_proxy, riceveva indietro il
+# dict di un endpoint HTTP, non aveva dove metterlo e lo scartava. Il browser
+# partiva senza nessuna pref di proxy, mentre `_geo` aveva gia' risolto fuso e
+# lingua ATTRAVERSO quel proxy. Nessuna eccezione, nessun log: la pagina
+# dichiarava un paese e la connessione ne usava un altro.
+
+
+def test_un_http_senza_credenziali_viene_INSTRADATO_dalle_prefs():
+    """Il routing non ha bisogno di Playwright, ed e' misurato sul binario
+    spedito: con network.proxy.type piu' http/http_port/ssl/ssl_port il browser
+    va al proxy e non ripiega su diretto."""
+    prefs = {}
+    resto = configure_proxy({"server": "http://gw.esempio:8080"}, prefs,
+                            delegates_auth=False)
+    assert resto is None
+    assert prefs["network.proxy.type"] == 1
+    assert prefs["network.proxy.http"] == "gw.esempio"
+    assert prefs["network.proxy.http_port"] == 8080
+    assert prefs["network.proxy.ssl"] == "gw.esempio"
+    assert prefs["network.proxy.ssl_port"] == 8080
+
+
+def test_un_http_CON_credenziali_su_un_percorso_senza_playwright_e_rifiutato():
+    """L'autenticazione invece Playwright la vuole: le credenziali che scriviamo
+    per i SOCKS arrivano al nsProxyInfo ma nessuno ne costruisce la
+    Proxy-Authorization, quindi un endpoint autenticato si ferma al 407.
+    Rifiutare e' l'unico esito onesto: l'alternativa e' uscire dall'IP di casa
+    credendo di essere proxati."""
+    for server in ("http://gw.esempio:8080", "https://gw.esempio:8080"):
+        with pytest.raises(ValueError) as e:
+            configure_proxy({"server": server, "username": "u", "password": "p"},
+                            {}, delegates_auth=False)
+        messaggio = str(e.value)
+        assert "credentials" in messaggio
+        assert "invisible_playwright" in messaggio, "il rifiuto deve dire dove funziona"
+
+
+def test_una_password_senza_username_e_comunque_una_credenziale():
+    """Il controllo e' un OR, non un AND: mezzo segreto e' un segreto."""
+    with pytest.raises(ValueError):
+        configure_proxy({"server": "http://gw.esempio:8080", "password": "p"},
+                        {}, delegates_auth=False)
+
+
+def test_il_percorso_che_delega_NON_cambia_comportamento():
+    """Guardia di regressione sul ramo misurato verde: il wrapper passa il dict a
+    Playwright, che instrada e risponde al 407. Se questo caso si muove, si e'
+    rotto l'unico percorso HTTP che funziona per gli utenti."""
+    for creds in ({}, {"username": "u", "password": "p"}):
+        proxy = dict({"server": "http://gw.esempio:8080"}, **creds)
+        prefs = {}
+        assert configure_proxy(proxy, prefs) is proxy
+        assert prefs == {}, "chi delega non deve scrivere prefs di proxy"
+
+
+def test_un_http_senza_porta_e_rifiutato_anche_qui():
+    """Stessa refusal del ramo SOCKS, sull'altro schema: un endpoint senza porta
+    non e' un endpoint."""
+    with pytest.raises(ValueError):
+        configure_proxy({"server": "http://gw.esempio"}, {}, delegates_auth=False)
+
+
+def test_i_socks_non_sono_toccati_da_delegates_auth():
+    """delegates_auth parla solo degli schemi che Playwright deve autenticare.
+    Un SOCKS e' gia' completo nelle prefs, con o senza."""
+    for delega in (True, False):
+        prefs = {}
+        assert configure_proxy({"server": "socks5://gw:1080", "username": "u",
+                                "password": "p"}, prefs, delegates_auth=delega) is None
+        assert prefs["network.proxy.socks_username"] == "u"
+        assert prefs["network.proxy.socks_version"] == 5
+
+
+def test_il_lancio_diretto_dichiara_di_non_poter_delegare():
+    """Il gate vero: non che la funzione sappia rifiutare, ma che il percorso che
+    non ha Playwright glielo DICA. Senza questo, i casi qui sopra passano e il
+    difetto resta esattamente dov'era.
+
+    ⛔ E si legge l'ALBERO SINTATTICO, non il testo del sorgente. La prima
+    stesura faceva `"delegates_auth=False" in inspect.getsource(...)` ed e'
+    sopravvissuta alla propria mutazione: il commento che sta sopra la chiamata
+    contiene quella stessa stringa, quindi il controllo era soddisfatto dal
+    COMMENTO mentre il codice sotto aveva di nuovo il difetto. E' il difetto piu'
+    ripetuto del progetto, colto qui solo perche' la mutazione e' stata eseguita.
+    """
+    import ast
+    import inspect
+    from invisible_core import launch
+
+    albero = ast.parse(inspect.getsource(launch.build_launch_plan).lstrip())
+    chiamate = [n for n in ast.walk(albero)
+                if isinstance(n, ast.Call)
+                and getattr(n.func, "id", getattr(n.func, "attr", None))
+                == "compose_session_prefs"]
+    assert chiamate, "build_launch_plan non compone piu' le prefs: gate da riscrivere"
+    for c in chiamate:
+        kw = {k.arg: k.value for k in c.keywords}
+        assert "delegates_auth" in kw, (
+            "build_launch_plan non dichiara di non poter delegare: un endpoint "
+            "HTTP tornerebbe di nuovo come dict e verrebbe scartato dal .prefs")
+        assert isinstance(kw["delegates_auth"], ast.Constant)
+        assert kw["delegates_auth"].value is False, (
+            "delegates_auth c'e' ma non e' False: questo percorso Playwright non "
+            "ce l'ha")
