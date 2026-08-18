@@ -1,15 +1,20 @@
-"""What the two consumers import from this package, asserted from inside it.
+"""What the consumer imports from this package, asserted from inside it.
 
-WHY. `invisible-playwright` and `invisible-firefox` pin `invisible-core==` to an
-exact version, so a name that disappears here does not fail somebody's build - it
-fails their IMPORT, on the machine of whoever upgrades next, with a traceback
-naming a symbol rather than a version. That already happened: `IANA_TO_POSIX_TZ`
-was taken by a bare module-level import ten minutes after it was written, and a
+WHY. `invisible-playwright` pins `invisible-core==` to an exact version, so a
+name that disappears here does not fail somebody's build - it fails their
+IMPORT, on the machine of whoever upgrades next, with a traceback naming a
+symbol rather than a version. That already happened: `IANA_TO_POSIX_TZ` was
+taken by a bare module-level import ten minutes after it was written, and a
 user hit it on the browser launch path within minutes of the release.
 
-Nothing in this repository knew any of that. The consumers are separate
-repositories on separate release cadences; this suite is what runs before this
+Nothing in this repository knew any of that. The consumer is a separate
+repository on its own release cadence; this suite is what runs before this
 package is pushed, and it had no idea which of its names were load-bearing.
+
+Written when there were two consumers - `invisible-firefox` pinned the same
+way, and everything below dated 2026-07-27 was measured against both. It was
+deleted on 2026-08-18; see `_CONSUMERS` below for what that took out of the
+frozen contract and why.
 
 MEASURED 2026-07-27, by parsing both consumers' sources: 57 names across eight
 modules, and **23 of them came from modules whose leading underscore says
@@ -49,7 +54,21 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _RELEASE = pathlib.Path(__file__).resolve().parents[2]
-_CONSUMERS = ("invisible_playwright", "invisible_firefox")
+
+#: ONE consumer since 2026-08-18. `invisible_firefox` was deleted that day - the
+#: GitHub repository is gone and so is the checkout beside this one.
+#:
+#: The dead name could not stay. The live cross-check below skips as soon as ONE
+#: listed consumer has no `src/`, so leaving it in did not merely narrow that
+#: test, it switched it off: measured on 2026-08-18, the only thing keeping
+#: CONTRACT honest against the surviving wrapper was reporting a skip on the
+#: workbench itself, and the frozen list could then drift with nothing to say so.
+#:
+#: The 13 versions of `invisible-firefox` still on PyPI are not an argument for
+#: keeping it: every one of them pins `invisible-core==` to an exact version, so
+#: they resolve the core they were released against and cannot be broken by a
+#: name leaving this package now.
+_CONSUMERS = ("invisible_playwright",)
 
 #: Frozen 2026-07-27 from the two consumers' sources. Every name here is imported
 #: at least once by shipped consumer code - not by their tests, which may reach
@@ -57,14 +76,32 @@ _CONSUMERS = ("invisible_playwright", "invisible_firefox")
 CONTRACT = {
     "invisible_core": {
         "BINARY_VERSION", "FIREFOX_UPSTREAM_VERSION", "GeoTimezoneError",
-        "IANA_TO_POSIX_TZ", "LaunchPlan", "_geo", "_headless", "_proxy",
-        "_webgl_personas", "build_launch_plan", "config",
+        "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
+        "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
-        "ensure_geoip_mmdb", "forced_gpu_class", "generate_profile",
+        "ensure_geoip_mmdb", "forced_gpu_class",
         "get_default_args", "get_default_stealth_prefs",
         "make_virtual_display", "prefs", "prepare_session_geo",
         "resolve_session_locale", "resolve_session_timezone",
         "tz_env",
+        # `LaunchPlan`, `build_launch_plan` and `generate_profile` left on
+        # 2026-08-18 with the deletion of `invisible_firefox`, which was the only
+        # consumer that imported them: it launched the engine DIRECTLY, so the
+        # launch plan and the profile generator were its entry points, while the
+        # wrapper reaches the same work through Playwright.
+        #
+        # Same rule as every other departure in this file, and it is the rule the
+        # docstring states: a contract that over-claims freezes this package for
+        # nobody. None of the three is deleted from the core, all three are still
+        # exported, and the core's own suite covers `build_launch_plan`
+        # (test_launch.py, test_prefs_composition.py) and `generate_profile`
+        # (eleven files). `LaunchPlan` had no other mention anywhere in this
+        # suite, which is why the public-export check at the bottom of this file
+        # was written in the same commit rather than left as a gap.
+        #
+        # The 13 versions of `invisible-firefox` still on PyPI are not a reason to
+        # keep the rows: each pins `invisible-core==` exactly, so it resolves the
+        # core it was released against and no later change here can reach it.
         # compose_session_prefs joined on 2026-08-01 and took two rows with it.
         # The wrapper's build_prefs was the third place stacking layers on top of
         # translate_profile_to_prefs in its own order; now it asks for the one
@@ -87,7 +124,11 @@ CONTRACT = {
         "Profile", "_network", "_sampler", "generate_profile", "profile",
     },
     "invisible_core.constants": {
-        "BINARY_VERSION",
+        # `BINARY_VERSION` left this MODULE's row on 2026-08-18 with the deletion
+        # of `invisible_firefox`, which was the only consumer reaching for it
+        # here. The name is unchanged and still guarded: the wrapper imports it
+        # from the package, so it is still listed under `invisible_core` above,
+        # and test_constants.py / test_seal_version.py cover the derivation.
         # The Windows taskbar, added 2026-08-09. The wrapper carried its own
         # _TASKBAR_H = 40 while this package declared 48 and the engine's
         # compiled floor was 48, so the default viewport was derived from one
@@ -115,7 +156,11 @@ CONTRACT = {
         "verify_font_manifest",
     },
     "invisible_core.download": {
-        "cache_root", "engine_status", "ensure_binary",
+        "cache_root", "ensure_binary",
+        # `engine_status` left on 2026-08-18 with the deletion of
+        # `invisible_firefox`, which showed the engine's state in its UI. Not
+        # deleted from the core and still covered by test_doctor_fix.py,
+        # test_seal_cache.py and test_seal_engine_guard.py.
         # Two rows left on 2026-08-01 with the CLI reduction that removed the
         # `clear-cache` subcommand: download.clear_cache, and __main__.main with
         # the whole module row. Neither is deleted from the core - the core's own
@@ -173,9 +218,9 @@ def test_every_name_a_consumer_imports_still_exists(module, names):
     missing = sorted(n for n in names if not hasattr(mod, n))
     assert not missing, (
         f"{module} no longer provides {missing}, and shipped code in "
-        f"invisible-playwright / invisible-firefox imports it at module level.\n"
-        f"Those packages pin invisible-core to an exact version, so this is not "
-        f"a build failure for them - it is an ImportError naming a symbol, on "
+        f"invisible-playwright imports it at module level.\n"
+        f"That package pins invisible-core to an exact version, so this is not "
+        f"a build failure for it - it is an ImportError naming a symbol, on "
         f"the machine of whoever upgrades next.\n"
         f"Put it back, or delete its row from CONTRACT in the same commit as the "
         f"consumer change that stops needing it.")
@@ -191,14 +236,14 @@ def test_the_frozen_contract_still_matches_the_consumers():
     for consumer in _CONSUMERS:
         src = _RELEASE / consumer / "src"
         if not src.is_dir():
-            pytest.skip("not the workbench - the consumers are not beside this checkout")
+            pytest.skip("not the workbench - the consumer is not beside this checkout")
         for mod, names in _imports_in(src).items():
             live.setdefault(mod, set()).update(names)
 
     new = {m: sorted(n - CONTRACT.get(m, set())) for m, n in live.items()}
     new = {m: n for m, n in new.items() if n}
     assert not new, (
-        "the consumers import names this contract does not list, so nothing here "
+        "the consumer imports names this contract does not list, so nothing here "
         f"would notice if they were removed:\n  {new}\n"
         "Add them to CONTRACT.")
 
@@ -230,7 +275,49 @@ def test_the_private_modules_in_the_contract_are_named_as_such():
     private = {m: len(n) for m, n in CONTRACT.items()
                if m.split(".")[-1].startswith("_")}
     assert private == {'invisible_core._fpforge': 5}, (
-        f"the set of PRIVATE modules the consumers depend on changed: {private}.\n"
-        "If it grew, a refactor that looks internal now breaks two published "
-        "packages. If it shrank, update this test - that is progress worth "
-        "recording.")
+        f"the set of PRIVATE modules the consumer depends on changed: {private}.\n"
+        "If it grew, a refactor that looks internal now breaks the published "
+        "consumer package. If it shrank, update this test - that is progress "
+        "worth recording.")
+
+
+def test_every_name_the_package_exports_publicly_resolves():
+    """`__all__` is a promise to everyone, not only to the consumers next door.
+
+    WHY IT EXISTS, and why the date matters. Until 2026-08-18 the contract above
+    was doing this job by accident: `invisible_firefox` launched the engine
+    directly, so it imported `LaunchPlan`, `build_launch_plan` and
+    `generate_profile`, and the CONTRACT row was the only thing in this entire
+    suite that named `LaunchPlan` at all. When that repository was deleted the
+    rows had to go - a contract that claims an importer who no longer exists is
+    the drift this file exists to catch - and deleting them would have taken the
+    only guard on a PUBLIC export with them.
+
+    So the property moves to where it always belonged. CONTRACT answers "what do
+    the neighbours import"; this answers "what does the package promise a
+    stranger", which is a question about this package alone and does not change
+    when a consumer comes or goes.
+
+    It is not a formality. `from invisible_core import X` for an X in `__all__`
+    that no longer resolves is an ImportError naming a symbol, on the machine of
+    whoever upgrades next - the same failure mode the module docstring opens
+    with, and the reason `IANA_TO_POSIX_TZ` cost a user a browser launch. A star
+    import raises AttributeError at import time on the first missing name, so a
+    typo in `__all__` breaks the package for everybody who ever wrote one.
+    """
+    import invisible_core
+
+    exported = list(invisible_core.__all__)
+    assert exported, "invisible_core.__all__ is empty, so this test guards nothing"
+
+    duplicates = sorted({n for n in exported if exported.count(n) > 1})
+    assert not duplicates, (
+        f"__all__ lists {duplicates} more than once. Harmless to import and a "
+        f"reliable sign the list is being appended to without being read.")
+
+    missing = sorted(n for n in exported if not hasattr(invisible_core, n))
+    assert not missing, (
+        f"invisible_core.__all__ promises {missing}, which the package does not "
+        f"provide.\nThat is an ImportError for `from invisible_core import "
+        f"<name>` and an AttributeError for anyone who wrote `import *`.\n"
+        f"Either export the name or take it out of __all__.")

@@ -438,8 +438,9 @@ def test_the_refusal_for_that_tree_does_not_contradict_itself(tmp_path, five_leg
 # ------------------------------- the refusal carries its reason as data (D4)
 #
 # Two callers render ONE line out of a refusal: the adoption log line in
-# download.py and engine_status(), which the manager paints next to a red dot.
-# Both did `e.args[0].splitlines()[3].strip()`. Index 3 of the rendered message
+# download.py and engine_status(), which the profile manager used to paint
+# next to a red dot before its 2026-08-18 deletion. Both did
+# `e.args[0].splitlines()[3].strip()`. Index 3 of the rendered message
 # is `engine says: Firefox X build Y` - an observation, not the problem - so
 # every refusal was reported with a line that reads like a success, and any edit
 # to the layout moved which line they showed.
@@ -519,8 +520,8 @@ def test_a_summary_is_always_one_line(tmp_path, sealed):
 def test_no_refusal_tells_a_user_to_install_from_git(tmp_path, sealed):
     """A `pip install git+https://...` installs a PEP 508 direct reference,
     which carries no version specifier: it bypasses the `invisible-core==N.N.N`
-    both consumers declare and leaves `pip check` with nothing to compare. Every
-    remedy this package prints has to be the index form."""
+    every consumer declares and leaves `pip check` with nothing to compare.
+    Every remedy this package prints has to be the index form."""
     import invisible_core.seal as seal_mod
 
     src = Path(seal_mod.__file__).read_text(encoding="utf-8")

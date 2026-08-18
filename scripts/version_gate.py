@@ -3,10 +3,11 @@
 
 Kept because the pre-push hooks, the publish workflow and the docs all name this
 path, and a release-critical entry point is the last thing to break for tidiness.
-It moved into the package so the two CONSUMERS can run the same gate: they pin
-the core exactly, so importing it costs nothing, while a script in this repo was
-reachable only from this repo - which is why they had none when 0.4.4 went out
-wrong.
+It moved into the package so every CONSUMER can run the same gate (two when
+this was written, one since invisible_firefox was deleted 2026-08-18): a
+consumer pins the core exactly, so importing it costs nothing, while a script
+in this repo was reachable only from this repo - which is why they had none
+when 0.4.4 went out wrong.
 """
 import sys
 from pathlib import Path

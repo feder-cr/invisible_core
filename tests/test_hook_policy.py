@@ -33,6 +33,22 @@ _PIN = "sync_core_pin.py"
 _NAME = "check_forbidden_names.py"
 _DISCLOSURE = "check_internal_disclosure.py"
 
+#: The repositories that run this hook. TWO since 2026-08-18, when
+#: `invisible_firefox` was deleted: the GitHub repo is gone and so is the
+#: checkout beside this one. The package is still on PyPI, unyanked, but nothing
+#: here can read a tree that no longer exists.
+#:
+#: Defined UP HERE because the parametrised policy test below is decorated with
+#: it, and a decorator argument is evaluated at import time. It used to sit next
+#: to the stub tests at the bottom with the list spelled out a second time in the
+#: decorator; one list is what stops the two from drifting.
+#:
+#: Dropping the dead name was not cosmetic. `_stub()` and the policy test both
+#: `pytest.skip` as soon as ONE listed repo is missing, so the stale entry did
+#: not shrink these checks, it disabled them: on 2026-08-18 the byte-comparison
+#: of the surviving stubs was skipping on the workbench itself.
+_SIBLINGS = ["invisible_core", "invisible_playwright"]
+
 #: Named rather than inlined because writing them inline needs escapes, and the
 #: first attempt at these three tests went through a shell heredoc where every
 #: backslash-n became a real newline and the module stopped parsing. Constants
@@ -164,8 +180,7 @@ def test_a_bare_string_release_tag_is_accepted_as_one_prefix(tmp_path):
     assert cfg["release_tags"] == ["rel"]
 
 
-@pytest.mark.parametrize("repo", ["invisible_core", "invisible_playwright",
-                                  "invisible_firefox"])
+@pytest.mark.parametrize("repo", _SIBLINGS)
 def test_every_repo_that_uses_this_hook_declares_its_policy(repo):
     """The declaration is the only per-repo part left, so it is the only part
     that can go missing. Read from the workbench when it is there; skipped in an
@@ -234,8 +249,8 @@ def test_a_pin_that_does_not_match_stops_the_push(tmp_path, capsys):
 
 def test_the_pin_gate_runs_its_own_cases_before_its_verdict_is_trusted(tmp_path, capsys):
     """A gate that has only ever printed PASS is not a gate. Its eighteen
-    known-bad cases live next to it and nothing else in any of the three repos
-    runs them, so without this they are a runbook note."""
+    known-bad cases live next to it and nothing else in any repo that pins
+    this package runs them, so without this they are a runbook note."""
     root = make_repo(tmp_path, block="pytest = false\npin = true")
     run = FakeRun({f"test_{_PIN}": 1})
     code, run = run_policy(root, run=run)
@@ -498,8 +513,9 @@ def test_the_summary_lists_exactly_what_ran(tmp_path, capsys):
 
 
 # ------------------------------------------------------------------ the stubs
-
-_SIBLINGS = ["invisible_core", "invisible_playwright", "invisible_firefox"]
+#
+# `_SIBLINGS` is defined at the top of this module: the policy test above is
+# parametrised on it, and a decorator runs at import time.
 
 
 def _stub(repo: str) -> Path:
@@ -509,13 +525,18 @@ def _stub(repo: str) -> Path:
     return p
 
 
-def test_all_three_repos_ship_the_same_stub():
+def test_every_repo_ships_the_same_stub():
     """The property the whole module buys, asserted as bytes.
 
     743 lines of shell across three files, 207 of 211 comparable lines identical
     between two of them, and nine of the eleven differences accidental. They
     diverged because a copy is the kind of thing you fix in whichever file
     happens to be open, and nothing anywhere compared them.
+
+    Those counts are from the measurement that bought this test, when there were
+    three stubs. `invisible_firefox` was deleted on 2026-08-18 and the property
+    is unchanged for the two that remain: two copies of a shell script drift for
+    exactly the same reason three did.
     """
     texts = {r: _stub(r).read_text(encoding="utf-8") for r in _SIBLINGS}
     distinct = set(texts.values())
@@ -554,11 +575,13 @@ def test_the_stub_is_tracked_as_executable(repo):
 
 # ------------------------------------------- the helpers, on known-bad clones
 #
-# Three assertions now run in all three repos through
-# `invisible_core.testing`, which means one silent mistake in any of them
-# disarms three suites at once. A gate that has only ever printed PASS is not a
-# gate, and that goes double for one shared this widely - so each is driven here
-# against a clone deliberately in the state it exists to catch.
+# Three assertions run in every repo that pins this package through
+# `invisible_core.testing` (three repos when this was written, two since
+# invisible_firefox was deleted 2026-08-18), which means one silent mistake in
+# any of them disarms every suite that shares it at once. A gate that has only
+# ever printed PASS is not a gate, and that goes double for one shared this
+# widely - so each is driven here against a clone deliberately in the state it
+# exists to catch.
 
 def _git_repo(tmp_path: Path, hook_text: str = "x\n") -> Path:
     import subprocess

@@ -278,8 +278,9 @@ def build_launch_plan(
     resolved from the proxy egress - a ``pin`` and a ``binary_ver``); it resolves
     geo, generates the fingerprint profile, translates it to prefs, writes
     ``user.js`` into ``profile_dir``, and returns the binary path + argv + env.
-    Both the profile manager and any other direct-launch consumer use this so the
-    session-setup logic lives in one place (mirrors the wrapper's __aenter__).
+    Any direct-launch consumer uses this so the session-setup logic lives in
+    one place (mirrors the wrapper's __aenter__) - the profile manager did,
+    until its 2026-08-18 deletion.
     ``proxy`` must already be a concrete endpoint dict (SOCKS/HTTP), not an intent.
     """
     # Lazy imports keep launch.py free of import-order coupling with the rest of
@@ -300,9 +301,17 @@ def build_launch_plan(
     # One composition for all three entry points (prefs.py). This path takes the
     # proxy layer and the hard-kill layer; it does NOT write the humanize prefs,
     # which is what humanize=None means - see compose_session_prefs.
+    # ⛔ delegates_auth=False, e non e' un dettaglio di stile: questo percorso
+    # lancia il binario con subprocess, quindi non ha nessun Playwright a cui
+    # passare un endpoint HTTP. Finche' non lo diceva, `configure_proxy`
+    # restituiva il dict e la riga qui sotto teneva solo `.prefs` buttandolo via:
+    # il browser partiva SENZA proxy mentre `_geo` aveva gia' risolto fuso e
+    # lingua ATTRAVERSO il proxy, quindi la sessione dichiarava un paese e ne
+    # navigava un altro, in silenzio. Adesso un endpoint HTTP senza credenziali
+    # viene instradato dalle prefs, e uno CON credenziali viene rifiutato.
     prefs = compose_session_prefs(
         fp, locale=loc, timezone=geo.timezone,
-        proxy=proxy, survive_hard_kill=True,
+        proxy=proxy, survive_hard_kill=True, delegates_auth=False,
     ).prefs
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)

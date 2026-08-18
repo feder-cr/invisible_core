@@ -279,11 +279,11 @@ def test_the_module_no_longer_claims_to_diagnose_an_unimportable_core():
     _version.py, which reads seal.json. Anything inside the core runs only after
     that succeeded.
 
-    Both are gone, and the state is reported by the consumers' import floor
-    instead (invisible_playwright/tests/test_seal_floor.py and
-    invisible_firefox/tests/test_seal_floor.py). This test is what stops the dead
-    branch from being reintroduced the next time somebody reads the message and
-    wonders where it went."""
+    Both are gone, and the state is reported by the consumer's import floor
+    instead (invisible_playwright/tests/test_seal_floor.py - invisible_firefox
+    carried the same test until its 2026-08-18 deletion). This test is what
+    stops the dead branch from being reintroduced the next time somebody reads
+    the message and wonders where it went."""
     assert not hasattr(_pin, "probe_core")
     assert "no_seal" not in SOURCE
     assert "core_state" not in SOURCE
@@ -329,9 +329,10 @@ def test_an_index_install_has_no_direct_url_and_is_not_editable(tmp_path):
 
 
 def test_an_editable_mismatch_is_never_handed_a_reinstall_command(tmp_path):
-    """On this project's own machines all three packages are editable installs
-    pointing at working trees. A --force-reinstall there replaces live source
-    with a copy from the index, uncommitted work included."""
+    """On this project's own machines the packages with a checkout here are
+    editable installs pointing at working trees. A --force-reinstall there
+    replaces live source with a copy from the index, uncommitted work
+    included."""
     site = tmp_path / "site"
     make_core(site, tag="firefox-19")
     checkout = tmp_path / "checkout"

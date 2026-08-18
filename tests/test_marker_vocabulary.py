@@ -1,4 +1,9 @@
-"""One marker vocabulary for the three repositories, and it stays one.
+"""One marker vocabulary for the surviving repositories, and it stays one.
+
+It was THREE repositories until 2026-08-18, when `invisible_firefox` was
+deleted. The history below is left as it happened - the incident is what bought
+this file - but the list it runs over is now `invisible_core` and
+`invisible_playwright`. See `_REPOS`.
 
 WHAT WENT WRONG. `integration` meant "several modules together, no browser" in
 `invisible_core` and `invisible_playwright`, and "launches the real patched
@@ -34,7 +39,20 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_REPOS = ["invisible_core", "invisible_playwright", "invisible_firefox"]
+#: TWO since 2026-08-18, not three. `invisible_firefox` was deleted that day -
+#: the GitHub repository is gone and so is the checkout beside this one. The
+#: package remains on PyPI, unyanked, but there is no tree here to compare
+#: against, and that is what every check in this file reads.
+#:
+#: THE REMOVAL HAD TO BE MADE HERE, and leaving the name in was not the safe
+#: option. Every helper below calls `pytest.skip` the moment ONE listed repo is
+#: absent, so a dead entry did not narrow these checks - it turned all of them
+#: off. Measured the same day, before this list was corrected: 22 of 22 skips in
+#: `pytest -q` read "not the workbench - the sibling repos are not here", ON the
+#: workbench, and the marker/addopts/strict-markers comparison between the two
+#: SURVIVING repos had stopped running entirely. A green suite that compares
+#: nothing is the exact failure this file was written to end.
+_REPOS = ["invisible_core", "invisible_playwright"]
 _RELEASE = Path(__file__).resolve().parents[2]
 
 # Where the patched Firefox source lives, per `10-repo-layout.md`. Two entries
@@ -55,7 +73,7 @@ def _pytest_config(repo: str) -> dict:
         return tomllib.load(fh)["tool"]["pytest"]["ini_options"]
 
 
-def test_all_three_declare_the_same_markers():
+def test_every_repo_declares_the_same_markers():
     got = {r: _pytest_config(r)["markers"] for r in _REPOS}
     first = got[_REPOS[0]]
     for repo, markers in got.items():
@@ -67,7 +85,7 @@ def test_all_three_declare_the_same_markers():
             f"one name, and nothing downstream can tell which one it got.")
 
 
-def test_all_three_run_the_same_selection_by_default():
+def test_every_repo_runs_the_same_selection_by_default():
     """The default selection IS the pre-push gate: `invisible_core.hooks` runs
     a bare `pytest -q` in each repo, so whatever addopts says is what "never
     push red" means there."""
@@ -123,7 +141,6 @@ def test_every_repo_refuses_a_run_in_which_nothing_ran():
     wanted = {
         "invisible_core": ".github/workflows/ci.yml",
         "invisible_playwright": ".github/workflows/tests.yml",
-        "invisible_firefox": ".github/workflows/ci.yml",
     }
     missing = []
     for repo, rel in wanted.items():
@@ -151,7 +168,6 @@ def test_every_repo_refuses_a_run_in_which_nothing_ran():
 _DEFAULT_SUITE_WORKFLOW = {
     "invisible_core": ".github/workflows/ci.yml",
     "invisible_playwright": ".github/workflows/tests.yml",
-    "invisible_firefox": ".github/workflows/ci.yml",
 }
 
 
@@ -223,6 +239,11 @@ _USER_INSTALL_WORKFLOW = ".github/workflows/user-install.yml"
 #: would mean every assertion read the wrong one.
 _ON_THE_RUNNER = {"pytest", "packaging", "pip"}
 
+#: `invisible_firefox` STAYS here after its 2026-08-18 deletion, unlike in
+#: `_REPOS`. This set is a blocklist, not a worklist: it names what the
+#: user-install runner does NOT have, so a leftover module-level import of the
+#: dead package is still something this gate should report rather than wave
+#: through. Removing the name would only make the check blinder.
 _FIRST_PARTY = {"invisible_core", "invisible_playwright", "invisible_firefox"}
 
 
@@ -736,20 +757,30 @@ def test_every_python_a_repo_promises_is_actually_run():
 
 
 def test_every_published_package_uploads_without_a_stored_credential():
-    """Three packages on PyPI; one of them had a publish workflow.
+    """Three packages were on PyPI when this was written; only one had a
+    publish workflow.
 
     The other two were uploaded by hand from one machine with a long-lived PyPI
     token on it. That token is a standing credential whose blast radius is the
     whole project, and a hand-run twine has no gate in front of it - the ordering
     rules live in somebody's memory rather than in a `needs:`.
 
-    All three now publish through the `pypi` GitHub Environment's OIDC trust
-    relationship, minted per run. This asserts the two properties that make that
-    true and that a well-meaning edit can undo: the upload job asks for
-    `id-token: write`, and NOTHING in the file reaches for a stored password.
+    All three moved to publish through the `pypi` GitHub Environment's OIDC
+    trust relationship, minted per run. This asserts the two properties that
+    make that true and that a well-meaning edit can undo: the upload job asks
+    for `id-token: write`, and NOTHING in the file reaches for a stored
+    password.
 
     A token creeping back is not a syntax error and would work, which is exactly
     why it needs a test rather than a review.
+
+    `invisible_firefox` was one of the three and its publish.yml is what this
+    was first measured against; it is not checked below any more, because its
+    checkout went with the repo on 2026-08-18. The PyPI package it left behind
+    (13 versions, unyanked) is a fact about the index, not about a workflow file
+    this test could still read - there is no tree here to read it from. The
+    other two are asserted below, over `_DEFAULT_SUITE_WORKFLOW`, which already
+    lists only the repos that still exist.
     """
     import re
 

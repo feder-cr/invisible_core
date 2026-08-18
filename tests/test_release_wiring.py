@@ -62,9 +62,11 @@ def test_every_layer_of_the_wiring_exists():
 
 @requires_checkout
 def test_the_hook_is_tracked_as_executable():
-    """The claim and its measurement live in the helper, which all three repos
-    call - this hook was tracked 100644 in every one of them, so a per-repo copy
-    of the assertion would have been a third copy of one finding."""
+    """The claim and its measurement live in the helper, which every repo that
+    pins this package calls - this hook was tracked 100644 in every one of
+    them (three repos when this was found, two since invisible_firefox was
+    deleted 2026-08-18), so a per-repo copy of the assertion would have been
+    another copy of one finding."""
     from invisible_core.testing import assert_hook_is_executable
 
     assert_hook_is_executable(REPO_ROOT)
@@ -319,9 +321,11 @@ def test_the_hooks_are_armed_in_this_clone():
     and git will not do that for you. Running the test suite is the one thing a
     developer does constantly, so the suite is where this belongs.
 
-    The claim and its measurement live once, in the helper, because all three
-    repos make it - until 2026-07-27 only this one did, and the other two
-    shipped a hook that nothing armed and nothing checked was armed.
+    The claim and its measurement live once, in the helper, because every repo
+    that pins this package makes it (three repos until invisible_firefox was
+    deleted 2026-08-18, two since) - until 2026-07-27 only this one did, and
+    the other two shipped a hook that nothing armed and nothing checked was
+    armed.
     """
     from invisible_core.testing import assert_hooks_are_armed
 

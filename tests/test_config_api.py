@@ -1,7 +1,9 @@
 """The public config API's humanize default, and what it hands a caller.
 
 `get_default_stealth_prefs` is for somebody driving the patched binary with
-their own Playwright - nobody inside these three packages calls it. That makes
+their own Playwright - nobody inside this project's own packages calls it
+(three when this was written - invisible_core, invisible_playwright,
+invisible_firefox; two since the last was deleted 2026-08-18). That makes
 it the one surface where the in-binary trajectory generator is still the
 default, and the only place a caller can be handed it without being told.
 

@@ -396,7 +396,8 @@ def test_unsupported_arch_raises_before_any_network(cache, tmp_path, monkeypatch
 def test_cache_dir_for_version_no_arg_is_the_sealed_content_key():
     """The no-arg call used to name cache_root()/<tag>. It now names the
     content-keyed directory for the ACTIVE seal, which is the path the test
-    harnesses and the profile manager look the fetched engine up under."""
+    harnesses look the fetched engine up under (and, until its 2026-08-18
+    deletion, the profile manager did too)."""
     s = active_seal()
     p = cache_dir_for_version()
     assert p == cache_dir_for_seal(s)

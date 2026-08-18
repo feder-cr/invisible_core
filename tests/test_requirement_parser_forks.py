@@ -3,7 +3,9 @@
 WHERE THEY ARE.
 
   * `invisible_core.pin.parse_requirement` + `normalise_name` - the real one, run
-    at import time in both consumers;
+    at import time in every consumer (both of them when this was written -
+    invisible_playwright and invisible_firefox, the latter deleted
+    2026-08-18);
   * `scripts/sync_core_pin.py` in the workbench - its own `normalise()` and its
     own regex;
   * `core-on-index.yml` in the wrapper repo - an inline `norm()` and `PIN_RE`,

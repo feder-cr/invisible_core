@@ -50,8 +50,9 @@ RELEASE_TAG_RE = re.compile(r"^firefox-(\d+)$")
 # The one remedy line printed whenever this package itself is the thing that has
 # to move. It must stay an INDEX install: `git+https://...` installs a PEP 508
 # direct reference, which carries no version specifier, so it silently defeats
-# the `invisible-core==N.N.N` both consumers declare and leaves `pip check` with
-# nothing to compare (measured: a violated direct reference reports healthy).
+# the `invisible-core==N.N.N` every consumer declares and leaves `pip check`
+# with nothing to compare (measured: a violated direct reference reports
+# healthy).
 CORE_INSTALL_HINT = "pip install --upgrade invisible-core"
 CORE_REINSTALL_HINT = "pip install --force-reinstall invisible-core"
 
@@ -92,12 +93,12 @@ class EngineMismatch(RuntimeError):
     """An on-disk engine does not match the seal. Never launch it.
 
     The rendered message is for a human reading a traceback. Every caller that
-    shows a SHORT reason instead - the adoption log line, the manager's status
-    pill - reads `.summary` or `.problems`, never an index into the rendered
-    text. Two of them used to do `args[0].splitlines()[3]`, which lands on the
-    `engine says: Firefox X build Y` line: an observation that reads like a
-    success, not the problem, and one line away from moving again the next time
-    the layout is edited.
+    shows a SHORT reason instead - the adoption log line, and until its
+    2026-08-18 deletion the profile manager's status pill - reads `.summary` or
+    `.problems`, never an index into the rendered text. Two of them used to do
+    `args[0].splitlines()[3]`, which lands on the `engine says: Firefox X build
+    Y` line: an observation that reads like a success, not the problem, and one
+    line away from moving again the next time the layout is edited.
     """
 
     def __init__(self, message: str, *, problems: Tuple[str, ...] = (),
@@ -251,8 +252,9 @@ class Seal:
         build = f" build {bid}" if bid else ""
         # Say which kind of seal this is. A local seal can verify the tree it was
         # generated from but can never download anything, and every line that
-        # shows a seal (doctor, the substitution notice, the manager's status)
-        # should make that visible rather than let it be inferred from a tag.
+        # shows a seal (doctor, the substitution notice, and until its
+        # 2026-08-18 deletion the profile manager's status) should make that
+        # visible rather than let it be inferred from a tag.
         kind = "" if self.assets else ", local seal"
         return (f"{self.tag} (Firefox {self.upstream_version}{build}, "
                 f"seal {self.digest[:12]}{kind})")
@@ -602,10 +604,14 @@ def verify_engine(entry: "str | os.PathLike[str]", seal: Optional[Seal] = None,
         "               the sealed build. Running a different engine under them is a",
         "               disagreement a page can observe.",
         # Deliberately the CORE's own command, not a consumer's. This module is
-        # shared: invisible-firefox does not depend on invisible-playwright, so
-        # naming the wrapper's CLI here handed half the readers a command they
-        # cannot run. `doctor --fix` clears the cached tree and re-fetches the
-        # sealed one, and it exists wherever this message can be printed.
+        # shared, and naming one consumer's CLI here would hand readers of any
+        # other consumer a command they cannot run - true when this was written
+        # against two consumers (invisible-firefox did not depend on
+        # invisible-playwright) and still the right shape with one, because the
+        # core does not get to assume it is only ever imported by the consumer
+        # that happens to exist today. `doctor --fix` clears the cached tree and
+        # re-fetches the sealed one, and it exists wherever this message can be
+        # printed.
         f"  fix        : python -m invisible_core doctor --fix",
         "               (deliberately driving another build? generate a seal for it:",
         "                python -m invisible_core seal --binary <path> -o my.seal.json",

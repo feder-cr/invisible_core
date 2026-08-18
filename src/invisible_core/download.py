@@ -493,9 +493,10 @@ def engine_status(seal: Seal | None = None) -> tuple:
         verify_engine(entry, s, source="status check", asset=asset)
         return (True, s.describe())
     except EngineMismatch as e:
-        # The manager renders this string next to a red dot. It must be the
-        # problem, carried as data, not whatever line the message layout happens
-        # to put at a fixed index.
+        # The profile manager used to render this string next to a red dot,
+        # until its 2026-08-18 deletion; `doctor` reads it as plain text now.
+        # Either way it must be the problem, carried as data, not whatever line
+        # the message layout happens to put at a fixed index.
         return (False, e.summary)
     except Exception as e:
         return (False, str(e))

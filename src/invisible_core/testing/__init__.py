@@ -1,10 +1,16 @@
 """Test support shared by the packages that pin this one.
 
-WHY IT SHIPS. `invisible_playwright` and `invisible_firefox` are released
-independently and both pin `invisible-core==` exactly, so this is the only place
-they can share anything. Without it, a helper the three suites all need has
-nowhere to live except in three copies, and three copies means three acceptance
-sets - the defect the requirement parser had already been through.
+WHY IT SHIPS. `invisible_playwright` pins `invisible-core==` exactly and is
+released on its own cadence, so this is the only place the two suites can share
+anything. Without it, a helper both need has nowhere to live except in a copy
+each, and two copies means two acceptance sets - the defect the requirement
+parser had already been through.
+
+It was TWO consumers and three suites until 2026-08-18, when `invisible_firefox`
+was deleted; the measurements below are from 2026-07-27 and are left exactly as
+they were taken. The reason this module ships is unchanged by the count: a
+consumer pinning an exact version cannot import a helper that is not inside the
+version it pinned.
 
 MEASURED, 2026-07-27, rather than assumed. An earlier note here claimed "four
 copies" of two harnesses; the real counts are smaller and worth stating
@@ -127,8 +133,10 @@ def assert_pre_push_policy_is_wired(repo_root: Path,
         f"its own copy of the pre-push rules again")
     for token in _POLICY_TOKENS:
         assert token not in body, (
-            f"{rel_path} decides something about {token!r}. That decision now "
-            f"exists in three places and will be fixed in one of them.")
+            f"{rel_path} decides something about {token!r}. That decision "
+            f"belongs to the shared policy in invisible_core.hooks; deciding it "
+            f"here again is a second copy that will be fixed in only one of "
+            f"the two places the next time it changes.")
 
     # git must never hand a shell script to a POSIX shell with CRLF endings:
     # `/bin/sh^M: bad interpreter` is how a gate stops running on a machine
@@ -164,8 +172,9 @@ def assert_pre_push_policy_is_wired(repo_root: Path,
         f"pushing {tag} did not run the publish gate, so a release tag can be "
         f"pushed - and published - with no check at all")
     assert str(Path(repo_root).resolve()) in gate[0], (
-        f"the gate ran against {gate[0]!r} rather than this project. One gate, "
-        f"three projects: pointed at the wrong one it passes every time.")
+        f"the gate ran against {gate[0]!r} rather than this project. One gate "
+        f"shared by every project that pins it: pointed at the wrong one it "
+        f"passes every time.")
 
     calls.clear()
     hooks.main(root=Path(repo_root), run=record, env=dict(off), python="PY",

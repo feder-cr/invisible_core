@@ -23,8 +23,6 @@ The shared foundation used by:
 
 - **[invisible_playwright](https://github.com/feder-cr/invisible_playwright)** - the
   Playwright automation wrapper (`InvisiblePlaywright`).
-- **[invisible_firefox](https://github.com/feder-cr/invisible_firefox)** - the
-  antidetect profile manager (launches the binary directly).
 
 The engine itself lives in
 [firefox_antidetect_patch](https://github.com/feder-cr/firefox_antidetect_patch),

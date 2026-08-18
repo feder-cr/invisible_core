@@ -10,8 +10,9 @@
 #
 #   * a checkout install never resolves `invisible-core==X.Y.Z` from the index,
 #     so the entire pin mechanism - the part most likely to break a release,
-#     and the reason a binary bump is now a three-package release - is outside
-#     what that job can see;
+#     and the reason a binary bump is a two-package release (core, then the
+#     consumer that pins it - three until invisible_firefox was deleted on
+#     2026-08-18) - is outside what that job can see;
 #   * installing a blessed `playwright==<pin>` afterwards REPAIRS the venv. If
 #     the declared range resolves to a client the shipped Juggler cannot speak,
 #     that manual line turns the job green while every fresh install is broken.
@@ -56,7 +57,7 @@ on:
     # around them does: pip resolves a new Playwright, GitHub moves a release
     # asset, an index mirror lags. Those break users without any commit here,
     # so a run triggered only by pushes would never see them.
-    - cron: "05 6 * * *"   # first of the three: the consumers pin this package, so if it is broken on the index their runs are noise
+    - cron: "05 6 * * *"   # first of the two (three until invisible_firefox was deleted 2026-08-18): the consumer pins this package, so if it is broken on the index its run is noise
   release:
     types: [published]
 

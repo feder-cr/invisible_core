@@ -320,8 +320,9 @@ _WIN_DECODING_INFO = chr(10).join([
 #
 #  These 26 also live in the binary's all.js, and the duplication is
 #  deliberate: the binary must stay correct when launched WITHOUT this
-#  package (invisible_firefox direct-launch, a manual run), because the
-#  fallback is not a subtle drift - Gecko's own defaults name "Sans" at
+#  package (a manual run, or any other code that launches the binary
+#  directly - invisible_firefox did this before its 2026-08-18 deletion),
+#  because the fallback is not a subtle drift - Gecko's own defaults name "Sans" at
 #  13.3333px on Linux, a family that does not exist on Windows, and that
 #  is what drove FpJS Pro tampering=True on 2026-08-07. all.js is the
 #  compiled floor; this is the source of truth that can move without a
@@ -1549,6 +1550,7 @@ def compose_session_prefs(
     cloak: bool = False,
     humanize: Any = None,
     survive_hard_kill: bool = False,
+    delegates_auth: bool = True,
 ) -> ComposedPrefs:
     """Every pref a session runs with, in one place.
 
@@ -1573,7 +1575,10 @@ def compose_session_prefs(
         extra_prefs=extra_prefs,
         virtual_display=virtual_display,
     )
-    playwright_proxy = configure_proxy(proxy, prefs) if proxy else None
+    # delegates_auth passa oltre senza essere interpretato qui: chi lancia sa se
+    # ha un Playwright a cui dare un endpoint HTTP, questo composer no.
+    playwright_proxy = (configure_proxy(proxy, prefs, delegates_auth=delegates_auth)
+                        if proxy else None)
 
     # ⛔ UNCONDITIONAL, and the reason is REALNESS - not the launch bug it also
     # happens to fix. Windows' occlusion tracker can decide our chrome window is

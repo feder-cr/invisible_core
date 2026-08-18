@@ -1085,8 +1085,11 @@ def test_the_index_cross_check_asks_about_THIS_project(monkeypatch):
     monkeypatch.setattr(R, "cmd_check",
                         lambda args: (seen.append(R._index_url_for(args)), 0)[1])
 
+    # `invisible_firefox` was the third row here until 2026-08-18, when the repo
+    # was deleted; the measurement quoted above is the one it produced and stays
+    # as written. The property is per-project and is still asserted on both
+    # projects that exist: a gate that resolves ITS OWN index URL.
     for root, expect in ((REPO_ROOT, "invisible-core"),
-                         (REPO_ROOT.parent / "invisible_firefox", "invisible-firefox"),
                          (REPO_ROOT.parent / "invisible_playwright", "invisible-playwright")):
         if not (root / "pyproject.toml").is_file():
             pytest.skip("not the workbench - the sibling repos are not here")
