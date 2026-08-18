@@ -35,7 +35,7 @@ Same seed → same fingerprint, every time.
 
 Which surfaces a browser fingerprint is made of, what each one gives away, and why
 consistency between them matters more than any single value, is written up at
-**[feder-cr.github.io/invisible_playwright](https://feder-cr.github.io/invisible_playwright/)**.
+**[the invisible_playwright wiki](https://github.com/feder-cr/invisible_playwright/wiki)**.
 Those pages are about the problem, not about this package, and several of them
 record something we got wrong first. A few that document the exact fields this
 package generates:
