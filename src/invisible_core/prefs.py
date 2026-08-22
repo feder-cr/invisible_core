@@ -454,7 +454,15 @@ _BASELINE: Dict[str, Any] = {
     # Safebrowsing - chatty and fingerprintable.
 
     # First-run / welcome UI noise.
-    "browser.startup.page":                               0,
+    #
+    # ⛔ QUI STAVA `browser.startup.page: 0`, TOLTA IL 2026-08-20 col revert del
+    # newtab. Era l'ULTIMO punto vivo che sopprimeva about:home: con 0 la finestra
+    # iniziale parte vuota anche con i cinque file del sorgente riportati a
+    # upstream e le cinque prefs newtab tolte, quindi il revert sarebbe stato
+    # completo a meta' e la pagina non si sarebbe vista lo stesso. Il default di
+    # Gecko e' 1, cioe' la home page, che e' cio' che fa un retail.
+    # Le tre righe qui sotto restano: sono la finestra di benvenuto e il
+    # controllo del browser predefinito, che sono un'altra cosa dal newtab.
     "browser.shell.checkDefaultBrowser":                  False,
     "browser.aboutwelcome.enabled":                       False,
     "browser.startup.upgradeDialog.enabled":              False,
@@ -481,14 +489,88 @@ _BASELINE: Dict[str, Any] = {
     # zero mousedown, zero mousemove - mentre la tastiera continua a funzionare.
     # Questa riga sembrava proteggerci e non proteggeva niente.
 
-    # Disable about:newtab auto-load - TopSitesFeed.sys.mjs auto-fetches when
-    # a tab opens, triggering a cross-process BC swap that hijacks the first
-    # page.goto() (NS_BINDING_ABORTED on creepjs/peet/sannysoft/fppro).
-    "browser.newtabpage.enabled":                         False,
-    "browser.newtab.preload":                             False,
-    "browser.newtabpage.activity-stream.feeds.topsites":  False,
-    "browser.newtabpage.activity-stream.feeds.section.topstories": False,
-    "browser.newtabpage.activity-stream.enabled":         False,
+    # ⛔ LE CINQUE PREFS DEL NEWTAB SONO STATE TOLTE (2026-08-20), ED E' UNA
+    # DECISIONE DEL PROPRIETARIO: "voglio riavere il codice originale, dei 34mb
+    # rimettere questo processo in piedi". Erano queste:
+    #
+    #   browser.newtabpage.enabled                                   False
+    #   browser.newtab.preload                                       False
+    #   browser.newtabpage.activity-stream.feeds.topsites            False
+    #   browser.newtabpage.activity-stream.feeds.section.topstories  False
+    #   browser.newtabpage.activity-stream.enabled                   False
+    #
+    # La seconda e' quella che teneva GIU' il processo preallocato della nuova
+    # scheda, quindi senza toglierla il revert del sorgente non bastava: i
+    # cinque file di Firefox sono tornati a upstream, ma il processo sarebbe
+    # rimasto spento da qui. Ora il retail e noi partiamo dagli stessi default.
+    #
+    # ⛔ LA REGRESSIONE E' TORNATA IL 2026-08-23, ED E' STATA CHIUSA NEL MOTORE:
+    # queste righe restano tolte e non vanno rimesse.
+    #
+    # Il segnale era quello previsto - la PRIMA `page.goto()` che muore, non le
+    # successive - ma con un altro messaggio: "Navigation ... interrupted by
+    # another navigation to about:newtab", e subito dopo, se si aspettava,
+    # "can't access property loadURI, browsingContext is undefined". Il gate
+    # `fppro_full` falliva 2 volte su 2.
+    #
+    # ⛔ E LA DIAGNOSI SCRITTA QUI SOPRA ERA SBAGLIATA IN DUE PUNTI, misurati
+    # entrambi quel giorno con Playwright puro sullo stesso binario:
+    #
+    #  1. Non e' la fetch di `TopSitesFeed`. E' il browser PREALLOCATO della
+    #     nuova scheda: `JugglerFrameParent` riconosceva il target confrontando
+    #     `browserId` con l'`id` di un BrowsingContext - due contatori diversi -
+    #     e con browserId 12 contro bcId 12 quel browser estraneo si prendeva il
+    #     canale della pagina. Da fuori si vedeva un secondo
+    #     `Page.frameAttached mainframe-12` sulla stessa sessione.
+    #  2. **Aspettare NON e' il rimedio**, ed era la riga che stava qui. Con
+    #     l'attesa vera - non un ritardo fisso: si aspettava che `about:newtab`
+    #     fosse arrivato E caricato - la `goto` successiva riusciva **0 volte su
+    #     9**, perche' a quel punto il frame che il client crede principale non
+    #     esiste sotto il browser della scheda. Il ritardo di 0,4 s che il
+    #     wrapper aveva riusciva solo quando VINCEVA LA CORSA, cioe' a caso.
+    #
+    # Il rimedio sta dove sta la causa: `juggler/JugglerFrameParent.sys.mjs`
+    # smentisce il riconoscimento numerico con l'elemento `<browser>` a cui il
+    # contesto appartiene. Con quello, e con la preallocazione ACCESA come vuole
+    # il proprietario, 10 giri su 10 riusciti e nessun mainframe di troppo.
+    # I numeri per esteso in `70-known-bugs.md` [B166].
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  LE TRE CHIAVI API, DICHIARATE QUI E IN NESSUN ALTRO POSTO
+    # ══════════════════════════════════════════════════════════════════════
+    #
+    # Decisione del proprietario, 2026-08-20: "voglio portare questi valori su
+    # invisible_core, trova il modo che ogni volta che firefox si avvia li legga
+    # e li setti prendendoli da invisible_core, come stiamo fondamentalmente
+    # facendo per tutte le altre cose che invisible_core genera".
+    #
+    # PRIMA: erano incise nel binario a tempo di compilazione. `configure`
+    # leggeva tre keyfile da $APIKEYDIR e sostituiva `@MOZ_..._API_KEY@` dentro
+    # `AppConstants.sys.mjs`, che a runtime e' una costante congelata.
+    #
+    # ADESSO: quel percorso non esiste piu' - tolte le tre voci di
+    # AppConstants.sys.mjs, i tre DEFINES di toolkit/modules/moz.build e le tre
+    # --with-*-api-keyfile del .mozconfig - e il solo lettore del motore,
+    # `URLFormatter.sys.mjs`, legge queste pref (`stealthDeclaredApiKey`).
+    #
+    # ⛔ E L'ASSENZA SI RIFIUTA. Senza dichiarazione il motore torna la stringa
+    # vuota e registra un errore in console: `checkGoogleSafeBrowsingKey` la
+    # legge come falsy e SPEGNE il provider, quindi non parte nessuna richiesta
+    # con una chiave finta o con un segnaposto dentro. E' la regola 7: se la
+    # dichiarazione manca si rifiuta, non si inventa un default.
+    #
+    # ⛔ I VALORI SONO QUELLI DI MOZILLA, byte per byte, ed e' deliberato.
+    # Il proprietario, 2026-08-20: "devono essere byte per byte identiche a
+    # quelle dentro il Firefox scaricato dal loro sito". Sono le stesse chiavi
+    # che ogni Firefox retail porta gia' in chiaro dentro `omni.ja`, quindi
+    # dichiararle qui non pubblica niente che non sia gia' pubblico - ma resta
+    # una scelta, non un dettaglio, ed e' scritta qui perche' si veda.
+    #
+    # Il dominio e' FINITO E NOTO - tre chiavi - quindi la regola 2 e'
+    # soddisfatta e la regola 1 si applica: il core dichiara, il motore obbedisce.
+    "zoom.stealth.apikey.google_location_service": "AIzaSyB0mAay6Zu8JTU8XTQtXJLri9eY9wISq6o",
+    "zoom.stealth.apikey.google_safebrowsing":     "AIzaSyC7jsptDS3am4tPx4r3nxis7IMjBc5Dovo",
+    "zoom.stealth.apikey.mozilla":                 "7e40f68c-7938-4c5d-9f95-e61647c213eb",
 
     # Disable Firefox internal services that hit the network on startup.
     # Through a residential SOCKS5 proxy these compete with the test

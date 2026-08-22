@@ -144,12 +144,54 @@ def test_the_locale_defaults_to_en_US_and_normalises_underscores():
 
 
 def test_the_locale_override_carries_the_whole_accept_language_list():
-    """navigator.languages must stay the desktop-default two elements; the C++
-    DidSet takes the primary tag out of this for Intl."""
+    """L'override porta la LISTA INTERA, ed e' la stessa di intl.accept_languages.
+
+    ⛔ Questo test asseriva `.startswith("fr-FR")` e la docstring prometteva
+    "navigator.languages resta i due elementi predefiniti del desktop". Erano
+    tutte e due sbagliate, e per la stessa ragione corretta il 2026-08-19: la
+    tabella del motore mappa la lingua `fr` su "fr, fr-FR", cioe' mette per
+    primo il tag NUDO, e poi aggiunge ", en-US, en". Chiedere `fr-FR` non
+    produce una lista che comincia per `fr-FR`.
+
+    L'invariante vera, e l'unica che questo test deve difendere, e' che
+    l'override e la pref siano LA STESSA STRINGA: sono due nomi per un valore
+    solo, e il giorno in cui divergono navigator.languages e l'header dicono
+    cose diverse.
+    """
     prefs = {}
     P._apply_locale(prefs, "fr-FR")
     assert prefs["juggler.locale.override"] == prefs["intl.accept_languages"]
-    assert prefs["juggler.locale.override"].startswith("fr-FR")
+    assert prefs["juggler.locale.override"] == "fr, fr-FR, en-US, en"
+    # E il tag richiesto resta intero nelle prefs che portano il LOCALE, che
+    # sono un'altra cosa dalla lista delle lingue accettate.
+    assert prefs["intl.locale.requested"] == "fr-FR"
+    assert prefs["general.useragent.locale"] == "fr-FR"
+
+
+@pytest.mark.unit
+def test_the_primary_tag_of_the_list_is_not_always_the_requested_locale():
+    """⛔ La conseguenza che nessuno aveva scritto, isolata qui apposta.
+
+    `BrowsingContext`'s DidSet estrae il TAG PRIMARIO dell'override per fissare
+    il locale predefinito di Intl. Con la tabella vera quel tag NON coincide
+    sempre con il locale richiesto:
+
+        richiesto it-IT -> lista "it-IT, it, en-US, en" -> primario it-IT   uguale
+        richiesto fr-FR -> lista "fr, fr-FR, en-US, en" -> primario fr      DIVERSO
+
+    Questo test non dice che sia un difetto: dice che il caso ESISTE e lo
+    inchioda, perche' finora nessuna riga del progetto lo nominava. Se una
+    misura contro il retail dimostrera' che Intl deve restare sul tag
+    richiesto, il rimedio andra' nel C++ o in _apply_locale, e questo test
+    sara' il posto in cui la decisione si legge.
+    """
+    it, fr = {}, {}
+    P._apply_locale(it, "it-IT")
+    P._apply_locale(fr, "fr-FR")
+    primario = lambda p: p["juggler.locale.override"].split(",")[0].strip()
+    assert primario(it) == "it-IT" == it["intl.locale.requested"]
+    assert primario(fr) == "fr"
+    assert primario(fr) != fr["intl.locale.requested"]
 
 
 def test_no_timezone_writes_no_timezone_pref():

@@ -33,7 +33,15 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
     plan = build_launch_plan(42, profile_dir=pdir, timezone="auto", locale="auto")
 
     assert plan.binary == "/fake/firefox"
-    assert plan.argv == ["/fake/firefox", "-no-remote", "-profile", str(pdir), "about:blank"]
+    # ⛔ SENZA URL IN CODA, ed e' la classe che conta, non la stringa: un URL
+    # sulla riga di comando ha la precedenza sulla pagina d'avvio, quindi il
+    # default "about:blank" che stava qui sopprimeva about:home a prescindere
+    # dalle prefs. Tolto il 2026-08-20 col revert del newtab.
+    assert plan.argv == ["/fake/firefox", "-no-remote", "-profile", str(pdir)]
+    # E chi ne vuole uno lo passa: il parametro e' ancora li'.
+    esplicito = build_launch_plan(42, profile_dir=pdir, timezone="auto",
+                                  locale="auto", url="https://example.invalid/")
+    assert esplicito.argv[-1] == "https://example.invalid/"
     text = (pdir / "user.js").read_text(encoding="utf-8")
     assert 'user_pref("zoom.stealth.screen.dpr", "1.25");' in text            # float -> string
     assert 'user_pref("toolkit.startup.max_resumed_crashes", -1);' in text    # no Safe Mode prompt
