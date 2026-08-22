@@ -160,6 +160,56 @@ def discover_egress_ip(
     )
 
 
+def _geo_record(ip: str, mmdb_path: Any) -> "Optional[Dict[str, Any]]":
+    """L'UNICO punto che apre il database e legge un record.
+
+    Le tre funzioni qui sotto - fuso, locale e coordinate - leggono lo STESSO
+    record dello STESSO IP, e prima di questa funzione due di loro ripetevano
+    le stesse tre righe. Aggiungere la terza avrebbe fatto tre copie di come si
+    legge il database, che e' la regola 16 violata mentre la si applica.
+
+    Torna ``None`` se l'IP non c'e': chi chiama decide se e' fatale (il fuso,
+    che dietro un proxy deve fallire rumorosamente) o no (il locale, che ha un
+    ripiego dichiarato).
+    """
+    import maxminddb
+
+    with maxminddb.open_database(str(mmdb_path)) as reader:
+        record = reader.get(ip)
+    return record if isinstance(record, dict) else None
+
+
+def ip_to_coordinates(ip: str, mmdb_path: Any) -> "tuple[float, float]":
+    """Map ``ip`` -> (latitudine, longitudine) dallo stesso record del fuso.
+
+    ⛔ E' la fonte UNICA della posizione dichiarata: il motore non chiede piu'
+    niente all'hardware (niente WiFi, niente GPS, niente cella) e non chiede
+    niente a Google. La posizione esce dall'IP di uscita del proxy, esattamente
+    come il fuso e la lingua, quindi le tre cose non possono contraddirsi.
+
+    ⛔ LA PRECISIONE NON VIENE DA QUI, e non e' una dimenticanza: misurato il
+    2026-08-20 su un record vero, ``location`` porta ``latitude``,
+    ``longitude`` e ``time_zone`` e **non** ``accuracy_radius``. Dichiararla e'
+    un'altra decisione, e vive nel Profile: una posizione derivata da un IP con
+    una precisione da GPS sarebbe incoerente per costruzione.
+
+    Solleva :class:`GeoTimezoneError` - stessa classe del fuso, perche' e' lo
+    stesso guasto - se l'IP manca o il record non porta le coordinate. **Non si
+    inventa un ripiego**: senza dichiarazione il motore rifiuta, che e' la
+    regola 7.
+    """
+    record = _geo_record(ip, mmdb_path)
+    if not record:
+        raise GeoTimezoneError(f"egress IP {ip} not present in the geoip database")
+    loc = record.get("location") or {}
+    lat, lon = loc.get("latitude"), loc.get("longitude")
+    if lat is None or lon is None:
+        raise GeoTimezoneError(
+            f"no coordinates for egress IP {ip} in the geoip database"
+        )
+    return float(lat), float(lon)
+
+
 def ip_to_timezone(ip: str, mmdb_path: Any) -> str:
     """Map ``ip`` to its IANA timezone using the offline mmdb.
 
@@ -167,15 +217,10 @@ def ip_to_timezone(ip: str, mmdb_path: Any) -> str:
     against the system tz database. Raises :class:`GeoTimezoneError` if the IP
     is absent from the DB or the zone is missing / not a valid IANA name.
     """
-    import maxminddb
-
-    with maxminddb.open_database(str(mmdb_path)) as reader:
-        record = reader.get(ip)
+    record = _geo_record(ip, mmdb_path)
     if not record:
         raise GeoTimezoneError(f"egress IP {ip} not present in the geoip database")
-    tz = ((record.get("location") or {}) if isinstance(record, dict) else {}).get(
-        "time_zone"
-    )
+    tz = (record.get("location") or {}).get("time_zone")
     if not tz:
         raise GeoTimezoneError(f"no timezone for egress IP {ip} in the geoip database")
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -252,13 +297,8 @@ def ip_to_locale(ip: str, mmdb_path: Any) -> str:
     """Map ``ip`` -> a BCP-47 locale via the MaxMind ``country.iso_code`` field, so the
     browser language stays consistent with the proxy egress country. Falls back to
     ``en-US`` for IPs absent from the DB or countries we don't map."""
-    import maxminddb
-
-    with maxminddb.open_database(str(mmdb_path)) as reader:
-        record = reader.get(ip)
-    cc = ""
-    if isinstance(record, dict):
-        cc = ((record.get("country") or {}).get("iso_code") or "")
+    record = _geo_record(ip, mmdb_path)
+    cc = ((record.get("country") or {}).get("iso_code") or "") if record else ""
     return _COUNTRY_LOCALE.get(cc.upper(), "en-US")
 
 
@@ -320,6 +360,16 @@ class SessionGeo(NamedTuple):
 
     timezone: str
     egress_ip: Optional[str]
+    #: La posizione dichiarata, dallo STESSO record dell'IP di uscita da cui
+    #: escono fuso e lingua. ``None`` quando non c'e' un IP da cui derivarla
+    #: (nessun proxy, o scoperta fallita): in quel caso il motore NON riceve
+    #: nessuna dichiarazione e rifiuta, invece di chiedere all'hardware.
+    #:
+    #: Hanno un default perche' ``SessionGeo`` si costruisce per posizione con
+    #: due argomenti in sei punti fra codice e test: aggiungerli senza default
+    #: sarebbe stato un cambiamento non retrocompatibile di un tipo esportato.
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 def prepare_session_geo(
@@ -350,13 +400,31 @@ def prepare_session_geo(
             egress_err = exc
 
     # Timezone resolution - same precedence as resolve_session_timezone.
+    def _coordinate(ip: "Optional[str]") -> "tuple[Optional[float], Optional[float]]":
+        """Le coordinate sono BEST-EFFORT, il fuso no, e la differenza e' voluta.
+
+        Un fuso sbagliato dietro un proxy e' la trappola `tz_mismatch` e deve
+        far fallire il lancio. Una posizione ASSENTE invece non e' una
+        contraddizione: e' un browser a cui nessuno ha ancora chiesto dove sia,
+        e il motore la rifiuta in modo pulito. Far fallire il lancio per questo
+        sarebbe piu' fragile senza essere piu' fedele.
+        """
+        if not ip:
+            return None, None
+        try:
+            return ip_to_coordinates(ip, ensure_geoip_mmdb())
+        except Exception:  # noqa: BLE001
+            return None, None
+
     if tz and tz.lower() != "auto":
-        return SessionGeo(tz, egress_ip)  # explicit IANA wins
+        lat, lon = _coordinate(egress_ip)
+        return SessionGeo(tz, egress_ip, lat, lon)  # explicit IANA wins
     try:
         ip = egress_ip if proxy_set else discover_egress_ip(None)
         if ip is None:  # proxy set but discovery failed above
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
-        return SessionGeo(ip_to_timezone(ip, ensure_geoip_mmdb()), egress_ip)
+        lat, lon = _coordinate(ip)
+        return SessionGeo(ip_to_timezone(ip, ensure_geoip_mmdb()), egress_ip, lat, lon)
     except Exception:
         if proxy_set:
             raise  # fail-early behind a proxy (timezone_mismatch trap)

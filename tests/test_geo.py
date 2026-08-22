@@ -29,6 +29,7 @@ from invisible_core._geo import (
     _proxy_is_set,
     discover_egress_ip,
     ip_to_locale,
+    ip_to_coordinates,
     ip_to_timezone,
     prepare_session_geo,
     resolve_session_timezone,
@@ -213,6 +214,70 @@ def test_ip_to_timezone_invalid_iana_raises(monkeypatch):
     _install_fake_maxminddb(monkeypatch, {"location": {"time_zone": "Not/AZone"}})
     with pytest.raises(GeoTimezoneError):
         ip_to_timezone("198.51.100.4", "x.mmdb")
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  ip_to_coordinates - stesso record del fuso, stesse mutazioni
+# ──────────────────────────────────────────────────────────────────────
+#
+# ⛔ Questa funzione e' arrivata SENZA test e SENZA consumatore: il core
+# dichiara la posizione, ma il 2026-08-23 nessun modulo la legge e nessuna pref
+# la porta al motore (voce 18 di `72-next-steps.md`). I test qui sotto coprono
+# il pezzo che esiste; il consumatore e' un'altra cosa e va scritto a parte.
+@pytest.mark.unit
+def test_ip_to_coordinates_reads_the_same_record_as_the_timezone(monkeypatch):
+    _install_fake_maxminddb(
+        monkeypatch,
+        {"location": {"time_zone": "Europe/Rome", "latitude": 41.9, "longitude": 12.5}},
+    )
+    assert ip_to_coordinates("198.51.100.4", "x.mmdb") == (41.9, 12.5)
+
+
+@pytest.mark.unit
+def test_ip_to_coordinates_returns_floats_not_whatever_the_database_stored(monkeypatch):
+    """Il database puo' portare interi: chi legge si aspetta due float."""
+    _install_fake_maxminddb(monkeypatch, {"location": {"latitude": 41, "longitude": 12}})
+    lat, lon = ip_to_coordinates("198.51.100.4", "x.mmdb")
+    assert isinstance(lat, float) and isinstance(lon, float)
+    assert (lat, lon) == (41.0, 12.0)
+
+
+@pytest.mark.unit
+def test_ip_to_coordinates_ip_absent_raises(monkeypatch):
+    _install_fake_maxminddb(monkeypatch, None)
+    with pytest.raises(GeoTimezoneError):
+        ip_to_coordinates("198.51.100.4", "x.mmdb")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "location",
+    [
+        {},
+        {"latitude": 41.9},                      # meta' record e' assenza
+        {"longitude": 12.5},
+        {"time_zone": "Europe/Rome"},            # il fuso c'e', la posizione no
+    ],
+)
+def test_ip_to_coordinates_incomplete_record_raises(monkeypatch, location):
+    """⛔ Non si inventa un ripiego: senza dichiarazione si rifiuta (regola 7)."""
+    _install_fake_maxminddb(monkeypatch, {"location": location})
+    with pytest.raises(GeoTimezoneError):
+        ip_to_coordinates("198.51.100.4", "x.mmdb")
+
+
+@pytest.mark.unit
+def test_a_session_without_coordinates_still_resolves_its_timezone(monkeypatch):
+    """La differenza VOLUTA fra i due: il fuso e' fatale, la posizione no.
+
+    Un fuso sbagliato dietro un proxy e' la trappola `tz_mismatch`; una
+    posizione assente e' solo un browser a cui nessuno ha chiesto dove sia.
+    """
+    _install_fake_maxminddb(monkeypatch, {"location": {"time_zone": "Europe/Rome"}})
+    geo = prepare_session_geo("Europe/Rome", None)
+    assert geo.timezone == "Europe/Rome"
+    assert geo.latitude is None and geo.longitude is None
+
 
 
 # ──────────────────────────────────────────────────────────────────────
