@@ -452,26 +452,125 @@ _BASELINE: Dict[str, Any] = {
     "security.ssl3.ecdhe_ecdsa_aes_128_sha":              False,
 
     # Safebrowsing - chatty and fingerprintable.
-    "browser.safebrowsing.malware.enabled":               False,
-    "browser.safebrowsing.phishing.enabled":              False,
-    "browser.safebrowsing.downloads.enabled":             False,
-    "browser.safebrowsing.downloads.remote.enabled":      False,
 
     # First-run / welcome UI noise.
-    "browser.startup.page":                               0,
+    #
+    # ⛔ QUI STAVA `browser.startup.page: 0`, TOLTA IL 2026-08-20 col revert del
+    # newtab. Era l'ULTIMO punto vivo che sopprimeva about:home: con 0 la finestra
+    # iniziale parte vuota anche con i cinque file del sorgente riportati a
+    # upstream e le cinque prefs newtab tolte, quindi il revert sarebbe stato
+    # completo a meta' e la pagina non si sarebbe vista lo stesso. Il default di
+    # Gecko e' 1, cioe' la home page, che e' cio' che fa un retail.
+    # Le tre righe qui sotto restano: sono la finestra di benvenuto e il
+    # controllo del browser predefinito, che sono un'altra cosa dal newtab.
     "browser.shell.checkDefaultBrowser":                  False,
     "browser.aboutwelcome.enabled":                       False,
     "browser.startup.upgradeDialog.enabled":              False,
-    "termsofuse.acceptedVersion":                         999,
+    # ⛔ QUI STAVA `termsofuse.acceptedVersion: 999`, ED ERA UNA DICHIARAZIONE
+    # MORTA. Tolta il 2026-08-19 dopo averla misurata, non dedotta.
+    #
+    # Non faceva niente per due ragioni indipendenti, e ognuna basta:
+    #  1. duplicava il default upstream: browser/app/profile/firefox.js
+    #     dichiara gia' termsofuse.acceptedVersion a 999 di suo.
+    #  2. da sola non sarebbe bastata comunque. hasUserAcceptedCurrentTOU
+    #     (TelemetryReportingPolicy.sys.mjs:536) vuole ANCHE
+    #     termsofuse.acceptedDate non nulla, e upstream la mette a "0".
+    #     Misurato: con la sola versione il modale esce lo stesso.
+    #
+    # E non e' riparabile da qui in nessun caso: le prefs di questo dizionario
+    # viaggiano sul protocollo e Browser.enable le applica DOPO l'avvio, mentre
+    # il modale nasce con la finestra. Misurato: le stesse prefs passate come
+    # firefox_user_prefs non riparano, scritte in un user.js prima del lancio
+    # riparano. Il rimedio vive nel default compilato del nostro Firefox:
+    # browser/app/profile/firefox.js, termsofuse.acceptedDate.
+    #
+    # Cosa costava tenerla: su una build MOZILLA_OFFICIAL il modale dei termini
+    # d'uso copre il viewport e mangia OGNI evento di mouse - fuoco su BODY,
+    # zero mousedown, zero mousemove - mentre la tastiera continua a funzionare.
+    # Questa riga sembrava proteggerci e non proteggeva niente.
 
-    # Disable about:newtab auto-load - TopSitesFeed.sys.mjs auto-fetches when
-    # a tab opens, triggering a cross-process BC swap that hijacks the first
-    # page.goto() (NS_BINDING_ABORTED on creepjs/peet/sannysoft/fppro).
-    "browser.newtabpage.enabled":                         False,
-    "browser.newtab.preload":                             False,
-    "browser.newtabpage.activity-stream.feeds.topsites":  False,
-    "browser.newtabpage.activity-stream.feeds.section.topstories": False,
-    "browser.newtabpage.activity-stream.enabled":         False,
+    # ⛔ LE CINQUE PREFS DEL NEWTAB SONO STATE TOLTE (2026-08-20), ED E' UNA
+    # DECISIONE DEL PROPRIETARIO: "voglio riavere il codice originale, dei 34mb
+    # rimettere questo processo in piedi". Erano queste:
+    #
+    #   browser.newtabpage.enabled                                   False
+    #   browser.newtab.preload                                       False
+    #   browser.newtabpage.activity-stream.feeds.topsites            False
+    #   browser.newtabpage.activity-stream.feeds.section.topstories  False
+    #   browser.newtabpage.activity-stream.enabled                   False
+    #
+    # La seconda e' quella che teneva GIU' il processo preallocato della nuova
+    # scheda, quindi senza toglierla il revert del sorgente non bastava: i
+    # cinque file di Firefox sono tornati a upstream, ma il processo sarebbe
+    # rimasto spento da qui. Ora il retail e noi partiamo dagli stessi default.
+    #
+    # ⛔ LA REGRESSIONE E' TORNATA IL 2026-08-23, ED E' STATA CHIUSA NEL MOTORE:
+    # queste righe restano tolte e non vanno rimesse.
+    #
+    # Il segnale era quello previsto - la PRIMA `page.goto()` che muore, non le
+    # successive - ma con un altro messaggio: "Navigation ... interrupted by
+    # another navigation to about:newtab", e subito dopo, se si aspettava,
+    # "can't access property loadURI, browsingContext is undefined". Il gate
+    # `fppro_full` falliva 2 volte su 2.
+    #
+    # ⛔ E LA DIAGNOSI SCRITTA QUI SOPRA ERA SBAGLIATA IN DUE PUNTI, misurati
+    # entrambi quel giorno con Playwright puro sullo stesso binario:
+    #
+    #  1. Non e' la fetch di `TopSitesFeed`. E' il browser PREALLOCATO della
+    #     nuova scheda: `JugglerFrameParent` riconosceva il target confrontando
+    #     `browserId` con l'`id` di un BrowsingContext - due contatori diversi -
+    #     e con browserId 12 contro bcId 12 quel browser estraneo si prendeva il
+    #     canale della pagina. Da fuori si vedeva un secondo
+    #     `Page.frameAttached mainframe-12` sulla stessa sessione.
+    #  2. **Aspettare NON e' il rimedio**, ed era la riga che stava qui. Con
+    #     l'attesa vera - non un ritardo fisso: si aspettava che `about:newtab`
+    #     fosse arrivato E caricato - la `goto` successiva riusciva **0 volte su
+    #     9**, perche' a quel punto il frame che il client crede principale non
+    #     esiste sotto il browser della scheda. Il ritardo di 0,4 s che il
+    #     wrapper aveva riusciva solo quando VINCEVA LA CORSA, cioe' a caso.
+    #
+    # Il rimedio sta dove sta la causa: `juggler/JugglerFrameParent.sys.mjs`
+    # smentisce il riconoscimento numerico con l'elemento `<browser>` a cui il
+    # contesto appartiene. Con quello, e con la preallocazione ACCESA come vuole
+    # il proprietario, 10 giri su 10 riusciti e nessun mainframe di troppo.
+    # I numeri per esteso in `70-known-bugs.md` [B166].
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  LE TRE CHIAVI API, DICHIARATE QUI E IN NESSUN ALTRO POSTO
+    # ══════════════════════════════════════════════════════════════════════
+    #
+    # Decisione del proprietario, 2026-08-20: "voglio portare questi valori su
+    # invisible_core, trova il modo che ogni volta che firefox si avvia li legga
+    # e li setti prendendoli da invisible_core, come stiamo fondamentalmente
+    # facendo per tutte le altre cose che invisible_core genera".
+    #
+    # PRIMA: erano incise nel binario a tempo di compilazione. `configure`
+    # leggeva tre keyfile da $APIKEYDIR e sostituiva `@MOZ_..._API_KEY@` dentro
+    # `AppConstants.sys.mjs`, che a runtime e' una costante congelata.
+    #
+    # ADESSO: quel percorso non esiste piu' - tolte le tre voci di
+    # AppConstants.sys.mjs, i tre DEFINES di toolkit/modules/moz.build e le tre
+    # --with-*-api-keyfile del .mozconfig - e il solo lettore del motore,
+    # `URLFormatter.sys.mjs`, legge queste pref (`stealthDeclaredApiKey`).
+    #
+    # ⛔ E L'ASSENZA SI RIFIUTA. Senza dichiarazione il motore torna la stringa
+    # vuota e registra un errore in console: `checkGoogleSafeBrowsingKey` la
+    # legge come falsy e SPEGNE il provider, quindi non parte nessuna richiesta
+    # con una chiave finta o con un segnaposto dentro. E' la regola 7: se la
+    # dichiarazione manca si rifiuta, non si inventa un default.
+    #
+    # ⛔ I VALORI SONO QUELLI DI MOZILLA, byte per byte, ed e' deliberato.
+    # Il proprietario, 2026-08-20: "devono essere byte per byte identiche a
+    # quelle dentro il Firefox scaricato dal loro sito". Sono le stesse chiavi
+    # che ogni Firefox retail porta gia' in chiaro dentro `omni.ja`, quindi
+    # dichiararle qui non pubblica niente che non sia gia' pubblico - ma resta
+    # una scelta, non un dettaglio, ed e' scritta qui perche' si veda.
+    #
+    # Il dominio e' FINITO E NOTO - tre chiavi - quindi la regola 2 e'
+    # soddisfatta e la regola 1 si applica: il core dichiara, il motore obbedisce.
+    "zoom.stealth.apikey.google_location_service": "AIzaSyB0mAay6Zu8JTU8XTQtXJLri9eY9wISq6o",
+    "zoom.stealth.apikey.google_safebrowsing":     "AIzaSyC7jsptDS3am4tPx4r3nxis7IMjBc5Dovo",
+    "zoom.stealth.apikey.mozilla":                 "7e40f68c-7938-4c5d-9f95-e61647c213eb",
 
     # Disable Firefox internal services that hit the network on startup.
     # Through a residential SOCKS5 proxy these compete with the test
@@ -479,8 +578,6 @@ _BASELINE: Dict[str, Any] = {
     # connection drops). Domains observed in MOZ_LOG: push.services,
     # firefox.settings.services, detectportal, ohttp-gateway, location.
     "browser.aboutConfig.showWarning":                    False,
-    "network.captive-portal-service.enabled":             False,
-    "network.connectivity-service.enabled":               False,
     # [CORRETTO 2026-08-09] These three were False, and the reason above is the
     # reason they were: startup network chatter through a residential proxy.
     # But turning them off DELETES Web APIs from the page. Measured against
@@ -496,7 +593,6 @@ _BASELINE: Dict[str, Any] = {
     # it, which the default-deny below answers locally. A user who blocked
     # location is the most ordinary thing on the web.
     "dom.push.enabled":                                   True,
-    "dom.push.connection.enabled":                        False,
     "geo.enabled":                                        True,
     #: `permissions.default.geo` is deliberately NOT SET, and this comment is
     #: here so nobody adds it back for the reason it was added the first time.
@@ -554,15 +650,8 @@ _BASELINE: Dict[str, Any] = {
     "browser.search.geoSpecificDefaults":                 False,
     "browser.contentblocking.report.lockwise.enabled":    False,
     "browser.contentblocking.report.monitor.enabled":     False,
-    "extensions.systemAddon.update.enabled":              False,
-    "extensions.update.enabled":                          False,
-    "extensions.getAddons.cache.enabled":                 False,
-    "browser.discovery.enabled":                          False,
-    "browser.ping-centre.telemetry":                      False,
-    "app.normandy.enabled":                               False,
     "dom.private-attribution.submission.enabled":         False,
     "browser.translations.enable":                        False,
-    "browser.search.update":                              False,
 
     # HTTP/3 + speculative + Alt-Svc disabled. SOCKS5 proxy doesn't
     # support UDP ASSOCIATE so HTTP/3 fails. Speculative connections
@@ -571,7 +660,6 @@ _BASELINE: Dict[str, Any] = {
     "network.http.http3.enabled":                         False,
     "network.http.altsvc.enabled":                        False,
     "network.http.altsvc.oe":                             False,
-    "network.http.speculative-parallel-limit":            0,
     "network.predictor.enabled":                          False,
     "network.dns.disablePrefetch":                        True,
     "network.dns.disablePrefetchFromHTTPS":               True,
@@ -605,14 +693,69 @@ _BASELINE: Dict[str, Any] = {
 
 
     # Telemetry & data reporting.
-    "datareporting.healthreport.uploadEnabled":           False,
-    "datareporting.policy.dataSubmissionEnabled":         False,
-    "toolkit.telemetry.enabled":                          False,
-    "toolkit.telemetry.unified":                          False,
-    "app.shield.optoutstudies.enabled":                   False,
+
+    # ------------------------------------------------------------------
+    # ⛔ QUI NON C'E' NIENTE, ED E' UNA DECISIONE - non una dimenticanza.
+    # Proprietario, 2026-08-19: il prodotto deve fare esattamente cio' che fa
+    # un Firefox retail, quindi le prefs che sopprimevano traffico che il
+    # retail fa sono state TOLTE, non impostate al valore del retail. Togliere
+    # eredita il default di Gecko, che e' per definizione quello del retail;
+    # impostare lascia un valore nostro che puo' divergere quando upstream
+    # cambia idea.
+    #
+    # Tolte qui: browser.safebrowsing.{malware,phishing,downloads,
+    # downloads.remote}.enabled, toolkit.telemetry.{enabled,unified},
+    # datareporting.{healthreport.uploadEnabled,policy.dataSubmissionEnabled},
+    # app.{update.enabled,normandy.enabled,shield.optoutstudies.enabled},
+    # extensions.{update,systemAddon.update,getAddons.cache}.enabled,
+    # browser.{discovery.enabled,ping-centre.telemetry,search.update},
+    # network.{captive-portal-service,connectivity-service}.enabled,
+    # dom.push.connection.enabled, network.http.speculative-parallel-limit.
+    #
+    # ⛔ E NON VANNO RIDICHIARATE "per sicurezza" al valore del retail: sul
+    # percorso Juggler - quello che usa il prodotto - PLAYWRIGHT NON SCRIVE
+    # NESSUNA PREF. Il blocco delle ~86 che si trova cercando in giro vive in
+    # `bidi/bidiFirefox.ts` e si raggiunge solo con `channel` che inizia per
+    # `moz-`, che noi non passiamo mai; la classe base ha `prepareUserDataDir`
+    # col corpo VUOTO. Misurato: un profilo Playwright nudo ha 48 prefs, tutte
+    # e 48 presenti anche nel profilo del retail firmato, e nessun `user.js`.
+    #
+    # `app.update.enabled` non e' fra queste per scelta: e' una pref MORTA,
+    # rimossa da Firefox (UpdateTelemetry.sys.mjs:54). La impostavamo a vuoto.
+    # Cio' che impedisce davvero l'installazione e' `app.update.auto`, che
+    # resta a False qui sotto: il retail CONTROLLA e noi pure, ma non
+    # scarichiamo e non installiamo, perche' installare distruggerebbe il
+    # binario pinnato dal sigillo.
+    #
+    # Contesto completo: docs/firefox-stealth-architecture/27-retail-network-parity.md
+    # ------------------------------------------------------------------
+
+    # ⛔ L'UNICA ECCEZIONE ALLA PARITA', E RESTA FINCHE' LA BUILD NON HA LA CHIAVE.
+    # Misurato nel sorgente 2026-08-19, catena completa:
+    #   browser.safebrowsing.downloads.remote.url =
+    #     https://sb-ssl.google.com/safebrowsing/clientreport/download
+    #       ?key=%GOOGLE_SAFEBROWSING_API_KEY%          (all.js:3448)
+    #   letta via FormatURLPref                          (ApplicationReputation.cpp:1603-1606)
+    #     -> la sentinella `no-google-safebrowsing-api-key` finisce NELLA URL
+    #   SendRemoteQueryInternal rifiuta solo URL vuoto o about:blank: la chiave
+    #     non la controlla mai.
+    # Quindi con questa pref ereditata a `true` e senza chiave vera, OGNI
+    # download binario manda a Google una POST con la sentinella dentro la
+    # query. Nessun retail emette quella stringa: non e' un'assenza, e' un
+    # segnale positivo che ci dichiara build senza chiave, verso il destinatario
+    # che stiamo cercando di non insospettire.
+    #
+    # Il percorso degli AGGIORNAMENTI LISTA e' protetto e non ha questo problema:
+    # checkGoogleSafeBrowsingKey azzera updateURL e gethashURL quando la chiave
+    # manca (SafeBrowsing.sys.mjs:537-568, :637-643). Solo la reputazione dei
+    # download scavalca il controllo.
+    #
+    # ⛔ SI TOGLIE QUANDO `--with-google-safebrowsing-api-keyfile` e' in vigore
+    # nella build: da quel momento questa riga diventa essa stessa la divergenza.
+    # Il gancio condizionale e' gia' nel .mozconfig di firefox-21.
+    "browser.safebrowsing.downloads.remote.enabled":      False,
 
     # Update channels.
-    "app.update.enabled":                                 False,
     "app.update.auto":                                    False,
 
     # Media devices: a FIXED pair (one audioinput, one videoinput) on every
@@ -807,16 +950,112 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
 #  Public helpers
 # ──────────────────────────────────────────────────────────────────────
 
+#: La tabella con cui Firefox costruisce `intl.accept_languages` di default,
+#: portata da `intl/locale/rust/locale_service_glue/src/lib.rs:89-222`
+#: (`locale_service_default_accept_languages`). Chiave = codice di LINGUA, non
+#: il locale intero.
+_ACCEPT_LANG_TABLE = {
+    "ace": "ace, id", "ach": "ach, en-GB", "af": "af, en-ZA, en-GB",
+    "ak": "ak, ak-GH", "an": "an, es-ES, es, ca", "ast": "ast, es-ES, es",
+    "az": "az-AZ, az", "bo": "bo-CN, bo-IN, bo", "br": "br, fr-FR, fr",
+    "brx": "brx, as", "bs": "bs-BA, bs", "cak": "cak, kaq, es",
+    "crh": "tr-TR, tr", "cs": "cs, sk", "csb": "csb, csb-PL, pl",
+    "cy": "cy-GB, cy", "dsb": "dsb, hsb, de", "el": "el-GR, el",
+    "et": "et, et-EE", "fa": "fa-IR, fa", "ff": "ff, fr-FR, fr, en-GB",
+    "fi": "fi-FI, fi", "fr": "fr, fr-FR", "frp": "frp, fr-FR, fr",
+    "fur": "fur-IT, fur, it-IT, it", "fy": "fy-NL, fy, nl",
+    "ga": "ga-IE, ga, en-IE, en-GB", "gd": "gd-GB, gd, en-GB",
+    "gl": "gl-ES, gl", "gn": "gn, es", "gv": "gv, en-GB", "he": "he, he-IL",
+    "hr": "hr, hr-HR", "hsb": "hsb, dsb, de",
+    "hto": "es-MX, es-ES, es, es-AR, es-CL", "hu": "hu-HU, hu",
+    "hye": "hye, hy", "ilo": "ilo-PH, ilo", "it": "it-IT, it",
+    "ixl": "ixl, es-MX, es", "ja": "ja", "ka": "ka-GE, ka",
+    "kab": "kab-DZ, kab, fr-FR, fr", "kk": "kk, ru, ru-RU", "kn": "kn-IN, kn",
+    "ko": "ko-KR, ko", "lb": "lb, de-DE, de", "lg": "lg, en-GB",
+    "lij": "lij, it", "lt": "lt, ru, pl", "ltg": "ltg, lv",
+    "mai": "mai, hi-IN, en", "meh": "meh, es-MX, es", "mix": "mix, es-MX, es",
+    "mk": "mk-MK, mk", "ml": "ml-IN, ml", "mr": "mr-IN, mr",
+    "nb": "nb-NO, nb, no-NO, no, nn-NO, nn",
+    "nn": "nn-NO, nn, no-NO, no, nb-NO, nb", "nr": "nr-ZA, nr, en-ZA, en-GB",
+    "nso": "nso-ZA, nso, en-ZA, en-GB", "oc": "oc, ca, fr, es, it",
+    "pa": "pa, pa-IN", "ppl": "ppl, es-MX, es", "rm": "rm, rm-CH, de-CH, de",
+    "ru": "ru-RU, ru", "sah": "sah, ru-RU, ru", "sc": "sc, it-IT, it",
+    "scn": "scn, it-IT, it", "si": "si-LK, si", "sk": "sk, cs",
+    "son": "son, son-ML, fr", "sq": "sq, sq-AL", "sr": "sr-RS, sr",
+    "st": "st-ZA, st, en-ZA, en-GB", "ta": "ta-IN, ta", "te": "te-IN, te",
+    "tl": "tl-PH, tl", "tr": "tr-TR, tr", "trs": "trs, es-MX, es",
+    "ts": "ts-ZA, ts, en-ZA, en-GB", "uk": "uk-UA, uk", "ur": "ur-PK, ur",
+    "uz": "uz, ru", "ve": "ve-ZA, ve, en-ZA, en-GB", "vi": "vi-VN, vi",
+    "xcl": "xcl, hy", "xh": "xh-ZA, xh", "zam": "zam, es-MX, es",
+}
+
+#: Le SEI lingue in cui Firefox NON aggiunge ", en-US, en" in coda
+#: (`add_en_us = false` nel sorgente citato sopra). Tutte le altre lo aggiungono.
+_ACCEPT_LANG_SENZA_EN = {
+    "en": None,          # la tabella per `en` dipende dalla regione, vedi sotto
+    "my": "my, en-GB, en",
+    "ro": "ro-RO, ro-GB, en",
+    "sco": "sco, en-GB, en",
+    "sl": "sl, en-GB, en",
+    "szl": "szl, pl-PL, pl, en, de",
+}
+
+
 def _accept_language(locale: str) -> str:
-    # "<locale>, <base>" - the desktop-default shape (e.g. "en-US, en"). Firefox expands it
-    # to navigator.languages=["en-US","en"] AND (via the patched binary) the q-valued header
-    # "en-US,en;q=0.5". The patched nsHttpHandler (STEALTHFOX, RE 2026-06-23) builds the
-    # Accept-Language header from THIS pref even when juggler sets a per-context locale
-    # override, so header and navigator.languages stay consistent 2/2 - the most authentic
-    # (real desktop) form. Supersedes the 2026-06-22 single-tag workaround.
+    """`intl.accept_languages` esattamente come lo costruisce Firefox 151.
+
+    ⛔ QUESTA FUNZIONE RESTITUIVA DUE VOCI PER OGNI LOCALE, E PER 89 LINGUE SU 95
+    ERA SBAGLIATO. Restituiva `"<locale>, <base>"` con il commento "la forma di
+    default del desktop (es. `en-US, en`)". Quella forma e' giusta **solo per
+    l'inglese**, che e' una delle sei lingue in cui Firefox non aggiunge la coda.
+
+    Il sorgente e' `locale_service_default_accept_languages`
+    (`intl/locale/rust/locale_service_glue/src/lib.rs:82-234`) e fa due cose:
+    una TABELLA di casi speciali per lingua, e poi
+
+        if add_en_us { format!("{langs}, en-US, en") } else { langs }
+
+    con `add_en_us` VERO di default e falso solo per en, my, ro, sco, sl, szl.
+    Il ramo di default della tabella e' `"{lang}-{region}, {lang}"`, cioe'
+    esattamente la nostra vecchia formula: mancava solo la coda, che e' il pezzo
+    che si vede.
+
+    Cosa costava, misurato: un profilo italiano emetteva
+        it-IT,it;q=0.9
+    dove un Firefox italiano vero emette
+        it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7
+    su OGNI richiesta HTTP e in `navigator.languages`.
+
+    ⛔ E PERCHE' NON ERA STATO VISTO: il confronto col retail era stato fatto
+    contro una build **en-US**, cioe' l'unico caso in cui la vecchia formula e
+    quella vera coincidono per costruzione. Il braccio di controllo era scelto
+    male, non la misura sbagliata. Quando si confronta una funzione che dipende
+    da un parametro, il braccio non puo' stare sul valore in cui il difetto si
+    annulla.
+    """
     lang = locale.replace("_", "-")
-    base = lang.split("-")[0]
-    return f"{lang}, {base}" if base != lang else lang
+    pezzi = lang.split("-")
+    base = pezzi[0]
+    regione = pezzi[1] if len(pezzi) > 1 else None
+
+    if base == "en":
+        # unico ramo con sotto-casi per regione, e senza coda
+        return {"CA": "en-CA, en-US, en", "GB": "en-GB, en",
+                "ZA": "en-ZA, en-GB, en-US, en"}.get(regione, "en-US, en")
+    if base in _ACCEPT_LANG_SENZA_EN:
+        return _ACCEPT_LANG_SENZA_EN[base]
+
+    if base == "ca" and "valencia" in lang.lower():
+        langs = "ca-valencia, ca"
+    elif base == "zh" and regione == "CN":
+        langs = "zh-CN, zh, zh-TW, zh-HK"
+    elif base in _ACCEPT_LANG_TABLE:
+        langs = _ACCEPT_LANG_TABLE[base]
+    elif regione:
+        langs = f"{base}-{regione}, {base}"
+    else:
+        langs = base
+    return f"{langs}, en-US, en"
 
 
 def _accept_language_header(locale: str) -> str:
@@ -1334,9 +1573,27 @@ def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
     # navigator.languages (the full list) AND the realm Intl default locale (the
     # primary tag it extracts) - so Intl.DateTimeFormat / NumberFormat /
     # toLocaleString follow the locale, not just the Accept-Language header. Seed
-    # it with the full Accept-Language list so navigator.languages stays the
-    # desktop-default 2 elements (["fr-FR","fr"]); the C++ DidSet takes "fr-FR"
+    # it with the full Accept-Language list; the C++ DidSet takes the primary tag
     # for Intl. Mirrors juggler.timezone.override; the SOLE source of truth.
+    #
+    # A sentence here used to promise this keeps navigator.languages at 'the
+    # desktop-default 2 elements'. THAT IS WRONG. It was written when
+    # _accept_language() still returned 2 tags for every non-English locale,
+    # which was itself the defect corrected on 2026-08-19. Firefox DERIVES
+    # navigator.languages from this list, so the count is whatever the list
+    # holds, and looking like retail means matching the list, not a number.
+    #
+    # Measured 2026-08-19 against a signed retail 151.0 (judge151-frozen, the
+    # updater frozen) handed the same intl.accept_languages, same page served
+    # from 127.0.0.1, and read on the product path (a context WITH locale=):
+    #   retail it-IT  navigator.languages  it-IT, it, en-US, en   -> FOUR
+    #   ours   it-IT  navigator.languages  identical
+    #   retail it-IT  Accept-Language      it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7
+    #   ours   it-IT  Accept-Language      identical
+    #
+    # en-US is the single locale where 2 and 4 coincide (the table has no 'en'
+    # row to append), which is why an en-US-only control kept the old sentence
+    # looking true for as long as it did.
     prefs["juggler.locale.override"]   = _accept_language(locale)
 
 

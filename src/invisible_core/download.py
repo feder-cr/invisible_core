@@ -405,8 +405,13 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
     if seal.is_local:
         raise SealError(
             f"the active seal ({seal.origin}) is a LOCAL seal with no published assets, "
-            f"so there is nothing to download. Point binary_path= / INVPW_BINARY_PATH at "
-            f"the tree this seal was generated from.")
+            f"so there is nothing to download. Pass binary_path= pointing at the "
+            f"build this seal was generated from. "
+            f"(INVPW_BINARY_PATH is NOT read by this library - the test scripts and "
+            f"run_e2e.py translate it into binary_path=, so it only works under them. "
+            f"Corrected 2026-08-19; the same false promise was removed from "
+            f"invisible_playwright/_engine.py on 2026-08-14, and naming an env var "
+            f"the code never reads sends the reader hunting in the wrong function.)")
 
     plat = sys.platform
     asset = seal.asset_for(plat, platform.machine())

@@ -269,7 +269,19 @@ def build_launch_plan(
     pin: Optional[Dict[str, Any]] = None,
     binary_ver: Optional[str] = None,
     extra_args: Optional[List[str]] = None,
-    url: str = "about:blank",
+    # ⛔ IL DEFAULT ERA "about:blank", TOLTO IL 2026-08-20 col revert del newtab.
+    # Un URL sulla riga di comando ha la PRECEDENZA sulla pagina d'avvio, quindi
+    # finche' c'era il lancio diretto non apriva about:home nemmeno con i cinque
+    # file del sorgente riportati a upstream e le prefs newtab tolte: era la
+    # seconda soppressione, indipendente da `browser.startup.page`.
+    #
+    # E ne chiude anche un'altra, misurata il 2026-08-20: un URL iniziale spegne
+    # le chiamate ad `accounts.firefox.com` e `addons.mozilla.org` che il retail
+    # fa all'avvio (2/2 senza URL, 0/2 con). Su Playwright quell'argomento lo
+    # impone la libreria e non e' nostro; QUI era nostro, ed era una scelta.
+    #
+    # Il parametro resta pubblico: chi vuole una pagina la passa esplicitamente.
+    url: str = "",
 ) -> LaunchPlan:
     """The single direct-launch entry point (no Playwright, no Qt).
 
