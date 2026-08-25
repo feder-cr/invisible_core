@@ -516,3 +516,118 @@ def test_a_single_endpoint_cannot_eat_the_whole_budget(monkeypatch):
         f"provato {len(visti)} endpoint su {len(_geo._IP_ECHO_ENDPOINTS)}: "
         "il budget si esaurisce sul primo e gli altri non entrano mai in gioco"
     )
+
+
+# ---------------------------------------------------------------------------
+# La decisione sul srflx viene dalle CAPACITA' dell'uscita, non dallo schema.
+# ---------------------------------------------------------------------------
+
+class _CapacitaFinte:
+    """Sostituisce la sonda di rete. Nessun proxy, nessun socket, nessuna attesa."""
+
+    def __init__(self, risposta):
+        self.risposta = risposta
+        self.chiamate = []
+
+    def __call__(self, proxy, **kw):
+        self.chiamate.append(kw)
+        if isinstance(self.risposta, Exception):
+            raise self.risposta
+        return self.risposta
+
+
+def _decidi(monkeypatch, risposta, egress="203.0.113.7"):
+    from invisible_core import _capacita, _geo
+    finta = _CapacitaFinte(risposta)
+    monkeypatch.setattr(_capacita, "capacita", finta)
+    return _geo._srflx_soppresso({"server": "socks5://gw:1080"}, egress), finta
+
+
+def test_il_DEFAULT_del_campo_e_quello_prudente():
+    """IL DIFETTO CHE QUESTO TEST ESISTE PER TENERE CHIUSO.
+
+    La prima stesura portava l'INDIRIZZO da dichiarare, con default ``None``.
+    `SessionGeo` si costruisce per posizione in sei punti fra codice e test, e
+    tutti quelli che non conoscevano il campo nuovo hanno smesso di dichiarare
+    il srflx per distrazione: il default cadeva dal lato che porta al messaggio
+    peggiore che un rilevatore possa scrivere. Invertito in un interruttore, il
+    silenzio va chiesto.
+    """
+    from invisible_core._geo import SessionGeo
+    g = SessionGeo("America/New_York", "198.51.100.4")
+    assert g.srflx_soppresso is False, "il default deve DICHIARARE"
+    assert g.srflx_da_dichiarare() == "198.51.100.4"
+
+
+def test_con_udp_coerente_il_srflx_si_SOPPRIME(monkeypatch):
+    """L'unico caso in cui tacere e' meglio che dichiarare.
+
+    Il srflx vero nascera' gia' con l'indirizzo giusto, perche' l'UDP esce da
+    dove esce il TCP. Dichiararne uno aggiungerebbe un candidato senza
+    allocazione corrispondente, che e' esattamente il segnale che un rilevatore
+    con un TURN proprio sa leggere.
+    """
+    from invisible_core._geo import SessionGeo
+    soppresso, _ = _decidi(monkeypatch, {"udp": True, "udp_coerente": True})
+    assert soppresso is True
+    assert SessionGeo("tz", "203.0.113.7", None, None, True).srflx_da_dichiarare() is None
+
+
+def test_con_udp_INCOERENTE_si_dichiara(monkeypatch):
+    """UDP c'e' ma esce da un altro indirizzo: il srflx vero porterebbe quello."""
+    soppresso, _ = _decidi(monkeypatch, {"udp": True, "udp_coerente": False})
+    assert soppresso is False
+
+
+def test_senza_udp_si_dichiara(monkeypatch):
+    soppresso, _ = _decidi(monkeypatch, {"udp": False, "udp_coerente": None})
+    assert soppresso is False
+
+
+def test_una_sonda_MUTA_non_e_una_licenza_a_tacere(monkeypatch):
+    """Campi assenti non sono una dimostrazione di coerenza."""
+    soppresso, _ = _decidi(monkeypatch, {})
+    assert soppresso is False
+
+
+def test_una_sonda_che_ESPLODE_non_puo_far_fallire_il_lancio(monkeypatch):
+    """Qualunque errore cade dal lato prudente, e il lancio prosegue."""
+    soppresso, _ = _decidi(monkeypatch, OSError("rete giu'"))
+    assert soppresso is False
+
+
+def test_l_uscita_gia_scoperta_viene_RIUSATA_non_rimisurata(monkeypatch):
+    """Un fatto, un giro. `prepare_session_geo` ha gia' pagato quel round-trip."""
+    _, finta = _decidi(monkeypatch, {"udp": False, "udp_coerente": None})
+    assert finta.chiamate, "la sonda non e' stata chiamata affatto"
+    assert finta.chiamate[0].get("uscita_tcp_nota") == "203.0.113.7"
+
+
+def test_senza_proxy_la_sonda_NON_viene_nemmeno_chiamata(monkeypatch):
+    """Su una connessione diretta lo STUN vero dice gia' la verita'."""
+    from invisible_core import _capacita, _geo
+    finta = _CapacitaFinte({"udp": True, "udp_coerente": True})
+    monkeypatch.setattr(_capacita, "capacita", finta)
+    assert _geo._srflx_soppresso(None, "203.0.113.7") is False
+    assert finta.chiamate == [], "sondare senza proxy e' un giro di rete sprecato"
+
+
+def test_la_domanda_riceve_risposta_in_UN_SOLO_posto():
+    """I due costruttori di env chiamano il metodo, non ricalcolano la regola."""
+    import inspect
+    from invisible_core import launch
+    src = inspect.getsource(launch.build_launch_env)
+    assert "srflx_soppresso" not in src, (
+        "build_launch_env sta rileggendo l'interruttore: la regola tornerebbe a "
+        "essere scritta in due posti, che e' come divergono")
+
+
+def test_la_stickiness_non_entra_piu_in_nessuna_decisione():
+    """Decisione del proprietario 2026-08-25, piu' il fatto che quel campo mentiva."""
+    import inspect
+    from invisible_core import _capacita
+    corpo = inspect.getsource(_capacita.misura)
+    corpo = corpo.split('"""')[2] if corpo.count('"""') >= 2 else corpo
+    assert "e_sticky" not in corpo, (
+        "la stickiness e' tornata dentro misura(): costava sei giri di rete su "
+        "otto e diceva 'si' per un endpoint misurato ruotare 8 volte in 25 minuti")

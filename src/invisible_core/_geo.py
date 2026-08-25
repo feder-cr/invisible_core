@@ -370,6 +370,68 @@ class SessionGeo(NamedTuple):
     #: sarebbe stato un cambiamento non retrocompatibile di un tipo esportato.
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    #: ⛔ UN INTERRUTTORE, E IL SUO DEFAULT E' QUELLO PRUDENTE.
+    #:
+    #: La prima stesura era un campo che portava l'INDIRIZZO da dichiarare, con
+    #: default ``None``. Sbagliato, e un test lo ha colto subito: ``SessionGeo``
+    #: si costruisce per posizione in sei punti fra codice e test, e tutti
+    #: quelli che non conoscevano il campo nuovo hanno smesso di dichiarare il
+    #: srflx **per distrazione**. Cioe' il default cadeva dal lato che porta al
+    #: messaggio peggiore che un rilevatore possa scrivere.
+    #:
+    #: Invertito: ``False`` significa "dichiara", che e' il comportamento di
+    #: sempre, e per spegnerlo bisogna dirlo. Vale ``True`` SOLO quando l'uscita
+    #: ha UDP dimostrato E coerente, perche' li' il srflx vero nasce gia' con
+    #: l'indirizzo giusto e dichiararne uno aggiungerebbe un candidato senza
+    #: allocazione corrispondente.
+    srflx_soppresso: bool = False
+
+    def srflx_da_dichiarare(self) -> Optional[str]:
+        """L'indirizzo che il motore deve annunciare come srflx, o ``None``.
+
+        ⛔ E' L'UNICO POSTO in cui questa domanda riceve risposta. I due
+        costruttori di env - ``launch.build_launch_env`` nel core e
+        ``_session.build_env`` nel wrapper - la chiamano, non la ricalcolano:
+        erano gia' due punti di atterraggio, e la stessa regola scritta due
+        volte avrebbe potuto divergere.
+        """
+        return None if self.srflx_soppresso else self.egress_ip
+
+
+def _srflx_soppresso(proxy: Optional[Dict[str, str]],
+                     egress_ip: Optional[str]) -> bool:
+    """Dichiarare un srflx sintetico, o lasciar passare quello vero?
+
+    Il criterio viene dal codice di un rilevatore vero, letto e non dedotto
+    (`docs_research/scrapfly-re/00-WEBRTC-LEAK.md`): la sua configurazione non
+    contiene nessuno STUN, solo TURN, e la username dell'allocazione e' lo
+    stesso identificativo che il POST di verifica manda al backend. Quindi in un
+    browser onesto **un srflx puo' venire soltanto da un'allocazione riuscita**,
+    e candidato lato client e prova lato server coincidono per costruzione. E'
+    quell'implicazione che un candidato dichiarato rompe.
+
+    Da qui la regola, che ha due rami e non uno:
+
+    * **UDP dimostrato e coerente** (l'UDP esce dallo stesso indirizzo del TCP):
+      il srflx vero nascera' gia' con l'indirizzo giusto. Non si dichiara niente:
+      dichiarare aggiungerebbe un candidato senza allocazione corrispondente.
+    * **tutto il resto**: si dichiara l'IP di uscita, che e' il comportamento di
+      sempre. Senza un srflx il rilevatore scrive *"Javascript is manipulated"*,
+      cioe' accusa il browser; con lui scrive *"VPN/PROXY detected"*, cioe'
+      accusa la rete. La differenza fra i due messaggi e' questa riga.
+
+    ⛔ E LA SONDA NON PUO' FAR FALLIRE UN LANCIO. Qualunque cosa vada storta -
+    rete, timeout, un campo che non c'e' - si ricade sul ramo prudente. Una
+    capacita' si sfrutta solo quando e' DIMOSTRATA.
+    """
+    if not _proxy_is_set(proxy) or not egress_ip:
+        return False
+    try:
+        from ._capacita import capacita
+        c = capacita(proxy, uscita_tcp_nota=egress_ip)
+    except Exception:  # noqa: BLE001
+        return False
+    return c.get("udp") is True and c.get("udp_coerente") is True
 
 
 def prepare_session_geo(
@@ -418,13 +480,15 @@ def prepare_session_geo(
 
     if tz and tz.lower() != "auto":
         lat, lon = _coordinate(egress_ip)
-        return SessionGeo(tz, egress_ip, lat, lon)  # explicit IANA wins
+        return SessionGeo(tz, egress_ip, lat, lon,
+                          _srflx_soppresso(proxy, egress_ip))  # explicit IANA wins
     try:
         ip = egress_ip if proxy_set else discover_egress_ip(None)
         if ip is None:  # proxy set but discovery failed above
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
         lat, lon = _coordinate(ip)
-        return SessionGeo(ip_to_timezone(ip, ensure_geoip_mmdb()), egress_ip, lat, lon)
+        return SessionGeo(ip_to_timezone(ip, ensure_geoip_mmdb()), egress_ip, lat, lon,
+                          _srflx_soppresso(proxy, egress_ip))
     except Exception:
         if proxy_set:
             raise  # fail-early behind a proxy (timezone_mismatch trap)
