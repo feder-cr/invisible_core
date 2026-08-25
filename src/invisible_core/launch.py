@@ -115,6 +115,12 @@ def build_launch_env(
     webrtc_ip = env.get("STEALTHFOX_WEBRTC_PUBLIC_IP") or egress_ip
     if webrtc_ip:
         env["STEALTHFOX_WEBRTC_PUBLIC_IP"] = webrtc_ip
+        # SOLO dietro un proxy. Un Firefox retail dual-stack emette un srflx
+        # IPv6 con l'indirizzo globale VERO in chiaro (l'mDNS offusca solo gli
+        # host): dietro un proxy IPv4 sarebbe un leak e un'incoerenza, senza
+        # proxy e' semplicemente cio' che fa un browser normale. Misurato il
+        # 2026-08-25: retail 6 candidati, noi 3, perche' filtravamo sempre.
+        # Stessa riga e stessa ragione in `_session.build_env` del wrapper.
         env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] = "1"
     return env
 

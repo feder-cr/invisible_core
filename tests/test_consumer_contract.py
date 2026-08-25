@@ -157,6 +157,23 @@ CONTRACT = {
     },
     "invisible_core.download": {
         "cache_root", "ensure_binary",
+        # Le tre righe qui sotto sono entrate il 2026-08-24 con
+        # `invisible_playwright._node`, che procura il Node su cui gira il driver
+        # biforcato: lo scarica da nodejs.org al primo uso e ne verifica il
+        # checksum. Sono nomi PRIVATI, e listarli qui e' esattamente il punto:
+        # un consumatore che si appoggia a un nome privato senza dichiararlo
+        # crea una dipendenza che questo pacchetto puo' rompere senza
+        # accorgersene, ed e' quello che il gate ha appena impedito.
+        #
+        # Perche' appoggiarsi a loro invece di riscriverli nel wrapper: scaricare
+        # con una scadenza, sommare uno sha256 e leggere un file di checksum sono
+        # gia' scritti e gia' provati qui. Averne un secondo esemplare nel wrapper
+        # sarebbe lo stesso fatto in due posti - la regola 16 - e i due
+        # divergerebbero al primo bug corretto da una parte sola.
+        #
+        # Verificato che esistano nel wheel PUBBLICATO e non solo nell'albero di
+        # lavoro, perche' un consumatore puo' usare solo cio' che l'indice ha.
+        "_download_file", "_parse_checksums", "_sha256_file",
         # `engine_status` left on 2026-08-18 with the deletion of
         # `invisible_firefox`, which showed the engine's state in its UI. Not
         # deleted from the core and still covered by test_doctor_fix.py,
