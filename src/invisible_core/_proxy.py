@@ -243,6 +243,26 @@ def _configure_http_like(
     return None
 
 
+#: Il browser fa passare l'UDP DENTRO il tunnel SOCKS?
+#:
+#: ⛔ NO, e questa costante esiste perche' la risposta non e' ovvia e una
+#: decisione ne dipende. Il motore ha il codice per farlo
+#: (`netwerk/socket/nsSOCKSUDPIOLayer.{h,cpp}`, agganciato in `nsUDPSocket.cpp`)
+#: ma e' dietro `network.proxy.socks_remote_udp`, che non impostiamo. Senza,
+#: **l'UDP scavalca il proxy** e uno STUN raggiunto per quella via risponde con
+#: l'indirizzo VERO della macchina.
+#:
+#: Chi la legge: `_geo._srflx_soppresso`. Smettere di dichiarare un srflx ha
+#: senso solo se quello VERO nascera' con l'indirizzo giusto, e con l'UDP che
+#: scavalca il proxy nascerebbe con l'indirizzo di casa. Cioe' la condizione
+#: "l'uscita porta UDP coerente" NON basta: serve anche che il browser quell'UDP
+#: lo mandi di la'.
+#:
+#: Il giorno in cui si accende la pref, questa costante si sposta con lei - e
+#: sono lo stesso fatto scritto in un posto solo.
+INSTRADIAMO_UDP_NEL_SOCKS = False
+
+
 def _is_socks_scheme(server: str) -> bool:
     return server.lower().startswith(_SOCKS_SCHEMES)
 

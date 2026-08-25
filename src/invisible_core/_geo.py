@@ -426,6 +426,21 @@ def _srflx_soppresso(proxy: Optional[Dict[str, str]],
     """
     if not _proxy_is_set(proxy) or not egress_ip:
         return False
+    # ⛔ PRIMA DELLA SONDA, perche' se questo e' falso la sonda non serve.
+    #
+    # Che l'USCITA porti UDP coerente non basta: deve anche essere il BROWSER a
+    # mandarci l'UDP. Con `network.proxy.socks_remote_udp` spenta l'UDP scavalca
+    # il proxy, quindi un srflx vero nascerebbe con l'indirizzo di CASA - e
+    # smettere di dichiarare, li', sarebbe una fuga vera invece di un rimedio.
+    #
+    # La prima stesura di questa funzione, il 2026-08-25, non lo controllava. Il
+    # ramo era irraggiungibile per fortuna (nessun fornitore ha UDP usabile) e
+    # non per costruzione, che e' esattamente la forma di difetto che questo
+    # progetto paga: una condizione la cui sicurezza dipende da un fatto che non
+    # verifica.
+    from ._proxy import INSTRADIAMO_UDP_NEL_SOCKS
+    if not INSTRADIAMO_UDP_NEL_SOCKS:
+        return False
     try:
         from ._capacita import capacita
         c = capacita(proxy, uscita_tcp_nota=egress_ip)
