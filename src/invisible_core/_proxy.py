@@ -149,6 +149,21 @@ def configure_proxy(
     # con `RESOLVE_IGNORE_SOCKS_DNS`, che il cancello esenta per primo. Non e'
     # una deroga che aggiungiamo noi: e' quella che gia' regge il ramo SOCKS.
     prefs["zoom.stealth.dns.no_local_resolution"] = True
+
+    # ⛔ E L'UDP DI ICE ESCE LO STESSO, se il server e' scritto come
+    # INDIRIZZO NUMERICO invece che come nome. Il cancello DNS qui sopra non
+    # lo puo' fermare, perche' un letterale non passa dal resolver.
+    #
+    # Misurato il 2026-08-26 su tre fornitori e due schemi: con uno STUN
+    # numerico il motore riceve il MAPPED-ADDRESS con l'indirizzo VERO della
+    # macchina, mentre la pagina vede l'uscita del proxy perche' il candidato
+    # reale viene riscritto. Una fuga che nessun controllo lato pagina puo'
+    # vedere, e che vede solo chi gestisce lo STUN.
+    #
+    # Le due prefs stanno qui insieme apposta: dicono al motore la stessa
+    # cosa da due lati - dietro un proxy nulla esce per una strada che il
+    # proxy non copre - e una decisione sola le emette entrambe.
+    prefs["zoom.stealth.webrtc.no_direct_udp"] = True
     return risultato
 
 
