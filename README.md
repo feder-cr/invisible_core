@@ -1,11 +1,13 @@
+
+
 # invisible_core
 
 Pure config for a patched Firefox stealth profile - **zero Playwright dependency**.
 
 `seed → fingerprint profile → Firefox prefs`, plus patched-binary download,
 proxy config, and geo/timezone resolution. Importing it does not start a browser,
-which is the point: the same fingerprint config backs an automation wrapper and a
-desktop profile manager without either depending on the other.
+which is the point: the same fingerprint config backs an automation wrapper
+without this package depending on it.
 
 The shared foundation used by:
 
