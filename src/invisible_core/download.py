@@ -438,8 +438,9 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
         _extract(archive_path, tmp_dir)
 
     tmp_entry = tmp_dir / asset.entry_rel
-    if plat == "darwin":
-        _post_extract_darwin(tmp_dir, tmp_entry)
+    # (nessun post-extract per darwin: macOS rifiuta al confine sopra, quindi
+    #  questo percorso non e' piu' raggiungibile per un Mac. La funzione e' stata
+    #  rimossa con la fine del supporto macOS il 2026-08-26.)
     if not tmp_entry.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise RuntimeError(f"binary not found after extraction: {tmp_entry}")
