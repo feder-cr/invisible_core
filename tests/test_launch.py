@@ -73,7 +73,7 @@ def test_build_launch_env_no_font_env_but_webrtc():
     # so build_launch_env must NOT set any STEALTHFOX_FONTLIST/SYSTEMUI env - even
     # when legacy font prefs are passed. WebRTC egress + TZ are still wired.
     prefs = {"zoom.stealth.font.fontlist": "Arial,Calibri", "zoom.stealth.font.system_ui": "Segoe UI"}
-    env = build_launch_env(prefs, timezone="America/New_York", egress_ip="198.51.100.4", base_env={})
+    env = build_launch_env(prefs, timezone="America/New_York", srflx_dichiarato="198.51.100.4", base_env={})
     assert "STEALTHFOX_FONTLIST" not in env
     assert "STEALTHFOX_SYSTEMUI" not in env
     assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.4"
@@ -88,5 +88,5 @@ def test_build_launch_env_no_proxy_no_webrtc_no_tz():
 
 
 def test_build_launch_env_caller_webrtc_wins():
-    env = build_launch_env({}, egress_ip="203.0.113.9", base_env={"STEALTHFOX_WEBRTC_PUBLIC_IP": "198.51.100.1"})
+    env = build_launch_env({}, srflx_dichiarato="203.0.113.9", base_env={"STEALTHFOX_WEBRTC_PUBLIC_IP": "198.51.100.1"})
     assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.1"

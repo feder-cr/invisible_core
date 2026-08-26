@@ -82,6 +82,12 @@ DELIBERATE = {
     # has no trajectory generator of their own, so the binary's is left on.
     "stealthfox.humanize",
     "stealthfox.humanize.maxTime",
+    # Terzo fratello, stessa ragione dei due sopra: governa la cadenza del
+    # generatore DEL BINARIO, che solo il percorso pubblico accende. Prima non
+    # era dichiarato da nessuno e il motore usava il proprio default compilato
+    # di 10 ms, che misurato dava il 79% degli intervalli piu' fitti di quanto
+    # un 60 Hz reale possa consegnare.
+    "stealthfox.humanize.stepMs",
 }
 
 

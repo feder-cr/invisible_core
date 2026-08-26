@@ -168,16 +168,16 @@ def make_virtual_display():
     platform hides windows via the in-binary cloak pref instead.
 
     - Linux: a fresh ``Xvfb`` (the launcher start()s/stop()s it).
-    - Windows / macOS: ``None`` - the binary self-cloaks via ``cloak_prefs()``,
+    - Windows: ``None`` - the binary self-cloaks via ``cloak_prefs()``,
       injected by the launcher; nothing host-side needs spawning.
     """
     if sys.platform.startswith("linux"):
         return _LinuxVirtualDisplay()
-    if sys.platform in ("win32", "darwin"):
+    if sys.platform == "win32":
         return None
     raise RuntimeError(
-        f"invisible_playwright supports Windows, macOS and Linux "
-        f"(got {sys.platform!r})"
+        f"invisible_playwright supporta Windows e Linux "
+        f"(macOS non e' piu' supportato; got {sys.platform!r})"
     )
 
 

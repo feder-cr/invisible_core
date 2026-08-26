@@ -367,12 +367,31 @@ def test_una_password_senza_username_e_comunque_una_credenziale():
 def test_il_percorso_che_delega_NON_cambia_comportamento():
     """Guardia di regressione sul ramo misurato verde: il wrapper passa il dict a
     Playwright, che instrada e risponde al 407. Se questo caso si muove, si e'
-    rotto l'unico percorso HTTP che funziona per gli utenti."""
+    rotto l'unico percorso HTTP che funziona per gli utenti.
+
+    ⛔ IL CONTRATTO E' SULLE PREFS DI INSTRADAMENTO, non su "nessuna pref", e
+    fino al 2026-08-25 era scritto `prefs == {}`. Cio' che va protetto e' che
+    non scriviamo noi il ROUTING (`type`, `http`, `ssl`, `socks*`), perche' quel
+    ramo lo instrada Playwright ed e' l'unico che sa rispondere al 407.
+
+    E' cambiato perche' `network.proxy.allow_bypass` deve valere anche qui: non
+    instrada niente e non tocca l'autenticazione, toglie solo a Firefox il
+    ripiego DIRETTO quando il proxy fallisce. Con `prefs == {}` il ramo HTTP
+    sarebbe restato scoperto proprio sul difetto misurato quel giorno.
+    """
+    instradamento = ("network.proxy.type", "network.proxy.http",
+                     "network.proxy.http_port", "network.proxy.ssl",
+                     "network.proxy.ssl_port", "network.proxy.socks",
+                     "network.proxy.socks_port", "network.proxy.socks_version",
+                     "network.proxy.socks_remote_dns")
     for creds in ({}, {"username": "u", "password": "p"}):
         proxy = dict({"server": "http://gw.esempio:8080"}, **creds)
         prefs = {}
         assert configure_proxy(proxy, prefs) is proxy
-        assert prefs == {}, "chi delega non deve scrivere prefs di proxy"
+        scritte = [k for k in prefs if k in instradamento]
+        assert not scritte, f"chi delega non deve instradare da se': {scritte}"
+        assert prefs.get("network.proxy.allow_bypass") is False, (
+            "il ramo HTTP resta senza la difesa dal ripiego diretto")
 
 
 def test_un_http_senza_porta_e_rifiutato_anche_qui():
@@ -424,3 +443,101 @@ def test_il_lancio_diretto_dichiara_di_non_poter_delegare():
         assert kw["delegates_auth"].value is False, (
             "delegates_auth c'e' ma non e' False: questo percorso Playwright non "
             "ce l'ha")
+def test_dietro_qualunque_proxy_il_ripiego_diretto_e_spento():
+    """Il ripiego di Firefox a un proxy che fallisce e' una connessione DIRETTA.
+
+    `network.proxy.allow_bypass` vale `true` di default nella nostra build, e un
+    canale che chiede `bypassProxy` salta `ResolveProxy()`: risolve col resolver
+    dell'utente e si connette col suo IP, proprio mentre il proxy sta fallendo.
+    I due consumatori sono `fallbackOrReject` di Remote Settings e `retryRequest`
+    della telemetria, e Remote Settings gira a ogni sessione.
+
+    Misurato il 2026-08-25 con un SOCKS5 locale che rifiuta apposta quei due
+    host: senza la pref, 43 rifiuti e l'host di Remote Settings risolto 13 volte
+    in locale; con la pref, 45 rifiuti e ZERO risoluzioni locali, cioe' lo stesso
+    insieme di nomi di un SOCKS5 che non fallisce. La navigazione resta ok in
+    entrambi i bracci.
+
+    Si asserisce su OGNI SCHEMA, non sul solo SOCKS: il difetto non dipende
+    dalla versione di SOCKS e nemmeno dal fatto che sia SOCKS. Decisione del
+    proprietario 2026-08-25, "dobbiamo permettere di usare tutti i protocolli":
+    la difesa vale ovunque, invece di essere una ragione per escludere uno
+    schema.
+    """
+    from invisible_core import configure_proxy
+
+    for server in ("socks5://h:1080", "socks4://h:1080", "socks://h:1080",
+                   "http://h:8080", "https://h:8443"):
+        prefs = {}
+        configure_proxy({"server": server}, prefs)
+        assert prefs.get("network.proxy.allow_bypass") is False, (
+            f"{server}: senza questa pref, un fallimento del proxy fa uscire "
+            f"Firefox in diretta con l'IP vero")
+
+
+def test_dietro_qualunque_proxy_il_dns_locale_e_dichiarato_vietato():
+    """`allow_bypass` chiude i CANALI. Questa chiude cio' che canale non e'.
+
+    Tre superfici chiamano `AsyncResolveNative` diretto e non passano da nessun
+    filtro: `NetworkConnectivityService`, le sonde dell'euristica DoH, e il
+    resolver ICE. Il cancello del motore le fermerebbe
+    (`netwerk/dns/DNSServiceBase.cpp`, `DNSForbiddenByActiveProxy`) ma riconosce
+    solo un proxy scritto nelle `network.proxy.*`, e sul ramo HTTP non ne
+    scriviamo nessuna. Quindi il fatto lo dichiara il core: regola 1.
+
+    La peggiore delle tre e' il resolver ICE, perche' il nome lo sceglie LA
+    PAGINA via `iceServers`: senza questa pref, dietro un proxy HTTP un sito
+    puo' far risolvere al browser un nome suo e guardare quale resolver
+    interroga, cioe' quello di casa, mentre l'HTTP esce dal proxy.
+
+    Misurato il 2026-08-25 dietro proxy HTTP, due giri identici: senza la pref
+    21 nomi risolti in locale fra cui `stunprobe.invalid` 6; con la pref **3**,
+    cioe' `local`, `localhost` e l'endpoint del proxy - la stessa identica forma
+    del braccio SOCKS. Il braccio senza proxy resta a 28 nomi: la pref li' non
+    viene scritta e il motore si comporta come upstream.
+    """
+    from invisible_core import configure_proxy
+
+    for server in ("socks5://h:1080", "socks4://h:1080", "socks://h:1080",
+                   "http://h:8080", "https://h:8443"):
+        prefs = {}
+        configure_proxy({"server": server}, prefs)
+        assert prefs.get("zoom.stealth.dns.no_local_resolution") is True, (
+            f"{server}: senza questa dichiarazione una PAGINA puo' far "
+            f"risolvere al browser un nome scelto da lei sul resolver di casa")
+
+
+def test_senza_proxy_il_ripiego_non_si_dichiara():
+    """Il caso che deve NON scattare, e vale quanto quello che scatta.
+
+    Senza proxy non c'e' niente da aggirare, quindi la pref non ha nulla da
+    governare e dichiararla sarebbe una divergenza dal retail pagata per zero.
+    Stessa forma per `direct://`, che e' un modo di dire "nessun proxy".
+    """
+    from invisible_core import configure_proxy
+
+    for proxy in (None, {}, {"server": ""}, {"server": "direct://"}):
+        prefs = {}
+        configure_proxy(proxy, prefs)
+        assert "network.proxy.allow_bypass" not in prefs, (
+            f"{proxy!r}: pref dichiarata dove non c'e' proxy da aggirare")
+        assert "zoom.stealth.dns.no_local_resolution" not in prefs, (
+            f"{proxy!r}: senza proxy il DNS locale e' il percorso NORMALE, e "
+            f"vietarlo sarebbe una divergenza dal retail pagata per zero")
+
+
+def test_un_endpoint_malformato_non_lascia_prefs_a_meta():
+    """Il rifiuto deve lasciare il dict come l'ha trovato.
+
+    La prima stesura scriveva `allow_bypass` PRIMA di validare la porta, quindi
+    un endpoint malformato sollevava lasciandosi dietro una pref: un dict
+    parzialmente configurato che il chiamante puo' usare credendolo intatto. Due
+    test esistenti sono diventati rossi e avevano ragione loro.
+    """
+    import pytest
+    from invisible_core import configure_proxy
+
+    prefs = {}
+    with pytest.raises(ValueError):
+        configure_proxy({"server": "socks5://senzaporta"}, prefs)
+    assert prefs == {}, f"prefs sporcate dal rifiuto: {prefs}"

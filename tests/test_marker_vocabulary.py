@@ -55,6 +55,21 @@ pytestmark = pytest.mark.unit
 _REPOS = ["invisible_core", "invisible_playwright"]
 _RELEASE = Path(__file__).resolve().parents[2]
 
+
+def _e_vendorizzato(rel: str) -> bool:
+    """Il file appartiene al fork Playwright vendorizzato (``_pw`` o ``_driver``)?
+
+    Da quando il fork e' in git (2026-08-26, voce 23 di 72-next-steps.md), questi
+    controlli lo scansionano insieme al nostro codice. Ma il fork non e' nostro:
+    il suo ``_pw/_impl/_transport.py`` usa sequenze ANSI ``\\x1b[...`` per colorare
+    l'output di terminale, byte pulite ma il cui VALORE contiene 0x1B. Questo gate
+    esiste per cogliere la NOSTRA corruzione da heredoc, non per fare il linter del
+    codice di Microsoft: il fork si esclude, come ``tests/playwright-upstream`` e'
+    gia' escluso dall'sdist per la stessa ragione (non e' roba nostra).
+    """
+    parti = rel.replace("\\", "/").split("/")
+    return "_pw" in parti or "_driver" in parti
+
 # Where the patched Firefox source lives, per `10-repo-layout.md`. Two entries
 # because the two build trees are SEPARATE clones, Windows and WSL. Only used
 # to resolve test names the workbench docs cite from that repo; a machine that
@@ -551,6 +566,8 @@ def test_no_tracked_text_file_carries_an_invisible_control_character():
         names = [n for n in listing.stdout.splitlines() if n.strip()]
         assert names, f"{repo}: git tracks no files, so this check saw nothing"
         for rel in names:
+            if _e_vendorizzato(rel):
+                continue
             path = root / rel
             if path.suffix.lower() not in _TEXT_SUFFIXES or not path.is_file():
                 continue
@@ -618,6 +635,8 @@ def test_no_string_LITERAL_evaluates_to_a_control_character():
         names = [n for n in listing.stdout.splitlines() if n.strip()]
         assert names, f"{repo}: git tracks no Python files; this check saw nothing"
         for rel in names:
+            if _e_vendorizzato(rel):
+                continue
             path = root / rel
             if not path.is_file():
                 continue

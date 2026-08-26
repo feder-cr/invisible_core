@@ -411,13 +411,17 @@ _BASELINE: Dict[str, Any] = {
     #   §17.B), fed the egress IP via STEALTHFOX_WEBRTC_PUBLIC_IP from
     #   launcher._build_env (auto-discovered from the proxy).
     # IPv6: media.peerconnection.ice.disableIPv6 is DEAD on FF150 (read by no
-    #   ICE-gathering code). The real switch is our zoom.stealth.webrtc.disable_ipv6
-    #   (nICEr addrs.cpp filter) + the STEALTHFOX_WEBRTC_DISABLE_IPV6 env.
+    #   ICE-gathering code). Il filtro vero e' in nICEr (addrs.cpp), e dal
+    #   2026-08-25 legge UNA sola fonte: la variabile d'ambiente
+    #   STEALTHFOX_WEBRTC_DISABLE_IPV6, scritta incondizionatamente da
+    #   `launch.build_launch_env` e dal `_session.build_env` del wrapper.
+    #   La pref `zoom.stealth.webrtc.disable_ipv6` NON si scrive piu': il ponte
+    #   nativo non la legge, e una pref che nessun C++ legge e' proprio cio' che
+    #   `test_no_orphan_prefs_in_baseline` vieta di emettere.
     "media.peerconnection.enabled":                       True,
     "media.peerconnection.ice.no_host":                   False,
     "media.peerconnection.ice.default_address_only":      False,
     "media.peerconnection.ice.obfuscate_host_addresses":  True,
-    "zoom.stealth.webrtc.disable_ipv6":                   True,
     "media.peerconnection.ice.proxy_only":                False,
     "media.peerconnection.ice.relay_only":                False,
     "media.peerconnection.use_document_iceservers":       True,
@@ -651,20 +655,53 @@ _BASELINE: Dict[str, Any] = {
     "browser.contentblocking.report.lockwise.enabled":    False,
     "browser.contentblocking.report.monitor.enabled":     False,
     "dom.private-attribution.submission.enabled":         False,
+
     "browser.translations.enable":                        False,
 
-    # HTTP/3 + speculative + Alt-Svc disabled. SOCKS5 proxy doesn't
-    # support UDP ASSOCIATE so HTTP/3 fails. Speculative connections
-    # under load cause early channel cancel (NS_BINDING_FAILED).
-    "network.http.http3.enable":                          False,
-    "network.http.http3.enabled":                         False,
-    "network.http.altsvc.enabled":                        False,
-    "network.http.altsvc.oe":                             False,
+    # ⛔ QUI STAVANO SEI PREF CHE SPEGNEVANO HTTP/3, Alt-Svc, ECH e i record
+    # DNS HTTPS. TOLTE IL 2026-08-25: erano un segnale SOPPRESSO, e la ragione
+    # scritta accanto non reggeva alla misura.
+    #
+    # Il commento diceva: "SOCKS5 proxy doesn't support UDP ASSOCIATE so HTTP/3
+    # fails". Vero dietro un proxy - misurato: il gateway di un provider
+    # residenziale rifiuta `UDP ASSOCIATE` con `rep=7` su 8 peer su 8. Ma le
+    # pref erano INCONDIZIONATE, e senza proxy il proxy non c'entra niente.
+    #
+    # Misurato leggendo `performance.getEntriesByType('navigation')[0]
+    # .nextHopProtocol`, che e' il protocollo VERO della connessione, detto dal
+    # browser stesso:
+    #
+    #   senza proxy, come spedivamo   cloudflare-quic.com:  h2 -> h2 -> h2
+    #   senza proxy, pref tolte       cloudflare-quic.com:  h2 -> **h3** -> h3
+    #
+    # Cioe' eravamo l'unico browser sulla connessione a non parlare MAI HTTP/3,
+    # e Scrapfly lo stampa in chiaro (`http3_supported: false`). Un Firefox
+    # retail su una connessione di casa lo usa.
+    #
+    # **E dietro proxy non serve nessuna condizione**, che e' la parte che
+    # rende il rimedio semplice: con le pref al default del motore e un proxy
+    # configurato, Firefox **si astiene da solo**. Misurato su entrambi gli
+    # schemi, con e senza le pref, quattro corse: sempre `h2 -> h2 -> h2`, con
+    # gli stessi tempi (22-24 s). Non ci prova e fallisce: semplicemente non usa
+    # QUIC quando c'e' un proxy, esattamente come farebbe il retail.
+    #
+    # Il criterio, dettato dal proprietario lo stesso giorno: **si spegne una
+    # cosa solo se e' davvero indisponibile E non la si puo' falsificare.** Qui
+    # non e' indisponibile (senza proxy funziona) e dietro proxy se ne occupa il
+    # motore, quindi non c'e' niente da spegnere.
+    #
+    # `echconfig` e `use_https_rr_as_altsvc` valgono `true` nel motore e sono
+    # uscite con le altre: ECH cambia il ClientHello, cioe' proprio cio' che
+    # JA3/JA4 misurano, e un HTTPS RR in meno e' una via di scoperta che il
+    # retail ha e noi no.
+
+    # Le connessioni speculative RESTANO spente, e la ragione e' diversa: sotto
+    # carico producono un annullamento anticipato del canale
+    # (NS_BINDING_FAILED). E' un rimedio a un guasto osservato, non una difesa
+    # di fingerprint - e non e' stato rimisurato, quindi non si tocca.
     "network.predictor.enabled":                          False,
     "network.dns.disablePrefetch":                        True,
     "network.dns.disablePrefetchFromHTTPS":               True,
-    "network.dns.echconfig.enabled":                      False,
-    "network.dns.use_https_rr_as_altsvc":                 False,
 
     # === Fission / site-isolation disabled (FF146 Playwright parity) ===
     # Force a single content-process model. Three knobs are required in FF150:
@@ -1344,6 +1381,17 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["ui.prefersReducedMotion"]          = _a11y
     prefs["ui.prefersReducedTransparency"]    = _a11y
     prefs["ui.invertedColors"]                = _a11y
+    # La quarta della famiglia, aggiunta il 2026-08-24. Governa `forced-colors`
+    # e, di rimbalzo, `prefers-contrast`: quest'ultimo Gecko lo DERIVA dal
+    # rapporto di contrasto dei colori effettivi e non ha nessun override, ma il
+    # primo termine del suo if e' proprio questo flag.
+    #
+    # Era rimasta indietro perche' Playwright mandava `Browser.setForcedColors`
+    # a ogni lancio e l'override cortocircuitava la lettura: la pref non serviva
+    # a niente e nessuno si accorgeva che mancasse. Tolto quel comando, senza
+    # questa riga la decisione non sarebbe tornata qui - sarebbe andata
+    # all'HOST, via LookAndFeel::GetInt(IntID::UseAccessibilityTheme).
+    prefs["ui.useAccessibilityTheme"]         = _a11y
 
 
 def _apply_audio(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -1501,6 +1549,19 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     """Dark mode, plus the Windows colours palette when the theme is light."""
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
+    # La stessa cosa detta all'altro lettore. `ui.systemUsesDarkTheme` la
+    # legge LookAndFeel; `prefers-color-scheme` no, perche' nsPresContext
+    # guarda prima l'override del BrowsingContext e poi questa pref.
+    # 0 = Dark, 1 = Light (StaticPrefList.yaml:10646-10648); il default e' 2,
+    # che vuol dire "il sistema", cioe' l'host.
+    #
+    # Dichiarata il 2026-08-24, quando `Browser.setColorScheme` e' stato tolto
+    # dal client. Va in quest'ordine: prima la dichiarazione, poi la rimozione
+    # del comando, altrimenti la decisione non torna qui - va alla macchina.
+    # Misurato prima: col comando attivo questa pref era codice morto, messa a
+    # 0 il browser continuava a rispondere light.
+    prefs["layout.css.prefers-color-scheme.content-override"] = (
+        0 if profile.dark_theme else 1)
     # ── Three LookAndFeel values that still read the HOST ────────────────────
     #
     # `ui.textScaleFactor` is the one that matters, and it is not a theme
@@ -1781,6 +1842,26 @@ def humanize_max_seconds(humanize: Any) -> float:
     return value if value > 0 else HUMANIZE_MAX_SECONDS
 
 
+#: Millisecondi fra due `mousemove` consecutivi, MEDIA di una gaussiana (il
+#: passo fisso era di per se' un tell, e il motore lo sfuma gia').
+#:
+#: Il valore non e' scelto a gusto: e' quello che il generatore Python del
+#: wrapper - il percorso PREDEFINITO, quindi il riferimento - produce davvero.
+#: Misurato il 2026-08-24 sulla stessa mossa, leggendo i `dt` dalla pagina:
+#: media 31,9 ms, mediana 31,5, minimo 16, e solo il 5% sotto i 16,7 ms.
+#:
+#: Il motore del binario, che e' il RIPIEGO quando il generatore Python manca,
+#: girava invece sul default compilato di 10 ms e dava media 14,2 ms con minimo
+#: 2 ms: **79 dt su 115 piu' fitti di quanto un 60 Hz reale possa consegnare**,
+#: perche' Firefox unisce i mousemove al ritmo di refresh. Due percorsi per la
+#: stessa cosa che si comportavano in modo diverso, e il piu' veloce era quello
+#: che nessun hardware puo' produrre.
+#:
+#: INTERO per forza: Juggler la legge con `getIntPref`, e una pref del tipo
+#: sbagliato arriva col nome giusto e non viene letta.
+HUMANIZE_STEP_MS = 32
+
+
 def humanize_prefs(humanize: Any) -> Dict[str, Any]:
     """The `stealthfox.*` prefs implied by a `humanize=` value.
 
@@ -1793,6 +1874,10 @@ def humanize_prefs(humanize: Any) -> Dict[str, Any]:
     return {
         "stealthfox.humanize": True,
         "stealthfox.humanize.maxTime": str(humanize_max_seconds(humanize)),
+        # Dichiarata qui e non lasciata al default compilato nel motore: era
+        # l'unica dei tre fratelli `stealthfox.humanize*` che il core non
+        # nominava, quindi la decideva il binario da solo.
+        "stealthfox.humanize.stepMs": HUMANIZE_STEP_MS,
     }
 
 
