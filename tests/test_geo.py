@@ -390,11 +390,27 @@ def test_prepare_geo_egress_present_even_with_explicit_tz(stub_egress):
 
 
 @pytest.mark.unit
-def test_prepare_geo_no_egress_without_proxy(stub_egress):
-    # no proxy → no WebRTC override (real STUN already tells the truth).
+def test_prepare_geo_no_webrtc_override_without_proxy(stub_egress):
+    """Senza proxy non si dichiara nessun srflx - ma il fatto si porta lo stesso.
+
+    ⛔ QUESTO TEST ASSERIVA IL MECCANISMO, NON IL REQUISITO. Il commento diceva
+    "no WebRTC override (real STUN already tells the truth)", che e' il
+    requisito e vale ancora; l'asserzione era `geo.egress_ip is None`, che era
+    solo il MODO in cui quel requisito veniva ottenuto fino al 2026-08-26.
+    Quel modo costava una seconda scoperta dell'indirizzo, perche' il fatto
+    veniva buttato per poter dire "non dichiarare".
+
+    Adesso il requisito e' asserito direttamente, e il fatto e' asserito come
+    fatto. Sono due righe che prima erano una sola e ambigua.
+    """
     geo = prepare_session_geo("auto", None)
     assert geo.timezone == "America/New_York"
-    assert geo.egress_ip is None
+    assert geo.srflx_da_dichiarare() is None, (
+        "senza proxy il motore non deve ricevere nessun srflx da dichiarare: "
+        "quello vero nasce gia' con l'indirizzo giusto e con la sua allocazione")
+    assert geo.egress_ip == "203.0.113.7", (
+        "il giro di rete e' stato fatto per il fuso: buttarne il risultato "
+        "obbliga resolve_session_locale a rifarlo")
 
 
 @pytest.mark.unit
@@ -617,11 +633,18 @@ def test_l_uscita_gia_scoperta_viene_RIUSATA_non_rimisurata(monkeypatch):
 
 
 def test_senza_proxy_la_sonda_NON_viene_nemmeno_chiamata(monkeypatch):
-    """Su una connessione diretta lo STUN vero dice gia' la verita'."""
+    """Su una connessione diretta lo STUN vero dice gia' la verita'.
+
+    ⛔ E QUELLA FRASE E' IL REQUISITO, quindi la risposta e' `True` - non
+    dichiarare. Fino al 2026-08-26 questa asserzione diceva `False`, e il "non
+    dichiarare" arrivava lo stesso perche' `egress_ip` valeva `None` senza
+    proxy. Docstring e asserzione dicevano cose opposte su cosa fare con un
+    indirizzo in mano, e a decidere era l'assenza del fatto invece della regola.
+    """
     from invisible_core import _capacita, _geo
     finta = _CapacitaFinte({"udp": True, "udp_coerente": True})
     monkeypatch.setattr(_capacita, "capacita", finta)
-    assert _geo._srflx_soppresso(None, "203.0.113.7") is False
+    assert _geo._srflx_soppresso(None, "203.0.113.7") is True
     assert finta.chiamate == [], "sondare senza proxy e' un giro di rete sprecato"
 
 
@@ -693,3 +716,111 @@ def test_l_instradamento_udp_e_dichiarato_in_un_posto_solo():
         "scritto in due posti")
     assert "Preferences" not in codice and "socks_remote_udp" not in codice, (
         "_geo sta leggendo la pref per conto suo invece della costante")
+
+
+def _conta_scoperte(monkeypatch):
+    """Rende la scoperta deterministica e CONTA quante volte viene chiamata."""
+    import invisible_core.download as dl
+    from invisible_core import _geo
+
+    conteggio = {"n": 0}
+
+    def finta(proxy=None, **kw):
+        conteggio["n"] += 1
+        return "203.0.113.7"
+
+    monkeypatch.setattr(_geo, "discover_egress_ip", finta)
+    monkeypatch.setattr(_geo, "ip_to_timezone", lambda ip, mmdb: "America/New_York")
+    monkeypatch.setattr(_geo, "ip_to_locale", lambda ip, mmdb: "en-GB")
+    monkeypatch.setattr(_geo, "ip_to_coordinates", lambda ip, mmdb: (1.0, 2.0))
+    monkeypatch.setattr(dl, "ensure_geoip_mmdb", lambda *a, **k: "fake.mmdb")
+    return conteggio
+
+
+@pytest.mark.unit
+def test_senza_proxy_l_indirizzo_si_scopre_UNA_volta_sola(monkeypatch):
+    """Un fatto, un giro di rete. Il percorso predefinito ne faceva DUE.
+
+    ⛔ E' LA REGOLA 16 APPLICATA A UN GIRO DI RETE. `prepare_session_geo`
+    scopriva l'indirizzo per derivarne il fuso, poi lo buttava perche' il campo
+    che avrebbe potuto portarlo significava un'altra cosa; `resolve_session_locale`
+    doveva quindi riscoprirlo. Due richieste identiche a un servizio esterno,
+    dall'indirizzo VERO, prima che il browser esista - e un utente vero ne fa
+    zero, non due.
+
+    Il conto va fatto sui DUE passi insieme, perche' ognuno preso da solo era
+    gia' corretto: nessuno dei due faceva un giro di troppo. Il difetto stava
+    fra loro, e un test su una funzione sola non poteva vederlo.
+    """
+    from invisible_core import _geo
+
+    conteggio = _conta_scoperte(monkeypatch)
+    geo = _geo.prepare_session_geo("auto", None)
+    loc = _geo.resolve_session_locale(geo.egress_ip, None)
+
+    assert loc == "en-GB", "la lingua deve comunque risolversi dall'indirizzo"
+    assert conteggio["n"] == 1, (
+        "l'indirizzo e' stato chiesto alla rete %d volte invece di una: il "
+        "fatto viene ancora buttato fra un passo e l'altro" % conteggio["n"])
+
+
+@pytest.mark.unit
+def test_senza_proxy_il_motore_non_riceve_ne_srflx_ne_filtro_ipv6(monkeypatch):
+    """⛔ LA REGRESSIONE CHE LA CORREZIONE OVVIA AVREBBE CAUSATO.
+
+    Portare l'indirizzo scoperto dentro `egress_ip` senza toccare altro sembra
+    la correzione minima del doppio giro, e sarebbe stata un guasto doppio,
+    perche' `egress_ip` pilotava DUE cose:
+
+    1. il srflx dichiarato - avremmo annunciato un candidato sintetico con
+       l'indirizzo di CASA, cioe' un candidato senza allocazione corrispondente,
+       che e' esattamente il segnale che il rilevatore letto in
+       `docs_research/scrapfly-re/` chiama "the front end is manipulated";
+    2. il filtro IPv6 - `build_launch_env` lo accende su `if webrtc_ip`, quindi
+       si sarebbe riacceso anche senza proxy, disfacendo la misura del
+       2026-08-25 (retail 6 candidati, noi 3, perche' filtravamo sempre).
+
+    Nessuna delle due si vede da un test sul solo `_geo`: la prima passa per un
+    metodo, la seconda per un costruttore di ambiente in un altro modulo. Per
+    questo il test arriva fino all'ambiente.
+    """
+    from invisible_core import _geo
+    from invisible_core.launch import build_launch_env
+
+    _conta_scoperte(monkeypatch)
+    geo = _geo.prepare_session_geo("auto", None)
+
+    assert geo.egress_ip == "203.0.113.7", "il fatto deve essere in mano"
+    env = build_launch_env({}, timezone=geo.timezone or None,
+                           srflx_dichiarato=geo.srflx_da_dichiarare(),
+                           base_env={})
+
+    assert "STEALTHFOX_WEBRTC_PUBLIC_IP" not in env, (
+        "senza proxy staremmo dichiarando un srflx sintetico con l'indirizzo "
+        "di casa: un candidato senza allocazione corrispondente")
+    assert "STEALTHFOX_WEBRTC_DISABLE_IPV6" not in env, (
+        "senza proxy il filtro IPv6 si e' riacceso: e' la regressione della "
+        "misura del 2026-08-25, retail 6 candidati contro i nostri 3")
+
+
+@pytest.mark.unit
+def test_dietro_un_proxy_una_scoperta_fallita_NON_cade_sull_indirizzo_diretto(monkeypatch):
+    """La lingua non si deriva mai dal paese di casa mentre il fuso dice un altro.
+
+    E' il rischio dell'altra meta' della correzione: `resolve_session_locale`
+    adesso riusa cio' che riceve invece di riscoprirlo, e la forma piu' breve -
+    `ip = egress_ip or discover_egress_ip(None)` - avrebbe fatto cadere il caso
+    "proxy vivo, scoperta fallita" sull'indirizzo DIRETTO. La sessione avrebbe
+    dichiarato la lingua del paese di casa e il fuso di quello del proxy: una
+    contraddizione fra due campi, che e' peggio del ripiego su `en-US`.
+    """
+    from invisible_core import _geo
+
+    conteggio = _conta_scoperte(monkeypatch)
+    conteggio["n"] = 0
+    loc = _geo.resolve_session_locale(None, {"server": "socks5://g:1"})
+
+    assert loc == "en-US", "dietro un proxy senza indirizzo si ripiega, non si indovina"
+    assert conteggio["n"] == 0, (
+        "e' uscito sulla rete DIRETTA per derivare la lingua mentre un proxy "
+        "era configurato: quell'indirizzo e' quello di casa")
