@@ -78,10 +78,14 @@ APP_INI = ("[App]\nVendor=Mozilla\nName=Firefox\nVersion={v}\nBuildID={b}\n\n"
            "[Gecko]\nMinVersion={v}\nMaxVersion={v}\n")
 PLAT_INI = "[Build]\nBuildID={b}\nMilestone={v}\n"
 
+# macOS non e' piu' un target di download: dal 2026-08-26 `ensure_binary` rifiuta
+# su darwin PRIMA di guardare il seal (che per le release vecchie contiene ancora
+# gli asset mac - restano leggibili come storia, ma non si scaricano piu'). La
+# gamba darwin e' quindi uscita da questa lista; il rifiuto ha un test suo,
+# `test_ensure_binary_rifiuta_macos`, piu' sotto.
 PLATFORMS = [
     pytest.param("win32", id="win32-zip"),
     pytest.param("linux", id="linux-targz-loose-juggler"),
-    pytest.param("darwin", id="darwin-targz-bundle"),
 ]
 
 
@@ -678,3 +682,21 @@ def test_the_download_path_never_installs_anything():
         "the engine download path reaches an installer again:\n  "
         + "\n  ".join(hits) +
         "\n\nIt may report what to run. It may not run it.")
+
+
+@pytest.mark.unit
+def test_ensure_binary_rifiuta_macos(cache, tmp_path, monkeypatch):
+    """Su un Mac ``ensure_binary`` si ferma al confine, non tenta un download.
+
+    macOS non e' piu' un target dal 2026-08-26. Il rifiuto arriva PRIMA di
+    guardare il seal, con un messaggio che nomina il perche' (nessun binario mac
+    pubblicato) invece di lasciare un fallimento oscuro piu' a valle. Il seal
+    passato e' non-locale e valido (una gamba linux/win reale), per superare il
+    controllo ``is_local`` e arrivare al ramo di piattaforma: e' quel ramo a
+    rifiutare, non l'assenza di un asset.
+    """
+    plat = "win32" if sys.platform == "win32" else "linux"
+    seal, _name, _bytes, _bid = publish(tmp_path, plat)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    with pytest.raises(NotImplementedError, match="macOS non e' piu' una piattaforma"):
+        ensure_binary(seal=seal)

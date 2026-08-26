@@ -282,31 +282,6 @@ def _extract(archive: Path, dst: Path) -> None:
         raise RuntimeError(f"unknown archive format: {archive}")
 
 
-def _post_extract_darwin(app_root: Path, entry: Path) -> None:
-    """Make an ad-hoc-signed .app launchable on macOS.
-
-    The .app is downloaded via requests (no Finder quarantine attached), but we
-    strip com.apple.quarantine defensively and ensure the inner binary is
-    executable. We exec the inner binary directly (not via LaunchServices), so
-    Gatekeeper's first-launch prompt does not apply; the ad-hoc signature
-    (applied in release.yml) is what lets the arm64 Mach-O run at all.
-    """
-    app = app_root
-    # walk up to the .app bundle dir if entry points inside it
-    for parent in entry.parents:
-        if parent.name.endswith(".app"):
-            app = parent
-            break
-    try:
-        subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(app)], check=False)
-    except FileNotFoundError:
-        pass
-    try:
-        entry.chmod(0o755)
-    except OSError:
-        pass
-
-
 def _adopt_existing_cache(seal: Seal, asset: Asset, version_dir: Path) -> Path | None:
     """Use a tree that is already on disk if it IS the sealed build.
 
@@ -414,6 +389,15 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
             f"the code never reads sends the reader hunting in the wrong function.)")
 
     plat = sys.platform
+    if plat == "darwin":
+        raise NotImplementedError(
+            "macOS non e' piu' una piattaforma supportata: da firefox-21 in poi non "
+            "vengono piu' pubblicati binari per Mac, e questo pacchetto non ne scarica.\n"
+            "I seal delle release precedenti contengono ancora gli asset macOS - restano "
+            "leggibili come storia - ma un nuovo avvio su Mac si ferma qui invece di "
+            "tentare un download che non esiste.\n"
+            "Su Windows e Linux non cambia niente."
+        )
     asset = seal.asset_for(plat, platform.machine())
     version_dir = cache_dir_for_seal(seal)
     entry = version_dir / asset.entry_rel

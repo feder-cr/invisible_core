@@ -42,10 +42,16 @@ def test_make_virtual_display_returns_none_on_win32(monkeypatch):
 
 
 @pytest.mark.unit
-def test_make_virtual_display_returns_none_on_darwin(monkeypatch):
-    """macOS is now supported - it hides via the same in-binary cloak pref."""
+def test_make_virtual_display_raises_on_darwin(monkeypatch):
+    """macOS non e' piu' supportato: un Mac si ferma qui invece di procedere.
+
+    Fino a firefox-20 tornava ``None`` (il binario si nascondeva da solo via
+    ``cloak_prefs()``). Da firefox-21 il Mac non e' piu' un target: il rifiuto
+    va dato al confine, con un messaggio che nomina il perche', non lasciato a
+    un fallimento oscuro piu' a valle."""
     monkeypatch.setattr(headless.sys, "platform", "darwin")
-    assert make_virtual_display() is None
+    with pytest.raises(RuntimeError, match="macOS non e' piu' supportato"):
+        make_virtual_display()
 
 
 @pytest.mark.unit
@@ -67,7 +73,7 @@ def test_make_virtual_display_accepts_linux_variants(monkeypatch):
 @pytest.mark.unit
 def test_make_virtual_display_raises_on_unsupported_platform(monkeypatch):
     monkeypatch.setattr(headless.sys, "platform", "freebsd14")
-    with pytest.raises(RuntimeError, match="Windows, macOS and Linux"):
+    with pytest.raises(RuntimeError, match="Windows e Linux"):
         make_virtual_display()
 
 
