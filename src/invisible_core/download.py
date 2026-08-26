@@ -28,6 +28,8 @@ from .constants import (
 from .seal import (
     Asset,
     EngineMismatch,
+    GAMBE_SUPPORTATE,
+    PIATTAFORME_SUPPORTATE,
     Seal,
     SealError,
     SealMismatch,
@@ -389,14 +391,24 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
             f"the code never reads sends the reader hunting in the wrong function.)")
 
     plat = sys.platform
-    if plat == "darwin":
+    if plat not in PIATTAFORME_SUPPORTATE:
+        # La CONDIZIONE viene dalla dichiarazione in seal.py, non da un nome
+        # scritto qui: era `plat == "darwin"`, cioe' lo stesso fatto in un
+        # secondo posto. Il messaggio resta specifico dove sappiamo dire
+        # qualcosa di utile.
+        if plat == "darwin":
+            raise NotImplementedError(
+                "macOS non e' piu' una piattaforma supportata: da firefox-21 in poi non "
+                "vengono piu' pubblicati binari per Mac, e questo pacchetto non ne scarica.\n"
+                "I seal delle release precedenti contengono ancora gli asset macOS - restano "
+                "leggibili come storia - ma un nuovo avvio su Mac si ferma qui invece di "
+                "tentare un download che non esiste.\n"
+                "Su Windows e Linux non cambia niente."
+            )
         raise NotImplementedError(
-            "macOS non e' piu' una piattaforma supportata: da firefox-21 in poi non "
-            "vengono piu' pubblicati binari per Mac, e questo pacchetto non ne scarica.\n"
-            "I seal delle release precedenti contengono ancora gli asset macOS - restano "
-            "leggibili come storia - ma un nuovo avvio su Mac si ferma qui invece di "
-            "tentare un download che non esiste.\n"
-            "Su Windows e Linux non cambia niente."
+            "questa piattaforma non e' fra quelle per cui pubblichiamo un motore: "
+            "%s. Le gambe dichiarate sono %s."
+            % (plat, ", ".join("%s/%s" % g for g in GAMBE_SUPPORTATE))
         )
     asset = seal.asset_for(plat, platform.machine())
     version_dir = cache_dir_for_seal(seal)
