@@ -21,6 +21,7 @@ from invisible_core.constants import (
     FIREFOX_UPSTREAM_VERSION,
     RELEASE_URL_TEMPLATE,
 )
+from invisible_core.seal import GAMBE_SUPPORTATE
 
 
 @pytest.mark.unit
@@ -66,10 +67,22 @@ def test_archive_name_linux():
 
 
 @pytest.mark.unit
-def test_archive_name_macos_arm64():
-    name = ARCHIVE_NAME("darwin", "arm64")
-    assert name.endswith(".tar.gz")
-    assert "macos-arm64" in name
+@pytest.mark.parametrize("machine", ["arm64", "x86_64"])
+def test_macos_e_rifiutato_non_dimenticato(machine):
+    """⛔ Questo caso ASSERIVA il contrario fino al 2026-08-26.
+
+    Diceva `ARCHIVE_NAME("darwin", "arm64")` deve tornare un nome che finisce in
+    `.tar.gz` e contiene `macos-arm64`. Da `firefox-21` non esiste piu' nessun
+    asset macOS, quindi la richiesta deve essere RIFIUTATA.
+
+    Non e' stato cancellato di proposito: una decisione senza nessuno che la
+    sorvegli e' una decisione che qualcuno disfa per sbaglio. Se un giorno un
+    sigillo tornasse a portare darwin, questo caso lo direbbe. Il rifiuto arriva
+    da `Seal.asset_for`, che non trova la coppia, ed e' lo stesso `seal.json` la
+    fonte - non un elenco scritto qui.
+    """
+    with pytest.raises(NotImplementedError):
+        ARCHIVE_NAME("darwin", machine)
 
 
 @pytest.mark.unit
@@ -120,7 +133,8 @@ def test_archive_name_rejects_unsupported_arches(machine):
 @pytest.mark.unit
 @pytest.mark.parametrize("machine", ["arm64", "aarch64"])
 def test_archive_name_arm64_supported(machine):
-    """ARM64 is shipped now (issue #6): both Linux aarch64 and macOS arm64.
+    """ARM64 is shipped now (issue #6): Linux aarch64 - e macOS arm64 fino a
+    `firefox-20`, uscito il 2026-08-26.
     ARCHIVE_NAME must map both machine spellings to the canonical -arm64 asset.
 
     The version comes from BINARY_BASENAME rather than a literal: what this test
@@ -129,7 +143,8 @@ def test_archive_name_arm64_supported(machine):
     gets "fixed" without anyone checking the asset actually exists.
     """
     assert ARCHIVE_NAME("linux", machine) == f"{BINARY_BASENAME}-linux-arm64.tar.gz"
-    assert ARCHIVE_NAME("darwin", machine) == f"{BINARY_BASENAME}-macos-arm64.tar.gz"
+    # La riga su darwin che stava qui e' uscita col mac il 2026-08-26; il
+    # rifiuto ha il suo caso apposta, sopra.
 
 
 @pytest.mark.unit
@@ -149,9 +164,18 @@ def test_archive_name_rejects_unsupported_platforms(platform_key):
 @pytest.mark.unit
 def test_binary_entry_rel_covers_every_supported_platform():
     """If ARCHIVE_NAME accepts a platform key, BINARY_ENTRY_REL must declare
-    where the executable lives inside the archive for it."""
-    for plat in ["win32", "linux", "darwin"]:
-        ARCHIVE_NAME(plat, "x86_64")  # must not raise
+    where the executable lives inside the archive for it.
+
+    ⛔ L'elenco delle piattaforme era scritto a mano - `["win32", "linux",
+    "darwin"]` - ed e' diventato rosso da solo il giorno in cui il mac e' uscito
+    dal sigillo. E' lo stesso difetto di `EXPECTED_ASSETS = 5` in
+    `roll_seal.py`: un conteggio o un elenco scritto in un posto che non e'
+    l'autorita' invecchia al primo cambio di matrice. Ora si deriva da
+    `GAMBE_SUPPORTATE`, che e' la sola dichiarazione, e questo caso continuera' a
+    valere qualunque insieme di gambe spediamo.
+    """
+    for plat, arch in GAMBE_SUPPORTATE:
+        ARCHIVE_NAME(plat, arch)  # must not raise
         assert plat in BINARY_ENTRY_REL, (
             f"ARCHIVE_NAME accepts {plat!r} but BINARY_ENTRY_REL has no entry "
             f"- ensure_binary() will fail late after a 110 MB download."

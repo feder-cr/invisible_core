@@ -38,6 +38,18 @@ from typing import Dict, Optional, Tuple
 # cannot be read forward, because its single BuildID matches at most one of the
 # five legs and there is no way to recover the other four from it.
 SUPPORTED_SEAL_SCHEMA = 2
+
+# Le gambe che pubblichiamo, cioe' le coppie (piattaforma, architettura) per
+# cui esiste un asset scaricabile. UNICA dichiarazione: la legge il rifiuto in
+# download.py e la legge il gate del rilascio (scripts/roll_seal.py), che fino
+# al 2026-08-26 contava e basta - EXPECTED_ASSETS = 5, un numero scritto a
+# mano che il primo rilascio a tre gambe avrebbe fatto fallire, e che comunque
+# non poteva vedere QUALE piattaforma manca. Un conteggio non distingue "tre
+# gambe giuste" da "tre gambe di cui una che nessuno puo' scaricare".
+# Le due macOS sono uscite il 2026-08-26; i sigilli gia' pubblicati le
+# contengono ancora e restano leggibili come storia.
+GAMBE_SUPPORTATE = (("linux", "arm64"), ("linux", "x86_64"), ("win32", "x86_64"))
+PIATTAFORME_SUPPORTATE = tuple(dict.fromkeys(p for p, _ in GAMBE_SUPPORTATE))
 READABLE_SEAL_SCHEMAS = (2,)
 SEAL_FILE_ENV = "INVISIBLE_SEAL_FILE"
 STAMP_NAME = ".invisible-seal.json"
