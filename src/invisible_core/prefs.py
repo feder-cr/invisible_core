@@ -1881,6 +1881,25 @@ def humanize_prefs(humanize: Any) -> Dict[str, Any]:
     }
 
 
+def show_cursor_prefs(show_cursor: Any) -> Dict[str, Any]:
+    """The `stealthfox.*` prefs implied by a `show_cursor=` value.
+
+    ⛔ IT IS A DEMO SWITCH, NOT A STEALTH ONE, and the default is FALSE for a
+    reason that has nothing to do with detection: the overlay draws in the
+    browser's own chrome document, which the page cannot reach, so a site
+    learns nothing either way. What it changes is what a PERSON watching the
+    monitor sees - a dot gliding across a window with nobody touching the mouse
+    reads as "this is a bot" to anyone glancing at the screen. Camoufox ships
+    it on; we do not.
+
+    ⛔ AND IT IS DECLARED HERE, like every other engine switch, so the browser
+    reads and never decides. The pref is written into the profile before the
+    browser starts, so it is in force from the first window rather than from
+    the second launch.
+    """
+    return {"stealthfox.showcursor": bool(show_cursor)}
+
+
 def compose_session_prefs(
     profile: Profile,
     *,
@@ -1891,6 +1910,7 @@ def compose_session_prefs(
     proxy: Optional[Dict[str, str]] = None,
     cloak: bool = False,
     humanize: Any = None,
+    show_cursor: Any = None,
     survive_hard_kill: bool = False,
     delegates_auth: bool = True,
 ) -> ComposedPrefs:
@@ -1958,6 +1978,13 @@ def compose_session_prefs(
             prefs.setdefault(key, value)
     if humanize is not None:
         prefs.update(humanize_prefs(humanize))
+    if show_cursor is not None:
+        # ⛔ Composed HERE and not layered by a caller. The comment on
+        # `build_prefs` in the wrapper records what happens otherwise: three
+        # separate places stacked layers in their own order and nothing
+        # compared the results, so one of them silently skipped the proxy
+        # entirely. One composer, one order.
+        prefs.update(show_cursor_prefs(show_cursor))
     if survive_hard_kill:
         # A persistent profile can be hard-killed - a manager Stop, or a kill
         # mid-startup on a rapid relaunch. Keep Firefox from counting that as a
