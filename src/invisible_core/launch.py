@@ -281,6 +281,16 @@ def build_launch_plan(
     locale: str = "auto",
     pin: Optional[Dict[str, Any]] = None,
     binary_ver: Optional[str] = None,
+    # <M> IL BINARIO CHE IL CHIAMANTE HA GIA'. Senza questo parametro la
+    # funzione risolve SEMPRE un motore - `ensure_binary()` - anche quando chi
+    # chiama il binario ce l'ha in mano e usa questo piano solo per le prefs e
+    # per l'ambiente. E' un lavoro inutile nel caso migliore e un rifiuto nel
+    # caso vero: con un sigillo LOCALE non c'e' niente da scaricare, quindi
+    # `ensure_binary()` solleva e si porta dietro ogni chiamante, compresi i
+    # test e2e che il binario lo passano a mano due righe piu' sotto. Misurato
+    # il 2026-08-28: 21 rossi sull'e2e, identici sui due transport, tutti
+    # questo.
+    binary_path: Optional[str] = None,
     extra_args: Optional[List[str]] = None,
     # ⛔ IL DEFAULT ERA "about:blank", TOLTO IL 2026-08-20 col revert del newtab.
     # Un URL sulla riga di comando ha la PRECEDENZA sulla pagina d'avvio, quindi
@@ -295,6 +305,10 @@ def build_launch_plan(
     #
     # Il parametro resta pubblico: chi vuole una pagina la passa esplicitamente.
     url: str = "",
+    # ⛔ Anche il lancio diretto deve poterlo accendere, o la funzione esiste
+    # solo per chi passa dal wrapper. Il default e' False come di la': il punto
+    # e' il default, non l'interruttore.
+    show_cursor: Optional[bool] = None,
 ) -> LaunchPlan:
     """The single direct-launch entry point (no Playwright, no Qt).
 
@@ -315,7 +329,14 @@ def build_launch_plan(
     from ._geo import prepare_session_geo, resolve_session_locale
     from .prefs import compose_session_prefs
 
-    binary = str(ensure_binary(binary_ver) if binary_ver else ensure_binary())
+    # <M> Si risolve solo se serve. `ensure_binary` verifica il motore contro
+    # il sigillo, che e' giusto quando il motore lo scegliamo noi; quando lo
+    # sceglie il chiamante quella verifica la fa il chiamante - e il posto in
+    # cui la fa e' `conn.launch`, non qui.
+    if binary_path:
+        binary = str(binary_path)
+    else:
+        binary = str(ensure_binary(binary_ver) if binary_ver else ensure_binary())
     # Resolves timezone="auto" from the egress AND discovers the egress IP;
     # raises behind a dead proxy (fail-early, by design).
     geo = prepare_session_geo(timezone, proxy)
@@ -337,6 +358,7 @@ def build_launch_plan(
     prefs = compose_session_prefs(
         fp, locale=loc, timezone=geo.timezone,
         proxy=proxy, survive_hard_kill=True, delegates_auth=False,
+        show_cursor=show_cursor,
     ).prefs
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)

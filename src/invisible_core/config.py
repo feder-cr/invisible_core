@@ -52,6 +52,7 @@ def get_default_stealth_prefs(
     humanize: Union[bool, float] = True,
     virtual_display: bool = False,
     proxy: Optional[Dict[str, str]] = None,
+    show_cursor: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Build a complete ``firefox_user_prefs`` dict for ``firefox.launch()``.
 
@@ -109,6 +110,20 @@ def get_default_stealth_prefs(
             ``launch(proxy=...)`` yourself. Added 2026-08-01: before it,
             this function returned a prefs dict with no proxy configuration
             whatever endpoint you were about to use.
+        show_cursor: Draw the pointer where the automation is, in the
+            browser's own chrome window: the Windows arrow with the package
+            logo's green halo around it. None means "not specified" and
+            resolves to `invisible_core.prefs.DEFAULT_SHOW_CURSOR`, which is
+            True; pass False for a session with nothing drawn. It is a demo
+            and debugging switch, not a stealth one - the page cannot reach
+            the node, so no detector sees a difference - while a person
+            watching the monitor sees a pointer moving with nobody touching
+            the mouse, which is the trade the default makes.
+
+            ⛔ It is DECLARED either way, false included, on both core paths.
+            The engine does carry a compiled `false` as the last resort, but
+            relying on it would be a second place that knows the answer, and
+            the two can then disagree without anything noticing.
 
     Returns:
         Dict ready to pass as ``firefox_user_prefs=`` to
@@ -133,6 +148,7 @@ def get_default_stealth_prefs(
         virtual_display=virtual_display,
         proxy=proxy,
         humanize=humanize,
+        show_cursor=show_cursor,
     ).prefs
 
 

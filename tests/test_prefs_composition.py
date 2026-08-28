@@ -28,7 +28,8 @@ import invisible_core.download as _dl
 from invisible_core import get_default_stealth_prefs
 from invisible_core._geo import SessionGeo
 from invisible_core.launch import build_launch_plan, write_user_js
-from invisible_core.prefs import compose_session_prefs, humanize_prefs
+from invisible_core.prefs import (DEFAULT_SHOW_CURSOR, compose_session_prefs,
+                                  humanize_prefs)
 
 pytestmark = pytest.mark.unit
 
@@ -198,3 +199,54 @@ def test_the_hard_kill_prefs_can_be_overridden_by_the_caller():
         extra_prefs={"toolkit.startup.max_resumed_crashes": 3},
     ).prefs
     assert composed["toolkit.startup.max_resumed_crashes"] == 3
+
+
+def test_the_visible_cursor_is_declared_by_every_core_path_and_defaults_on():
+    """On by default since 2026-08-28, and DECLARED rather than left to the
+    engine.
+
+    The engine reads `getBoolPref(PREF, false)`, so an absent pref would mean
+    OFF - the opposite of the shipped default now, which is exactly why the
+    declaration is asserted rather than assumed. A compiled default and a
+    declaration are two places that know the same thing, and the project has
+    already paid for that shape (the taskbar geometry had four). Here there is
+    one: `DEFAULT_SHOW_CURSOR`, both core paths say it identically, and the
+    engine only obeys.
+    """
+    public = get_default_stealth_prefs(SEED, locale=LOCALE, timezone=TZ)
+    assert public["stealthfox.showcursor"] is DEFAULT_SHOW_CURSOR
+    assert DEFAULT_SHOW_CURSOR is True, (
+        "the shipped default moved; that is a decision, so move this "
+        "assertion deliberately rather than to make a suite green")
+
+    silent = compose_session_prefs(_profile()).prefs
+    assert silent["stealthfox.showcursor"] is DEFAULT_SHOW_CURSOR
+
+    off = get_default_stealth_prefs(SEED, locale=LOCALE, timezone=TZ,
+                                    show_cursor=False)
+    assert off["stealthfox.showcursor"] is False, (
+        "an explicit False must still win: None means 'did not say', and a "
+        "layer that collapses the two takes the switch away from the caller")
+
+    asked = get_default_stealth_prefs(SEED, locale=LOCALE, timezone=TZ,
+                                      show_cursor=True)
+    assert asked["stealthfox.showcursor"] is True
+
+    # And the two core paths agree on the VALUE, not only on the key - which is
+    # what `test_the_two_core_paths_compose_the_same_prefs` above compares.
+    composed = compose_session_prefs(_profile(), show_cursor=True).prefs
+    assert composed["stealthfox.showcursor"] is True
+
+
+def test_the_visible_cursor_is_independent_of_humanize():
+    """Two switches, not one, and no code may derive either from the other.
+
+    `humanize` decides WHO draws the path; `show_cursor` decides whether the
+    chrome window paints a dot on top of it. Humanize off with the dot on is a
+    legitimate session - it is how you watch a teleporting cursor - and a
+    derivation would quietly forbid it.
+    """
+    both = compose_session_prefs(_profile(), humanize=False,
+                                 show_cursor=True).prefs
+    assert both["stealthfox.humanize"] is False
+    assert both["stealthfox.showcursor"] is True
