@@ -102,6 +102,19 @@ markers = [
 # the release wiring, and it is the selection a push most needs.
 addopts = "-m 'not slow and not e2e' --strict-markers"
 
+# ⛔ THE SUITE TESTS *THIS* CHECKOUT, not whatever the shared interpreter's
+# editable install happens to point at. This repository has not been bitten
+# yet - its .pth points here today by install order, not by construction -
+# but its consumer was, on 2026-08-29: the wrapper's editable install had
+# drifted to a SECOND working copy of that same repository, on an older
+# branch, and a plain `pytest -q` there ran against a package with a whole
+# subsystem missing.
+#
+# The exposure is identical here and the cost of removing it is one line, so
+# it is removed rather than left to install order. `src` resolves relative to
+# this file, so each checkout points at itself.
+pythonpath = ["src"]
+
 [tool.hatch.version]
 source = "code"
 path = "src/invisible_core/_version.py"

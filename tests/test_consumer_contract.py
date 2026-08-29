@@ -123,28 +123,40 @@ CONTRACT = {
     "invisible_core._fpforge": {
         "Profile", "_network", "_sampler", "generate_profile", "profile",
     },
-    "invisible_core.constants": {
-        # `BINARY_VERSION` left this MODULE's row on 2026-08-18 with the deletion
-        # of `invisible_firefox`, which was the only consumer reaching for it
-        # here. The name is unchanged and still guarded: the wrapper imports it
-        # from the package, so it is still listed under `invisible_core` above,
-        # and test_constants.py / test_seal_version.py cover the derivation.
-        # The Windows taskbar, added 2026-08-09. The wrapper carried its own
-        # _TASKBAR_H = 40 while this package declared 48 and the engine's
-        # compiled floor was 48, so the default viewport was derived from one
-        # number and screen.availHeight from another. The wrapper reads the
-        # profile field at the use sites and imports this only to keep the old
-        # name resolving to the same declaration. NOTE the ordering this
-        # creates: the name is new here, so the core must be on the index
-        # BEFORE a wrapper release can use it.
-        "TASKBAR_PX",
-        # Same story, same day, and the same ordering constraint: the wrapper's
-        # _CHROME_W / _CHROME_H were module constants at 14 and 91, and the 14
-        # was not merely duplicated but WRONG - stock Firefox 151 answers
-        # outerWidth - innerWidth = 0. Measured 2026-08-09.
-        "CHROME_W",
-        "CHROME_H",
-    },
+    # `BINARY_VERSION` left this MODULE's row on 2026-08-18 with the deletion
+    # of `invisible_firefox`, which was the only consumer reaching for it
+    # here. The name is unchanged and still guarded: the wrapper imports it
+    # from the package, so it is still listed under `invisible_core` above,
+    # and test_constants.py / test_seal_version.py cover the derivation.
+    #
+    # ⛔ TASKBAR_PX, CHROME_W and CHROME_H WERE HERE AND CAME OUT on
+    # 2026-08-29, in the ONE direction this file allows: the consumer stopped
+    # importing them, so the rows go, per the rule in the docstring at the top.
+    # They were added on 2026-08-09 because the wrapper carried duplicate
+    # constants - _TASKBAR_H = 40 against this package's 48, and a
+    # _CHROME_W = 14 that was not merely duplicated but WRONG, since stock
+    # Firefox 151 answers outerWidth - innerWidth = 0.
+    #
+    # What changed: the wrapper imported them only to keep an old name
+    # resolving, and a simplification pass removed that re-export from
+    # `launcher.py`. Its `src/` names none of the three any more.
+    #
+    # ⛔ AND THEY ARE NOT FREE TO DELETE FROM `constants.py`, which is the part
+    # a green suite here will not tell you. The wrapper's TESTS still import
+    # all three, straight from this package now that the re-export is gone
+    # (`test_launcher_config.py`, `test_launcher_helpers.py`). That is outside
+    # this contract on purpose - the perimeter is the consumer's `src/`,
+    # because what this file exists to prevent is a USER's import failing
+    # after an upgrade, not a consumer's CI going red where the people who can
+    # fix it are already looking. Deleting the constants would turn the
+    # wrapper's suite red, immediately and visibly, which is the acceptable
+    # failure of the two.
+    #
+    # ⛔ `set()` AND NOT EMPTY BRACES. With every name gone, `{ }` is an empty
+    # DICT, and the comparison below does `dict - set` - a TypeError, not a red
+    # assertion, so the gate stops being a gate and starts being a crash. Cost
+    # of learning this: one run, because the test was there to catch it.
+    "invisible_core.constants": set(),
     "invisible_core.launch": {
         # The font manifest handover, added 2026-08-08. The engine builds its
         # font list during app startup, before the caller's prefs exist on the
