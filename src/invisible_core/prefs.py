@@ -1881,6 +1881,47 @@ def humanize_prefs(humanize: Any) -> Dict[str, Any]:
     }
 
 
+#: Whether the pointer overlay is drawn when the caller does not say.
+#:
+#: ⛔ ONE LITERAL, AND IT USED TO BE SEVEN. The value lived in six Python
+#: signatures - `config`, `launch`, the launcher, both API front doors and the
+#: session - plus the engine's own `getBoolPref` fallback, and nothing compared
+#: them: flipping the switch meant finding all six, and a missed one would give
+#: the sync API a different default from the async one with every test still
+#: green. The signatures now default to None, meaning "the caller did not say",
+#: and this is the only place that decides what that means.
+#:
+#: ⛔ THE ENGINE'S FALLBACK IS NOT A SECOND SOURCE. `StealthCursor.js` reads
+#: `getBoolPref(PREF_ENABLED, false)`, which answers the different question
+#: "nobody declared it at all" - a profile this package did not write. Since
+#: the pref is now always emitted, that branch is never the one taken here.
+#:
+#: Owner decision 2026-08-28: ON by default. What it trades is recorded below
+#: rather than deleted, because the trade did not stop being true.
+DEFAULT_SHOW_CURSOR = True
+
+
+def show_cursor_prefs(show_cursor: Any) -> Dict[str, Any]:
+    """The `stealthfox.*` prefs implied by a `show_cursor=` value.
+
+    ⛔ IT IS A DEMO SWITCH, NOT A STEALTH ONE, and the default does not change
+    that: the overlay draws in the browser's own chrome document, which the
+    page cannot reach, so a site learns nothing either way. What it changes is
+    what a PERSON watching the monitor sees - a pointer gliding across a window
+    with nobody touching the mouse reads as "this is a bot" to anyone glancing
+    at the screen. That was the argument for shipping it off, it is still the
+    argument, and the owner decided on 2026-08-28 to ship it ON anyway, the way
+    Camoufox does. A caller who wants the old behaviour passes
+    `show_cursor=False` and gets it.
+
+    ⛔ AND IT IS DECLARED HERE, like every other engine switch, so the browser
+    reads and never decides. The pref is written into the profile before the
+    browser starts, so it is in force from the first window rather than from
+    the second launch.
+    """
+    return {"stealthfox.showcursor": bool(show_cursor)}
+
+
 def compose_session_prefs(
     profile: Profile,
     *,
@@ -1891,6 +1932,7 @@ def compose_session_prefs(
     proxy: Optional[Dict[str, str]] = None,
     cloak: bool = False,
     humanize: Any = None,
+    show_cursor: Any = None,
     survive_hard_kill: bool = False,
     delegates_auth: bool = True,
 ) -> ComposedPrefs:
@@ -1958,6 +2000,19 @@ def compose_session_prefs(
             prefs.setdefault(key, value)
     if humanize is not None:
         prefs.update(humanize_prefs(humanize))
+    # ⛔ ALWAYS EMITTED, never left to the engine. `None` from a caller
+    # means "did not say" and resolves to `DEFAULT_SHOW_CURSOR` here; it
+    # does not mean "leave the pref out", which would hand the decision
+    # back to a compiled fallback in the browser and give this package two
+    # answers depending on which profile it happened to write.
+    #
+    # ⛔ Composed HERE and not layered by a caller. The comment on
+    # `build_prefs` in the wrapper records what happens otherwise: three
+    # separate places stacked layers in their own order and nothing
+    # compared the results, so one of them silently skipped the proxy
+    # entirely. One composer, one order.
+    prefs.update(show_cursor_prefs(
+        DEFAULT_SHOW_CURSOR if show_cursor is None else show_cursor))
     if survive_hard_kill:
         # A persistent profile can be hard-killed - a manager Stop, or a kill
         # mid-startup on a rapid relaunch. Keep Firefox from counting that as a

@@ -123,28 +123,40 @@ CONTRACT = {
     "invisible_core._fpforge": {
         "Profile", "_network", "_sampler", "generate_profile", "profile",
     },
-    "invisible_core.constants": {
-        # `BINARY_VERSION` left this MODULE's row on 2026-08-18 with the deletion
-        # of `invisible_firefox`, which was the only consumer reaching for it
-        # here. The name is unchanged and still guarded: the wrapper imports it
-        # from the package, so it is still listed under `invisible_core` above,
-        # and test_constants.py / test_seal_version.py cover the derivation.
-        # The Windows taskbar, added 2026-08-09. The wrapper carried its own
-        # _TASKBAR_H = 40 while this package declared 48 and the engine's
-        # compiled floor was 48, so the default viewport was derived from one
-        # number and screen.availHeight from another. The wrapper reads the
-        # profile field at the use sites and imports this only to keep the old
-        # name resolving to the same declaration. NOTE the ordering this
-        # creates: the name is new here, so the core must be on the index
-        # BEFORE a wrapper release can use it.
-        "TASKBAR_PX",
-        # Same story, same day, and the same ordering constraint: the wrapper's
-        # _CHROME_W / _CHROME_H were module constants at 14 and 91, and the 14
-        # was not merely duplicated but WRONG - stock Firefox 151 answers
-        # outerWidth - innerWidth = 0. Measured 2026-08-09.
-        "CHROME_W",
-        "CHROME_H",
-    },
+    # `BINARY_VERSION` left this MODULE's row on 2026-08-18 with the deletion
+    # of `invisible_firefox`, which was the only consumer reaching for it
+    # here. The name is unchanged and still guarded: the wrapper imports it
+    # from the package, so it is still listed under `invisible_core` above,
+    # and test_constants.py / test_seal_version.py cover the derivation.
+    #
+    # ⛔ TASKBAR_PX, CHROME_W and CHROME_H WERE HERE AND CAME OUT on
+    # 2026-08-29, in the ONE direction this file allows: the consumer stopped
+    # importing them, so the rows go, per the rule in the docstring at the top.
+    # They were added on 2026-08-09 because the wrapper carried duplicate
+    # constants - _TASKBAR_H = 40 against this package's 48, and a
+    # _CHROME_W = 14 that was not merely duplicated but WRONG, since stock
+    # Firefox 151 answers outerWidth - innerWidth = 0.
+    #
+    # What changed: the wrapper imported them only to keep an old name
+    # resolving, and a simplification pass removed that re-export from
+    # `launcher.py`. Its `src/` names none of the three any more.
+    #
+    # ⛔ AND THEY ARE NOT FREE TO DELETE FROM `constants.py`, which is the part
+    # a green suite here will not tell you. The wrapper's TESTS still import
+    # all three, straight from this package now that the re-export is gone
+    # (`test_launcher_config.py`, `test_launcher_helpers.py`). That is outside
+    # this contract on purpose - the perimeter is the consumer's `src/`,
+    # because what this file exists to prevent is a USER's import failing
+    # after an upgrade, not a consumer's CI going red where the people who can
+    # fix it are already looking. Deleting the constants would turn the
+    # wrapper's suite red, immediately and visibly, which is the acceptable
+    # failure of the two.
+    #
+    # ⛔ `set()` AND NOT EMPTY BRACES. With every name gone, `{ }` is an empty
+    # DICT, and the comparison below does `dict - set` - a TypeError, not a red
+    # assertion, so the gate stops being a gate and starts being a crash. Cost
+    # of learning this: one run, because the test was there to catch it.
+    "invisible_core.constants": set(),
     "invisible_core.launch": {
         # The font manifest handover, added 2026-08-08. The engine builds its
         # font list during app startup, before the caller's prefs exist on the
@@ -157,23 +169,16 @@ CONTRACT = {
     },
     "invisible_core.download": {
         "cache_root", "ensure_binary",
-        # Le tre righe qui sotto sono entrate il 2026-08-24 con
-        # `invisible_playwright._node`, che procura il Node su cui gira il driver
-        # biforcato: lo scarica da nodejs.org al primo uso e ne verifica il
-        # checksum. Sono nomi PRIVATI, e listarli qui e' esattamente il punto:
-        # un consumatore che si appoggia a un nome privato senza dichiararlo
-        # crea una dipendenza che questo pacchetto puo' rompere senza
-        # accorgersene, ed e' quello che il gate ha appena impedito.
+        # ⛔ USCITE il 2026-08-28 con la cancellazione di Node. `_download_file`,
+        # `_parse_checksums` e `_sha256_file` erano entrate il 2026-08-24 per
+        # `invisible_playwright._node`, che scaricava da nodejs.org il Node su cui
+        # girava il driver biforcato. Tolto il driver, nessun consumatore le importa
+        # piu', e questo gate l'ha detto da solo: un contratto che promette di piu'
+        # di quanto qualcuno usi congela questo pacchetto per nessuno.
         #
-        # Perche' appoggiarsi a loro invece di riscriverli nel wrapper: scaricare
-        # con una scadenza, sommare uno sha256 e leggere un file di checksum sono
-        # gia' scritti e gia' provati qui. Averne un secondo esemplare nel wrapper
-        # sarebbe lo stesso fatto in due posti - la regola 16 - e i due
-        # divergerebbero al primo bug corretto da una parte sola.
-        #
-        # Verificato che esistano nel wheel PUBBLICATO e non solo nell'albero di
-        # lavoro, perche' un consumatore puo' usare solo cio' che l'indice ha.
-        "_download_file", "_parse_checksums", "_sha256_file",
+        # ⛔ NON sono state cancellate dal core - restano scritte, provate e usate
+        # da `ensure_binary`. Quello che finisce qui e' la PROMESSA di non cambiarle
+        # per un consumatore che non c'e' piu'.
         # `engine_status` left on 2026-08-18 with the deletion of
         # `invisible_firefox`, which showed the engine's state in its UI. Not
         # deleted from the core and still covered by test_doctor_fix.py,
