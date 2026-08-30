@@ -79,6 +79,11 @@ CONTRACT = {
         "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
+        # ⛔ Il LETTORE degli endpoint, e sta qui perche' il consumatore
+        # lo importa invece di averne una copia: il 2026-08-30 ne e' esistita
+        # una nel wrapper per la durata di una correzione, ed era la stessa
+        # duplicazione che aveva prodotto il difetto, un piano piu' in basso.
+        "parse_proxy",
         "ensure_geoip_mmdb", "forced_gpu_class",
         "get_default_args", "get_default_stealth_prefs",
         "make_virtual_display", "prefs", "prepare_session_geo",

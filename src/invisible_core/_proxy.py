@@ -1,50 +1,162 @@
-"""Proxy translation shared by sync and async launchers.
+"""Proxy translation: ONE reading of the endpoint, ONE road to the engine.
 
-SOCKS proxies are driven entirely by the patched Firefox prefs (the
-``nsProtocolProxyService`` patch reads ``network.proxy.socks_username``
-and ``socks_password``). HTTP/HTTPS proxies go through Playwright's own
-``proxy=`` kwarg so it can negotiate Basic auth.
+⛔ THERE USED TO BE THREE ROADS FOR ONE FACT - where does this session's
+traffic go - and the scheme picked between them. SOCKS was routed by writing
+``network.proxy.*``; HTTP/HTTPS was handed back for the Playwright driver to
+route per channel; HTTP/HTTPS without a driver got different prefs and a
+refusal whenever credentials were present. When the Node driver was removed the
+middle road stopped existing, and ``proxy=`` with an ``http`` scheme was
+accepted and dropped: the page resolved its own DNS and went out on the host
+address while the timezone, the locale and the WebRTC candidate had all been
+resolved THROUGH the proxy. Announcing one country and connecting from another
+is the exact signal this package exists to avoid, manufactured by the package.
+
+Reported from outside on 2026-08-30, and the report is what settled the design:
+adding the missing call would have left two roads, which is the shape that
+produced the defect. So the other roads are DELETED, not fixed.
+
+**The one road is the engine's ``Browser.setBrowserProxy``.** It has always been
+there, it carries credentials, and it covers ``http``, ``https``, ``socks`` and
+``socks4`` alike - so the scheme decides nothing any more. ``parse_proxy`` reads
+the endpoint once; whoever holds the protocol connection sends the command. A
+caller with no connection is not given a second road: ``build_launch_plan``
+refuses a proxy and names the wrapper.
+
+What stays here is what was never routing: the prefs that close the channels a
+proxied session can still leak through.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NamedTuple, Optional
 
 
-_SOCKS_SCHEMES = ("socks5://", "socks4://", "socks://")
+#: What a caller may write on the left, the four names the engine's
+#: ``setBrowserProxy`` declares on the right. ``socks5`` is what everybody
+#: writes and is NOT one of them.
+_PROXY_TYPES = {"http": "http", "https": "https",
+                "socks": "socks", "socks5": "socks", "socks4": "socks4"}
+
+#: The port Playwright documents as the default for each scheme.
+_DEFAULT_PORT = {"http": 80, "https": 443, "socks": 1080, "socks4": 1080}
+
+
+class ProxyEndpoint(NamedTuple):
+    """One proxy, in the terms the engine uses. ``type`` is one of the four."""
+
+    type: str
+    host: str
+    port: int
+    username: str
+    password: str
+    bypass: tuple
+
+    @property
+    def is_socks(self) -> bool:
+        return self.type in ("socks", "socks4")
+
+    @property
+    def has_credentials(self) -> bool:
+        return bool(self.username or self.password)
+
+    def as_engine_command(self) -> Dict[str, Any]:
+        """The params of ``Browser.setBrowserProxy`` / ``setContextProxy``.
+
+        Credentials are OMITTED rather than sent empty: the engine declares
+        them Optional, and an empty string is a value, not an absence.
+        """
+        params: Dict[str, Any] = {"type": self.type, "host": self.host,
+                                  "port": self.port, "bypass": list(self.bypass)}
+        if self.username:
+            params["username"] = self.username
+        if self.password:
+            params["password"] = self.password
+        return params
+
+
+def parse_proxy(proxy: Optional[Dict[str, Any]]) -> Optional[ProxyEndpoint]:
+    """The ONE place that reads what the caller wrote. Raises, never guesses.
+
+    ``None`` means "no proxy was asked for", which is the only case a caller may
+    treat as "carry on". Anything present and unreadable RAISES, because the
+    caller cannot otherwise tell that apart from a proxy that was silently
+    dropped - and a dropped proxy has to stop the launch.
+    """
+    if not proxy:
+        return None
+    server = str(proxy.get("server") or "").strip()
+    if not server or server.lower() == "direct://":
+        return None
+
+    rest = server
+    scheme = "http"                     # Playwright's default for a bare host
+    if "://" in rest:
+        scheme, rest = rest.split("://", 1)
+        scheme = scheme.lower()
+    if scheme not in _PROXY_TYPES:
+        raise ValueError(
+            "proxy server %r uses scheme %r, which the engine cannot express. "
+            "It takes one of: %s"
+            % (server, scheme, ", ".join(sorted(_PROXY_TYPES))))
+    kind = _PROXY_TYPES[scheme]
+
+    rest = rest.split("/", 1)[0]
+    if rest.startswith("["):            # an IPv6 literal keeps its brackets
+        host, _, tail = rest.partition("]")
+        host, port_text = host[1:], (tail[1:] if tail.startswith(":") else "")
+    elif ":" in rest:
+        # ⛔ `rpartition` ON THE COLON, and the branch has to be on whether a
+        # colon EXISTS rather than on whether the head came back empty: with
+        # the second test `http://:80` read as the host "80" on the default
+        # port, which is a proxy nobody wrote. Caught by the known-bad case,
+        # not by review.
+        host, _, port_text = rest.rpartition(":")
+    else:
+        host, port_text = rest, ""
+    if not host:
+        raise ValueError("proxy server %r names no host" % server)
+
+    if port_text:
+        try:
+            port = int(port_text)
+        except ValueError:
+            raise ValueError(
+                "proxy server %r has a port that is not a number" % server)
+        if not 1 <= port <= 65535:
+            raise ValueError(
+                "proxy server %r has a port outside 1-65535" % server)
+    else:
+        port = _DEFAULT_PORT[kind]
+
+    bypass = proxy.get("bypass")
+    if isinstance(bypass, str):
+        bypass = [b.strip() for b in bypass.split(",") if b.strip()]
+    return ProxyEndpoint(type=kind, host=host, port=port,
+                         username=str(proxy.get("username") or ""),
+                         password=str(proxy.get("password") or ""),
+                         bypass=tuple(bypass or ()))
 
 
 def configure_proxy(
     proxy: Optional[Dict[str, str]],
     prefs: Dict[str, Any],
-    *,
-    delegates_auth: bool = True,
 ) -> Optional[Dict[str, str]]:
-    """Mutate ``prefs`` for SOCKS auth; return what to pass to Playwright.
+    """Validate the endpoint, close the leak channels, hand it on. NO routing.
 
-    * ``None`` proxy → returns ``None``.
-    * SOCKS proxy → writes the auth prefs and returns ``None`` (Playwright
-      gets nothing; Firefox does the rest).
-    * HTTP / HTTPS proxy → returns the dict unchanged for Playwright.
+    ⛔ THIS WRITES NO ``network.proxy.*``, AND THAT IS THE POINT. Routing is the
+    engine command, sent by whoever holds the connection, for every scheme
+    alike - see the module docstring for the three roads this replaced and the
+    defect they produced.
 
-    ``delegates_auth`` is the caller stating a fact about ITSELF: whether it has
-    a Playwright to hand an HTTP/HTTPS endpoint to. The wrapper does, so it
-    leaves the default. ``build_launch_plan`` does not - it spawns the binary
-    with ``subprocess`` - and passes ``False``.
+    What remains is what was never routing: the prefs below close the channels
+    a proxied session can still leak through. They were already applied to both
+    schemes and they still are, unchanged.
 
-    Why the caller declares it instead of this function guessing: for six weeks
-    the direct-launch path called this function, discarded the returned dict
-    because it had nowhere to put it, and launched a browser with NO proxy
-    configuration at all. The session then went out on the host's own address
-    while ``_geo`` had already resolved timezone and locale THROUGH the proxy,
-    so the page announced one country and connected from another. Nothing
-    raised, nothing logged. Same failure shape the no-port branch below was
-    fixed for on 2026-08-01, on the other scheme.
+    Returns the endpoint dict so the caller can hand it to the client that
+    sends the command, ``None`` when no proxy was asked for. An unreadable
+    endpoint RAISES: a caller cannot tell "none" from "dropped", and dropped
+    has to stop the launch.
     """
-    if not proxy:
-        return None
-
-    server = (proxy.get("server") or "").strip()
-    if not server or server.lower() == "direct://":
+    if parse_proxy(proxy) is None:
         return None
 
     # ⛔ QUI E' STATA PROVATA `network.dns.disableIPv6 = True` E TOLTA: E' INERTE
@@ -73,10 +185,7 @@ def configure_proxy(
     # `api6.ipify.org` attraverso il proxy risponde), non spegnere IPv6 da
     # questo lato.
 
-    if not _is_socks_scheme(server):
-        risultato = _configure_http_like(proxy, prefs, server, delegates_auth)
-    else:
-        risultato = _configure_socks(proxy, prefs, server)
+    risultato = dict(proxy)
 
     # ⛔ QUANDO IL PROXY INCIAMPA, IL RIPIEGO DI FIREFOX E' USCIRE IN CHIARO.
     #
@@ -167,99 +276,6 @@ def configure_proxy(
     return risultato
 
 
-def _configure_socks(
-    proxy: Dict[str, str],
-    prefs: Dict[str, Any],
-    server: str,
-) -> None:
-    """Le prefs di instradamento SOCKS. Estratta da `configure_proxy` il
-    2026-08-25 perche' la pref di sicurezza qui sopra vive in UN posto solo e
-    doveva stare dopo la validazione di ENTRAMBI gli schemi."""
-    host_port = _strip_scheme(server)
-    if ":" not in host_port:
-        # It used to `return None  # malformed, drop silently`, and a test named
-        # test_cp14_socks_without_port_dropped_silently pinned that. Changed
-        # 2026-08-01 after reading what the silence costs: the caller asked for a
-        # proxy, no network.proxy.* pref is written, and the session goes out on
-        # the host's own address believing it is proxied. For this package that
-        # is the worst outcome there is, and it is invisible - the browser
-        # launches, the page loads, the IP is wrong.
-        #
-        # The other parser disagreed too: _geo builds `socks5h://host` from the
-        # same dict and hands it to requests, so one half of a session was
-        # proxied and the other was not.
-        raise ValueError(
-            f"proxy server {server!r} has no port. A SOCKS endpoint needs "
-            f"host:port - e.g. socks5://host:1080. Refusing rather than "
-            f"launching unproxied, which is what this used to do silently")
-
-    host, port_str = host_port.rsplit(":", 1)
-    prefs["network.proxy.type"]            = 1
-    prefs["network.proxy.socks"]           = host
-    prefs["network.proxy.socks_port"]      = int(port_str)
-    prefs["network.proxy.socks_version"]   = 4 if server.lower().startswith("socks4://") else 5
-    prefs["network.proxy.socks_username"]  = proxy.get("username") or ""
-    prefs["network.proxy.socks_password"]  = proxy.get("password") or ""
-    prefs["network.proxy.socks_remote_dns"] = True
-    return None
-
-
-def _configure_http_like(
-    proxy: Dict[str, str],
-    prefs: Dict[str, Any],
-    server: str,
-    delegates_auth: bool,
-) -> Optional[Dict[str, str]]:
-    """An HTTP/HTTPS endpoint, for a caller that may or may not have Playwright.
-
-    Routing and authentication are two different problems here, and only the
-    second one needs Playwright:
-
-    * ROUTING is pure prefs, and it was measured working on the shipped binary:
-      with ``network.proxy.type`` plus ``http``/``http_port``/``ssl``/``ssl_port``
-      the browser goes to the proxy and does NOT fall back to direct.
-    * AUTHENTICATION is not. The credentials we write for SOCKS reach the
-      ``nsProxyInfo``, but nothing builds a ``Proxy-Authorization`` header out of
-      them, so an authenticated endpoint stops at the 407 and Gecko reports
-      ``NS_ERROR_PROXY_CONNECTION_REFUSED``. Playwright's own proxy support is
-      what answers that challenge today.
-
-    Hence: a caller that can delegate keeps the previous behaviour exactly, so
-    the path measured green stays untouched. A caller that cannot gets the
-    routing prefs, and a REFUSAL when credentials are present - because the one
-    thing that must never happen again is launching unproxied while believing
-    otherwise.
-    """
-    if delegates_auth:
-        return proxy
-
-    host_port = _strip_scheme(server)
-    if ":" not in host_port:
-        raise ValueError(
-            f"proxy server {server!r} has no port. An HTTP endpoint needs "
-            f"host:port - e.g. http://host:8080")
-    host, port_str = host_port.rsplit(":", 1)
-
-    if proxy.get("username") or proxy.get("password"):
-        raise ValueError(
-            f"proxy server {server!r} carries credentials, and this launch path "
-            f"cannot deliver them: it starts the binary directly, so there is no "
-            f"Playwright to answer the proxy's 407, and the browser has no pref "
-            f"that injects Proxy-Authorization (only SOCKS has that). Use a SOCKS "
-            f"endpoint here, or drive this proxy through invisible_playwright, "
-            f"which does answer the challenge. Refusing rather than launching "
-            f"unproxied, which is what this used to do silently")
-
-    prefs["network.proxy.type"]      = 1
-    prefs["network.proxy.http"]      = host
-    prefs["network.proxy.http_port"] = int(port_str)
-    prefs["network.proxy.ssl"]       = host
-    prefs["network.proxy.ssl_port"]  = int(port_str)
-    return None
-
-
-#: Il browser fa passare l'UDP DENTRO il tunnel SOCKS?
-#:
 #: ⛔ NO, e questa costante esiste perche' la risposta non e' ovvia e una
 #: decisione ne dipende. Il motore ha il codice per farlo
 #: (`netwerk/socket/nsSOCKSUDPIOLayer.{h,cpp}`, agganciato in `nsUDPSocket.cpp`)
@@ -277,10 +293,3 @@ def _configure_http_like(
 #: sono lo stesso fatto scritto in un posto solo.
 INSTRADIAMO_UDP_NEL_SOCKS = False
 
-
-def _is_socks_scheme(server: str) -> bool:
-    return server.lower().startswith(_SOCKS_SCHEMES)
-
-
-def _strip_scheme(server: str) -> str:
-    return server.split("://", 1)[1] if "://" in server else server
