@@ -1934,7 +1934,6 @@ def compose_session_prefs(
     humanize: Any = None,
     show_cursor: Any = None,
     survive_hard_kill: bool = False,
-    delegates_auth: bool = True,
 ) -> ComposedPrefs:
     """Every pref a session runs with, in one place.
 
@@ -1959,10 +1958,11 @@ def compose_session_prefs(
         extra_prefs=extra_prefs,
         virtual_display=virtual_display,
     )
-    # delegates_auth passa oltre senza essere interpretato qui: chi lancia sa se
-    # ha un Playwright a cui dare un endpoint HTTP, questo composer no.
-    playwright_proxy = (configure_proxy(proxy, prefs, delegates_auth=delegates_auth)
-                        if proxy else None)
+    # ⛔ NESSUNA pref di instradamento esce da qui, per nessuno schema: la
+    # strada e' il comando del motore, e chi non puo' mandarlo non riceve un
+    # proxy. `delegates_auth` era l'interruttore della terza strada ed e'
+    # sparito con lei - vedi il docstring di `_proxy`.
+    playwright_proxy = configure_proxy(proxy, prefs) if proxy else None
 
     # ⛔ UNCONDITIONAL, and the reason is REALNESS - not the launch bug it also
     # happens to fix. Windows' occlusion tracker can decide our chrome window is

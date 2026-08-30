@@ -329,6 +329,24 @@ def build_launch_plan(
     from ._geo import prepare_session_geo, resolve_session_locale
     from .prefs import compose_session_prefs
 
+    # ⛔ QUESTO PERCORSO NON HA UN PROXY, E LO DICE PRIMA DI FARE QUALUNQUE
+    # ALTRA COSA. Lancia il binario con subprocess, quindi non tiene nessuna
+    # connessione di protocollo e non puo' mandare `Browser.setBrowserProxy`,
+    # che dal 2026-08-30 e' l'unica strada. Prima ce n'erano tre e questa
+    # scriveva prefs di instradamento sue: e' la duplicazione che ha prodotto
+    # il difetto, quindi e' stata cancellata invece che riparata.
+    #
+    # Il rifiuto sta QUI, sopra `prepare_session_geo`, e non e' un dettaglio:
+    # quella riga risolve fuso e lingua ATTRAVERSO il proxy. Rifiutare dopo
+    # vorrebbe dire aver gia' costruito mezza sessione sul paese del proxy.
+    if proxy and (proxy.get("server") or "").strip().lower() not in ("", "direct://"):
+        raise ValueError(
+            "build_launch_plan() cannot take a proxy: it starts the binary "
+            "directly, so there is no protocol connection to send the engine's "
+            "proxy command on, and a browser launched without the proxy it was "
+            "given announces one country and connects from another. Drive the "
+            "proxy through invisible_playwright, which holds the connection.")
+
     # <M> Si risolve solo se serve. `ensure_binary` verifica il motore contro
     # il sigillo, che e' giusto quando il motore lo scegliamo noi; quando lo
     # sceglie il chiamante quella verifica la fa il chiamante - e il posto in
@@ -347,17 +365,9 @@ def build_launch_plan(
     # One composition for all three entry points (prefs.py). This path takes the
     # proxy layer and the hard-kill layer; it does NOT write the humanize prefs,
     # which is what humanize=None means - see compose_session_prefs.
-    # ⛔ delegates_auth=False, e non e' un dettaglio di stile: questo percorso
-    # lancia il binario con subprocess, quindi non ha nessun Playwright a cui
-    # passare un endpoint HTTP. Finche' non lo diceva, `configure_proxy`
-    # restituiva il dict e la riga qui sotto teneva solo `.prefs` buttandolo via:
-    # il browser partiva SENZA proxy mentre `_geo` aveva gia' risolto fuso e
-    # lingua ATTRAVERSO il proxy, quindi la sessione dichiarava un paese e ne
-    # navigava un altro, in silenzio. Adesso un endpoint HTTP senza credenziali
-    # viene instradato dalle prefs, e uno CON credenziali viene rifiutato.
     prefs = compose_session_prefs(
         fp, locale=loc, timezone=geo.timezone,
-        proxy=proxy, survive_hard_kill=True, delegates_auth=False,
+        proxy=proxy, survive_hard_kill=True,
         show_cursor=show_cursor,
     ).prefs
     pdir = Path(profile_dir)

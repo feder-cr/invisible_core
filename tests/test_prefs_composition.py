@@ -93,11 +93,18 @@ DELIBERATE = {
 
 
 def test_the_two_core_paths_compose_the_same_prefs(tmp_path, no_network):
+    # ⛔ SENZA PROXY DA ENTRAMBI I LATI dal 2026-08-30, e non e' una rinuncia:
+    # il lancio diretto adesso RIFIUTA un proxy, perche' non tiene una
+    # connessione su cui mandare il comando del motore ed era l'unico percorso
+    # rimasto a inventarsi prefs di instradamento sue. Che rifiuti lo prova
+    # `test_il_lancio_diretto_RIFIUTA_un_proxy_invece_di_inventarsi_una_strada`
+    # in `tests/test_proxy.py`; qui si confronta cio' che i due percorsi
+    # compongono, che e' un'altra domanda e vale senza proxy come con.
     plan = build_launch_plan(SEED, profile_dir=tmp_path / "direct",
-                             timezone=TZ, locale=LOCALE, proxy=PROXY)
+                             timezone=TZ, locale=LOCALE)
     direct = read_user_js(plan.profile_dir / "user.js")
 
-    api = get_default_stealth_prefs(SEED, locale=LOCALE, timezone=TZ, proxy=PROXY)
+    api = get_default_stealth_prefs(SEED, locale=LOCALE, timezone=TZ)
     public = read_user_js(write_user_js(tmp_path / "api", api))
 
     only_direct = set(direct) - set(public)
@@ -114,18 +121,28 @@ def test_the_two_core_paths_compose_the_same_prefs(tmp_path, no_network):
         f"which is worse than a missing key because nothing looks wrong: {differing}")
 
 
-def test_the_public_api_configures_a_socks_proxy(tmp_path):
-    """The measured consequence of A1, as its own test.
+def test_the_public_api_declares_the_leak_prefs_and_NO_endpoint(tmp_path):
+    """Turned inside out on 2026-08-30, and the inversion is the point.
 
-    Not folded into the comparison above: that one would still pass if BOTH
-    paths stopped writing the proxy prefs together.
+    This used to assert that a SOCKS endpoint became `network.proxy.*`. That
+    was one of three roads to one fact, and the scheme picked between them;
+    when the Node driver went, the HTTP road stopped existing and a proxy was
+    accepted and dropped. Routing is now the engine command for every scheme,
+    so prefs naming an endpoint are exactly what must NOT appear here.
+
+    What the composer still owes a proxied session is the part that was never
+    routing: the channels a proxy cannot cover.
     """
     prefs = get_default_stealth_prefs(SEED, proxy=PROXY)
-    assert prefs["network.proxy.type"] == 1
-    assert prefs["network.proxy.socks"] == "198.51.100.9"
-    assert prefs["network.proxy.socks_port"] == 1080
-    assert prefs["network.proxy.socks_username"] == "u"
-    assert prefs["network.proxy.socks_password"] == "p"
+    endpoint = {"network.proxy.type", "network.proxy.socks",
+                "network.proxy.socks_port", "network.proxy.socks_username",
+                "network.proxy.socks_password", "network.proxy.http",
+                "network.proxy.http_port", "network.proxy.ssl",
+                "network.proxy.ssl_port"}
+    assert not (endpoint & set(prefs)), sorted(endpoint & set(prefs))
+    assert prefs["network.proxy.allow_bypass"] is False
+    assert prefs["zoom.stealth.dns.no_local_resolution"] is True
+    assert prefs["zoom.stealth.webrtc.no_direct_udp"] is True
 
 
 def test_no_proxy_still_means_no_endpoint_prefs():

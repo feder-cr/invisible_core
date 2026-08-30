@@ -17,7 +17,7 @@ SOCKS4/5/default, HTTP/HTTPS, case variants, malformed, mutation contract.
 # `test_no_test_reaches_the_core_through_a_shim` in the wrapper keeps them here.
 import pytest
 
-from invisible_core._proxy import configure_proxy
+from invisible_core._proxy import configure_proxy, parse_proxy
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -110,339 +110,147 @@ def test_cp8b_http_with_username_password_passthrough():
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  CP10-CP13: SOCKS - mutate prefs, return None
-# ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-def test_cp10_socks5_with_credentials():
-    prefs = {}
-    proxy = {
-        "server": "socks5://host:1080",
-        "username": "u",
-        "password": "p",
-    }
-    result = configure_proxy(proxy, prefs)
-    assert result is None
-    assert prefs["network.proxy.type"] == 1
-    assert prefs["network.proxy.socks"] == "host"
-    assert prefs["network.proxy.socks_port"] == 1080
-    assert prefs["network.proxy.socks_version"] == 5
-    assert prefs["network.proxy.socks_username"] == "u"
-    assert prefs["network.proxy.socks_password"] == "p"
-    assert prefs["network.proxy.socks_remote_dns"] is True
-
-
-@pytest.mark.unit
-def test_cp11_socks4_sets_version_4():
-    prefs = {}
-    configure_proxy({"server": "socks4://host:1080"}, prefs)
-    assert prefs["network.proxy.socks_version"] == 4
-
-
-@pytest.mark.unit
-def test_cp12_bare_socks_defaults_to_v5():
-    prefs = {}
-    configure_proxy({"server": "socks://host:1080"}, prefs)
-    assert prefs["network.proxy.socks_version"] == 5
-
-
-@pytest.mark.unit
-def test_cp13_socks_scheme_is_case_insensitive():
-    prefs = {}
-    proxy = {"server": "SOCKS5://HOST:1080"}
-    result = configure_proxy(proxy, prefs)
-    assert result is None
-    assert prefs["network.proxy.type"] == 1
-    # Host preserves case (only the scheme is case-folded).
-    assert prefs["network.proxy.socks"] == "HOST"
-    assert prefs["network.proxy.socks_version"] == 5
-
-
-# ──────────────────────────────────────────────────────────────────────
-#  CP14-CP15: edge SOCKS inputs
-# ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-def test_cp14_socks_without_port_is_refused_not_dropped():
-    """This test asserted the opposite until 2026-08-01, and it was wrong.
-
-    A SOCKS server with no port wrote no `network.proxy.*` pref and returned
-    None, which the caller reads as "SOCKS handled, Playwright needs nothing".
-    The session then went out on the host's own address while the caller
-    believed it was proxied. Silent, and for this package the worst outcome
-    available: the browser launches, the page loads, the IP is wrong.
-
-    The two parsers disagreed as well - `_geo` builds `socks5h://host` from the
-    same dict and gives it to requests - so a malformed endpoint could leave one
-    half of a session proxied and the other half not.
-
-    Refusing costs a caller with a typo an exception at launch. That is the
-    trade, and it is the right way round.
-    """
-    prefs = {}
-    with pytest.raises(ValueError) as exc:
-        configure_proxy({"server": "socks5://hostonly"}, prefs)
-    assert "no port" in str(exc.value)
-    assert prefs == {}, "a refused proxy must not leave half its prefs behind"
-
-
-@pytest.mark.unit
-def test_cp15_socks_without_credentials_uses_empty_strings():
-    prefs = {}
-    configure_proxy({"server": "socks5://host:1080"}, prefs)
-    assert prefs["network.proxy.socks_username"] == ""
-    assert prefs["network.proxy.socks_password"] == ""
-
-
-@pytest.mark.unit
-def test_cp15b_socks_with_none_credentials_uses_empty_strings():
-    """`proxy.get("username")` returning None should resolve to ""."""
-    prefs = {}
-    configure_proxy(
-        {"server": "socks5://host:1080", "username": None, "password": None},
-        prefs,
-    )
-    assert prefs["network.proxy.socks_username"] == ""
-    assert prefs["network.proxy.socks_password"] == ""
-
-
-# ──────────────────────────────────────────────────────────────────────
-#  CP16: mutation contract - prefs dict mutated in-place
-# ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-def test_cp16_prefs_mutated_in_place():
-    """Caller's prefs dict receives the SOCKS keys directly (not a copy)."""
-    prefs = {"existing.pref": "kept"}
-    sentinel = prefs
-    configure_proxy({"server": "socks5://host:1080"}, prefs)
-    # Same object identity - mutated, not replaced.
-    assert prefs is sentinel
-    # Existing pref preserved.
-    assert prefs["existing.pref"] == "kept"
-    # SOCKS keys added.
-    assert "network.proxy.type" in prefs
-    assert "network.proxy.socks" in prefs
-
-
-# ──────────────────────────────────────────────────────────────────────
-#  CP17: boundary - IPv6-style host preserved via rsplit
-# ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-def test_cp17_ipv6_bracketed_host_preserved_via_rsplit():
-    """rsplit(':', 1) keeps brackets intact for `[::1]:1080`-style hosts."""
-    prefs = {}
-    configure_proxy({"server": "socks5://[::1]:1080"}, prefs)
-    assert prefs["network.proxy.socks"] == "[::1]"
-    assert prefs["network.proxy.socks_port"] == 1080
-
-
-# ──────────────────────────────────────────────────────────────────────
-#  Recheck additions - branches discovered while re-reading _proxy.py
-# ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-def test_socks_with_surrounding_whitespace_in_server_stripped():
-    """The implementation strips whitespace before scheme checks."""
-    prefs = {}
-    result = configure_proxy({"server": "  socks5://host:1080  "}, prefs)
-    assert result is None
-    assert prefs["network.proxy.socks"] == "host"
-    assert prefs["network.proxy.socks_port"] == 1080
-
-
-@pytest.mark.unit
-def test_server_key_missing_returns_none():
-    """No 'server' key → treated as empty → no-op."""
-    prefs = {}
-    result = configure_proxy({"username": "u"}, prefs)
-    assert result is None
-    assert prefs == {}
-
-
-@pytest.mark.unit
-def test_server_key_none_returns_none():
-    """`server: None` is normalized to "" by the implementation."""
-    prefs = {}
-    result = configure_proxy({"server": None}, prefs)
-    assert result is None
-    assert prefs == {}
-
-
-@pytest.mark.unit
-def test_socks_port_coerced_to_int():
-    """Port string is parsed via int() - not a numeric string."""
-    prefs = {}
-    configure_proxy({"server": "socks5://host:443"}, prefs)
-    assert prefs["network.proxy.socks_port"] == 443
-    assert isinstance(prefs["network.proxy.socks_port"], int)
-
-
-@pytest.mark.unit
-def test_socks_non_numeric_port_raises_value_error():
-    """Non-numeric port is a programmer error - int() raises."""
-    prefs = {}
-    with pytest.raises(ValueError):
-        configure_proxy({"server": "socks5://host:notaport"}, prefs)
-
-
-@pytest.mark.unit
-def test_the_two_proxy_parsers_agree_on_what_is_usable():
-    """One dict, two readers, and nothing compared them.
-
-    `configure_proxy` writes the browser's prefs; `_geo._proxies_for` builds the
-    requests URL for the egress lookup. A dict that one accepts and the other
-    rejects means half a session is proxied - which is what a portless SOCKS
-    endpoint used to produce.
-    """
-    from invisible_core import _geo
-
-    for server in ("socks5://hostonly", "socks4://hostonly", "socks://hostonly"):
-        proxy = {"server": server}
-        with pytest.raises(ValueError):
-            configure_proxy(proxy, {})
-        with pytest.raises(ValueError):
-            _geo._proxies_for_requests(proxy)
-
-    for server in ("socks5://host:1080", "http://host:8080", "https://host:8080"):
-        proxy = {"server": server}
-        configure_proxy(proxy, {})          # must not raise
-        assert _geo._proxies_for_requests(proxy)     # must produce a usable URL
-
-
-# ---------------------------------------------------------------------------
-# delegates_auth: il chiamante dichiara se ha un Playwright a cui delegare
+#  Una strada sola: `parse_proxy` legge, il comando del motore instrada
 #
-# Il difetto che questi casi difendono e' vissuto sei settimane in 17 versioni
-# pubblicate: `build_launch_plan` chiamava configure_proxy, riceveva indietro il
-# dict di un endpoint HTTP, non aveva dove metterlo e lo scartava. Il browser
-# partiva senza nessuna pref di proxy, mentre `_geo` aveva gia' risolto fuso e
-# lingua ATTRAVERSO quel proxy. Nessuna eccezione, nessun log: la pagina
-# dichiarava un paese e la connessione ne usava un altro.
+#  I test che stavano qui asserivano il contrario - che uno schema
+#  scrivesse `network.proxy.*` e un altro tornasse un dict - ed erano
+#  corretti finche' le strade erano tre. Sono stati cancellati con le
+#  strade, non riadattati: un test che descrive un meccanismo che non
+#  esiste piu' e' peggio di nessun test, perche' passa.
+#
+#  Quello che quei test proteggevano davvero sopravvive qui: nessun
+#  endpoint viene lasciato cadere in silenzio, e nessuno schema e'
+#  trattato diversamente da un altro.
+# ──────────────────────────────────────────────────────────────────────
 
 
-def test_un_http_senza_credenziali_viene_INSTRADATO_dalle_prefs():
-    """Il routing non ha bisogno di Playwright, ed e' misurato sul binario
-    spedito: con network.proxy.type piu' http/http_port/ssl/ssl_port il browser
-    va al proxy e non ripiega su diretto."""
-    prefs = {}
-    resto = configure_proxy({"server": "http://gw.esempio:8080"}, prefs,
-                            delegates_auth=False)
-    assert resto is None
-    assert prefs["network.proxy.type"] == 1
-    assert prefs["network.proxy.http"] == "gw.esempio"
-    assert prefs["network.proxy.http_port"] == 8080
-    assert prefs["network.proxy.ssl"] == "gw.esempio"
-    assert prefs["network.proxy.ssl_port"] == 8080
+@pytest.mark.unit
+@pytest.mark.parametrize("server,atteso", [
+    ("socks5://host:1080", ("socks", "host", 1080)),
+    ("SOCKS5://HOST:1080", ("socks", "HOST", 1080)),   # lo schema e' insensibile
+    ("socks4://host:1080", ("socks4", "host", 1080)),
+    ("socks://host:1080",  ("socks", "host", 1080)),
+    ("http://host:8080",   ("http", "host", 8080)),
+    ("https://host:3128",  ("https", "host", 3128)),
+    ("host:9999",          ("http", "host", 9999)),    # senza schema: http
+    ("socks5://host",      ("socks", "host", 1080)),   # senza porta: il default
+    ("http://host",        ("http", "host", 80)),
+    ("  socks5://host:1080  ", ("socks", "host", 1080)),
+])
+def test_ogni_schema_e_letto_dallo_STESSO_lettore(server, atteso):
+    """Quattro tipi, un lettore. Era questa la differenza che ha fatto danno."""
+    ep = parse_proxy({"server": server})
+    assert (ep.type, ep.host, ep.port) == atteso
 
 
-def test_un_http_CON_credenziali_su_un_percorso_senza_playwright_e_rifiutato():
-    """L'autenticazione invece Playwright la vuole: le credenziali che scriviamo
-    per i SOCKS arrivano al nsProxyInfo ma nessuno ne costruisce la
-    Proxy-Authorization, quindi un endpoint autenticato si ferma al 407.
-    Rifiutare e' l'unico esito onesto: l'alternativa e' uscire dall'IP di casa
-    credendo di essere proxati."""
-    for server in ("http://gw.esempio:8080", "https://gw.esempio:8080"):
-        with pytest.raises(ValueError) as e:
-            configure_proxy({"server": server, "username": "u", "password": "p"},
-                            {}, delegates_auth=False)
-        messaggio = str(e.value)
-        assert "credentials" in messaggio
-        assert "invisible_playwright" in messaggio, "il rifiuto deve dire dove funziona"
+@pytest.mark.unit
+def test_un_ipv6_fra_parentesi_resta_intero():
+    """Le parentesi le toglie il lettore; i due punti dentro non sono la porta."""
+    ep = parse_proxy({"server": "socks5://[2001:db8::1]:1080"})
+    assert ep.host == "2001:db8::1" and ep.port == 1080
 
 
-def test_una_password_senza_username_e_comunque_una_credenziale():
-    """Il controllo e' un OR, non un AND: mezzo segreto e' un segreto."""
-    with pytest.raises(ValueError):
-        configure_proxy({"server": "http://gw.esempio:8080", "password": "p"},
-                        {}, delegates_auth=False)
+@pytest.mark.unit
+def test_le_credenziali_arrivano_al_comando_su_OGNI_schema():
+    """Il ramo HTTP le RIFIUTAVA, perche' le prefs non sanno portarle.
 
-
-def test_il_percorso_che_delega_NON_cambia_comportamento():
-    """Guardia di regressione sul ramo misurato verde: il wrapper passa il dict a
-    Playwright, che instrada e risponde al 407. Se questo caso si muove, si e'
-    rotto l'unico percorso HTTP che funziona per gli utenti.
-
-    ⛔ IL CONTRATTO E' SULLE PREFS DI INSTRADAMENTO, non su "nessuna pref", e
-    fino al 2026-08-25 era scritto `prefs == {}`. Cio' che va protetto e' che
-    non scriviamo noi il ROUTING (`type`, `http`, `ssl`, `socks*`), perche' quel
-    ramo lo instrada Playwright ed e' l'unico che sa rispondere al 407.
-
-    E' cambiato perche' `network.proxy.allow_bypass` deve valere anche qui: non
-    instrada niente e non tocca l'autenticazione, toglie solo a Firefox il
-    ripiego DIRETTO quando il proxy fallisce. Con `prefs == {}` il ramo HTTP
-    sarebbe restato scoperto proprio sul difetto misurato quel giorno.
+    Il comando del motore si', e la stessa riga ora vale per tutti e quattro:
+    la limitazione era della strada, non del protocollo.
     """
-    instradamento = ("network.proxy.type", "network.proxy.http",
-                     "network.proxy.http_port", "network.proxy.ssl",
-                     "network.proxy.ssl_port", "network.proxy.socks",
-                     "network.proxy.socks_port", "network.proxy.socks_version",
-                     "network.proxy.socks_remote_dns")
-    for creds in ({}, {"username": "u", "password": "p"}):
-        proxy = dict({"server": "http://gw.esempio:8080"}, **creds)
-        prefs = {}
-        assert configure_proxy(proxy, prefs) is proxy
-        scritte = [k for k in prefs if k in instradamento]
-        assert not scritte, f"chi delega non deve instradare da se': {scritte}"
-        assert prefs.get("network.proxy.allow_bypass") is False, (
-            "il ramo HTTP resta senza la difesa dal ripiego diretto")
+    for server in ("http://h:1", "https://h:1", "socks5://h:1", "socks4://h:1"):
+        cmd = parse_proxy({"server": server, "username": "u",
+                           "password": "p"}).as_engine_command()
+        assert cmd["username"] == "u" and cmd["password"] == "p", server
 
 
-def test_un_http_senza_porta_e_rifiutato_anche_qui():
-    """Stessa refusal del ramo SOCKS, sull'altro schema: un endpoint senza porta
-    non e' un endpoint."""
-    with pytest.raises(ValueError):
-        configure_proxy({"server": "http://gw.esempio"}, {}, delegates_auth=False)
+@pytest.mark.unit
+def test_una_credenziale_vuota_non_viene_spedita():
+    """Il motore le dichiara Optional: "" e' un valore, non un'assenza."""
+    cmd = parse_proxy({"server": "http://h:1", "username": "",
+                       "password": None}).as_engine_command()
+    assert "username" not in cmd and "password" not in cmd
 
 
-def test_i_socks_non_sono_toccati_da_delegates_auth():
-    """delegates_auth parla solo degli schemi che Playwright deve autenticare.
-    Un SOCKS e' gia' completo nelle prefs, con o senza."""
-    for delega in (True, False):
-        prefs = {}
-        assert configure_proxy({"server": "socks5://gw:1080", "username": "u",
-                                "password": "p"}, prefs, delegates_auth=delega) is None
-        assert prefs["network.proxy.socks_username"] == "u"
-        assert prefs["network.proxy.socks_version"] == 5
+@pytest.mark.unit
+@pytest.mark.parametrize("server", [
+    "ftp://h:1",        # uno schema che il motore non sa esprimere
+    "http://:80",       # nessun host - letto come host "80" dalla prima
+                        # versione del lettore, e trovato dal caso noto-cattivo
+    "socks5://h:abc",   # una porta che non e' un numero
+    "socks5://h:0",     # fuori intervallo
+    "http://h:99999",
+])
+def test_un_endpoint_illeggibile_ALZA_invece_di_sparire(server):
+    """La forma del difetto, in piccolo.
 
-
-def test_il_lancio_diretto_dichiara_di_non_poter_delegare():
-    """Il gate vero: non che la funzione sappia rifiutare, ma che il percorso che
-    non ha Playwright glielo DICA. Senza questo, i casi qui sopra passano e il
-    difetto resta esattamente dov'era.
-
-    ⛔ E si legge l'ALBERO SINTATTICO, non il testo del sorgente. La prima
-    stesura faceva `"delegates_auth=False" in inspect.getsource(...)` ed e'
-    sopravvissuta alla propria mutazione: il commento che sta sopra la chiamata
-    contiene quella stessa stringa, quindi il controllo era soddisfatto dal
-    COMMENTO mentre il codice sotto aveva di nuovo il difetto. E' il difetto piu'
-    ripetuto del progetto, colto qui solo perche' la mutazione e' stata eseguita.
+    Chi chiama non puo' distinguere "nessun proxy" da "il proxy e' stato
+    buttato", e il secondo caso deve fermare il lancio.
     """
-    import ast
-    import inspect
-    from invisible_core import launch
+    with pytest.raises(ValueError):
+        parse_proxy({"server": server})
 
-    albero = ast.parse(inspect.getsource(launch.build_launch_plan).lstrip())
-    chiamate = [n for n in ast.walk(albero)
-                if isinstance(n, ast.Call)
-                and getattr(n.func, "id", getattr(n.func, "attr", None))
-                == "compose_session_prefs"]
-    assert chiamate, "build_launch_plan non compone piu' le prefs: gate da riscrivere"
-    for c in chiamate:
-        kw = {k.arg: k.value for k in c.keywords}
-        assert "delegates_auth" in kw, (
-            "build_launch_plan non dichiara di non poter delegare: un endpoint "
-            "HTTP tornerebbe di nuovo come dict e verrebbe scartato dal .prefs")
-        assert isinstance(kw["delegates_auth"], ast.Constant)
-        assert kw["delegates_auth"].value is False, (
-            "delegates_auth c'e' ma non e' False: questo percorso Playwright non "
-            "ce l'ha")
+
+@pytest.mark.unit
+def test_nessuno_schema_scrive_prefs_di_instradamento():
+    """La CLASSE, non il singolo nome: nessuna `network.proxy.*` di percorso.
+
+    Asserito su tutti e quattro gli schemi insieme, perche' la regressione
+    nasceva proprio dal fatto che due schemi facevano cose diverse.
+    """
+    vietate = ("network.proxy.type", "network.proxy.socks",
+               "network.proxy.socks_port", "network.proxy.socks_version",
+               "network.proxy.socks_username", "network.proxy.socks_password",
+               "network.proxy.socks_remote_dns", "network.proxy.http",
+               "network.proxy.http_port", "network.proxy.ssl",
+               "network.proxy.ssl_port")
+    for server in ("socks5://h:1080", "socks4://h:1080", "http://h:8080",
+                   "https://h:3128"):
+        prefs = {}
+        tornato = configure_proxy({"server": server, "username": "u",
+                                   "password": "p"}, prefs)
+        assert tornato is not None, server
+        for nome in vietate:
+            assert nome not in prefs, (server, nome)
+
+
+@pytest.mark.unit
+def test_le_prefs_dei_canali_di_fuga_restano_su_OGNI_schema():
+    """Cio' che non era instradamento non e' stato toccato dall'unificazione."""
+    for server in ("socks5://h:1080", "http://h:8080"):
+        prefs = {}
+        configure_proxy({"server": server}, prefs)
+        assert prefs["network.proxy.allow_bypass"] is False, server
+        assert prefs["zoom.stealth.dns.no_local_resolution"] is True, server
+        assert prefs["zoom.stealth.webrtc.no_direct_udp"] is True, server
+
+
+@pytest.mark.unit
+def test_il_lancio_diretto_RIFIUTA_un_proxy_invece_di_inventarsi_una_strada():
+    """Non ha una connessione di protocollo, quindi non ha un proxy.
+
+    Prima si scriveva prefs sue, ed e' la terza strada: quella che rendeva
+    possibile dimenticarne una. Il rifiuto e' l'alternativa onesta, e arriva
+    PRIMA che fuso e lingua vengano risolti attraverso quel proxy.
+    """
+    from invisible_core.launch import build_launch_plan
+
+    with pytest.raises(ValueError) as caught:
+        build_launch_plan(1, profile_dir="/non/serve",
+                          proxy={"server": "http://h:8080"})
+    messaggio = str(caught.value)
+    assert "invisible_playwright" in messaggio, messaggio
+
+
+@pytest.mark.unit
+def test_il_lancio_diretto_senza_proxy_non_e_toccato():
+    """Il caso che deve NON scattare: `direct://` e l'assenza non sono un proxy."""
+    from invisible_core import parse_proxy as _pp
+
+    for niente in (None, {}, {"server": ""}, {"server": "direct://"}):
+        assert _pp(niente) is None
+
+
+@pytest.mark.unit
 def test_dietro_qualunque_proxy_il_ripiego_diretto_e_spento():
     """Il ripiego di Firefox a un proxy che fallisce e' una connessione DIRETTA.
 
@@ -533,11 +341,18 @@ def test_un_endpoint_malformato_non_lascia_prefs_a_meta():
     un endpoint malformato sollevava lasciandosi dietro una pref: un dict
     parzialmente configurato che il chiamante puo' usare credendolo intatto. Due
     test esistenti sono diventati rossi e avevano ragione loro.
+
+    ⛔ L'input e' cambiato il 2026-08-30 e la ragione va detta: prima era
+    `socks5://senzaporta`, perche' un SOCKS senza porta veniva RIFIUTATO. Ora
+    una porta mancante prende il default dello schema, come documenta
+    Playwright, e puo' farlo senza rischio proprio grazie all'unificazione: non
+    esiste piu' un percorso che parte lo stesso senza proxy: o il comando viene
+    mandato, o il lancio fallisce. Quindi serve un endpoint davvero illeggibile.
     """
     import pytest
     from invisible_core import configure_proxy
 
     prefs = {}
     with pytest.raises(ValueError):
-        configure_proxy({"server": "socks5://senzaporta"}, prefs)
+        configure_proxy({"server": "socks5://host:non-un-numero"}, prefs)
     assert prefs == {}, f"prefs sporcate dal rifiuto: {prefs}"
