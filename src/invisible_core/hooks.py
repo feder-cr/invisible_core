@@ -483,9 +483,24 @@ def main(
             ran.append("publish gate (no-op)")
         elif rc:
             _say("", err=True)
-            _say(f"REFUSED (gate exit {rc}) - see above. A version whose content "
-                 f"moved needs a NEW version number: a PyPI filename is never "
-                 f"re-uploaded, so a wrong artifact stays wrong forever.", err=True)
+            # ⛔ NO fixed explanation. This used to print "a version whose
+            # content moved needs a NEW version number" for EVERY non-zero
+            # exit, and the gate refuses for several unrelated reasons: a
+            # direct-URL dependency, an empty ledger, a version that went
+            # backwards, an index the ledger does not match. Naming one of
+            # them as though it were the cause sends the reader looking at
+            # the version number while the gate's own verdict, printed just
+            # above, says something else. Measured on 2026-08-31: it cost a
+            # release cycle - the real line was "the index serves 1 version
+            # that the ledger does not record", four lines up.
+            _say(f"REFUSED (gate exit {rc}). The gate printed its own verdict "
+                 f"above - read THAT, not this line: it refuses for several "
+                 f"unrelated reasons and this hook does not know which.",
+                 err=True)
+            _say("  The recurring one is a ledger the index has outrun: the "
+                 "publish workflow opens a `ledger/<version>` PR and cannot "
+                 "merge it itself, so an unmerged one blocks the NEXT "
+                 "release, not its own.", err=True)
             return 1
         else:
             ran.append("publish gate")
