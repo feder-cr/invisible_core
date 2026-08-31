@@ -759,10 +759,16 @@ _BASELINE: Dict[str, Any] = {
     #
     # `app.update.enabled` non e' fra queste per scelta: e' una pref MORTA,
     # rimossa da Firefox (UpdateTelemetry.sys.mjs:54). La impostavamo a vuoto.
-    # Cio' che impedisce davvero l'installazione e' `app.update.auto`, che
-    # resta a False qui sotto: il retail CONTROLLA e noi pure, ma non
-    # scarichiamo e non installiamo, perche' installare distruggerebbe il
-    # binario pinnato dal sigillo.
+    #
+    # Since 2026-08-31 OUR engine has no updater at all: the build options were
+    # removed from update-programs.configure, so the check never runs and the
+    # "Update available" badge has no code left to draw it. On our own binary
+    # this pref therefore has nothing to stop.
+    # It stays False anyway, and that is deliberate: get_default_stealth_prefs
+    # is the public path for a caller driving a Firefox of their own, retail
+    # included, and there this line is the only thing keeping that binary from
+    # updating out from under the seal that pins it. Dropping it would break
+    # that path in order to tidy up this one.
     #
     # Contesto completo: docs/firefox-stealth-architecture/27-retail-network-parity.md
     # ------------------------------------------------------------------
@@ -792,7 +798,8 @@ _BASELINE: Dict[str, Any] = {
     # Il gancio condizionale e' gia' nel .mozconfig di firefox-21.
     "browser.safebrowsing.downloads.remote.enabled":      False,
 
-    # Update channels.
+    # Updates: inert on our own engine, live for a caller bringing their own
+    # Firefox. The reason is in the network-parity block above.
     "app.update.auto":                                    False,
 
     # Media devices: a FIXED pair (one audioinput, one videoinput) on every
