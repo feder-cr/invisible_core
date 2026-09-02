@@ -414,6 +414,16 @@ def test_no_test_uses_a_globally_routable_placeholder_ip():
             return True
         if a == 169 and b == 254:                      # link-local
             return True
+        if a == 100 and 64 <= b <= 127:                # RFC 6598 shared, 100.64/10
+            # Added 2026-09-02, and it belongs here for this test's OWN stated
+            # reason rather than to unblock anything: carrier-grade NAT space is
+            # never globally routed and is assigned to nobody, so it cannot be
+            # "someone's address" the way 1.2.3.4 is. It became necessary when
+            # `_geo._NOT_ROUTABLE` started refusing it as an egress reply - that
+            # row has to be exercised by a literal in this range, and no RFC 5737
+            # address can stand in for it, because being a DIFFERENT range is the
+            # whole point of the case.
+            return True
         return False
 
     def prose_lines(text):

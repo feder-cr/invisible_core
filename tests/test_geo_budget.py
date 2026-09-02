@@ -120,7 +120,11 @@ def test_the_failure_says_the_budget_ran_out_and_how_far_it_got(
         _geo.discover_egress_ip(timeout=10.0, budget=10.0)
     msg = str(excinfo.value)
     assert "budget ran out" in msg
-    assert f"of {len(_geo._IP_ECHO_ENDPOINTS)} endpoints" in msg
+    assert f"of {len(_geo._IP_ECHO_ENDPOINTS)} endpoint(s)" in msg
+    # And the half a rewording cannot break: how far it got is an ATTRIBUTE,
+    # not a sentence. The prose above is for a person reading a log; this is
+    # what a caller should branch on.
+    assert len(excinfo.value.attempts) == 1
 
 
 def test_a_fast_success_still_returns_on_the_first_endpoint(monkeypatch, clock):
