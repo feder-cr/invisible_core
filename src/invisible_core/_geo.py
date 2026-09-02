@@ -22,6 +22,7 @@ On failure:
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from typing import Any, Dict, NamedTuple, Optional
 from urllib.parse import quote
@@ -30,7 +31,19 @@ import requests
 
 
 class GeoTimezoneError(RuntimeError):
-    """Raised when ``timezone="auto"`` cannot resolve a valid IANA zone."""
+    """Raised when ``timezone="auto"`` cannot resolve a valid IANA zone.
+
+    Carries ``kind`` - one of the keys of :data:`_REMEDY` - and, for a discovery
+    failure, one :class:`_Attempt` per endpoint. Read those instead of matching
+    on the prose: the message is written for a person, the attributes are the
+    part a caller may branch on.
+    """
+
+    def __init__(self, message: str, *, kind: str = "unknown",
+                 attempts: "tuple[_Attempt, ...]" = ()) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.attempts = attempts
 
 
 # Plain-text IP echo endpoints (each returns just the caller's public IP).
@@ -41,6 +54,243 @@ _IP_ECHO_ENDPOINTS = (
 )
 
 _SOCKS_SCHEMES = ("socks5://", "socks4://", "socks://")
+
+
+class _Attempt(NamedTuple):
+    """One endpoint tried, and what came back from it."""
+
+    url: str
+    seconds: float
+    kind: str
+    detail: str
+
+    def line(self) -> str:
+        return f"  {self.url:<32} {self.seconds:5.2f}s  {self.kind}: {self.detail}"
+
+
+# What each failure MEANS, and what to do about it. TWO strings per class: the
+# advice when a proxy is in the request path, and the advice for a direct
+# request. They are not interchangeable, and one string per class was a defect
+# of exactly the kind this whole change exists to remove: on the direct path the
+# message read "could not discover the egress IP directly (no proxy set): the
+# proxy HOSTNAME does not resolve - check it for a typo", which denies a proxy
+# and blames one in the same sentence, and sends the reader to a config line
+# that is empty.
+#
+# The CLASS names the MECHANISM and never the path, which is what lets
+# `_classify` stay a pure function of the exception. Only the advice knows
+# whether a proxy exists, and the caller is the one that already knows it, so
+# nothing computes that fact twice.
+#
+# Three families, and telling them apart is the first thing to know when a
+# launch dies, because they are fixed in three different places:
+#   the transport   the proxy, the credentials, the local network
+#   endpoint_*      a third-party echo service   (theirs, usually transient)
+#   the rest        the geoip database           (a download, a disk, the data)
+_REMEDY = {
+    # class:                   (a proxy is in the path,  the request went direct)
+    "proxy_auth": (
+        "the proxy refused the credentials - check username/password",
+        "something on this network demanded proxy credentials, so a transparent "
+        "proxy is intercepting the request"),
+    "proxy_rejected": (
+        "the proxy answered but refused to open the tunnel - check the plan, the "
+        "target, or an allowlist on the provider side",
+        "something on this network refused to open the tunnel, so a transparent "
+        "proxy is intercepting the request"),
+    "socks_missing": (
+        "a socks:// proxy needs PySocks - pip install 'requests[socks]'",
+        "a socks:// proxy needs PySocks - pip install 'requests[socks]'"),
+    "dns_failure": (
+        "the proxy HOSTNAME does not resolve - check it for a typo",
+        "the echo endpoint hostname does not resolve, so this host has no working "
+        "DNS - not a proxy problem, there is no proxy here"),
+    "connect_failed": (
+        "nothing accepted a connection at the proxy host:port",
+        "no route to the echo endpoint from this host - the network is down or "
+        "something is refusing the connection"),
+    "read_timeout": (
+        "the proxy accepted the connection and then never answered",
+        "the endpoint accepted the connection and then never answered"),
+    "tls_failed": (
+        "TLS to the endpoint failed THROUGH the proxy, which is what an "
+        "intercepting proxy looks like - check the certificate chain",
+        "TLS to the endpoint failed, which is what a captive portal or a "
+        "TLS-inspecting middlebox looks like - check the certificate chain"),
+    "endpoint_http_error": (
+        "the echo endpoint itself answered with an error, which is a third-party "
+        "outage rather than a fault on this side",
+        "the echo endpoint itself answered with an error, which is a third-party "
+        "outage rather than a fault on this side"),
+    "endpoint_not_an_ip": (
+        "the reply was not an IP address - something is intercepting the request "
+        "(a captive portal, or a proxy error page)",
+        "the reply was not an IP address - something on this network is "
+        "intercepting the request, most likely a captive portal"),
+    "not_routing": (
+        "the reply was a PRIVATE address, so the request never left the local "
+        "network - the proxy is not routing to the internet",
+        "the reply was a PRIVATE address, so the request never left the local "
+        "network - something here answered on the endpoint's behalf"),
+    "no_endpoint_tried": (
+        "the budget expired before a single endpoint could be contacted, so "
+        "nothing below was measured - raise `budget`, or find what delayed the "
+        "caller before this step",
+        "the budget expired before a single endpoint could be contacted, so "
+        "nothing below was measured - raise `budget`, or find what delayed the "
+        "caller before this step"),
+    # Phrased to follow "the egress IP is <ip>, ... but", which is how the raise
+    # in `_geoip_database` reads it. Repeating "the egress IP was found" here
+    # would say it twice in one sentence.
+    "geoip_unavailable": (
+        "the geoip database could not be obtained, so nothing can be mapped - a "
+        "download or a disk problem, NOT a proxy problem",
+        "the geoip database could not be obtained, so nothing can be mapped - a "
+        "download or a disk problem"),
+    "ip_not_in_db": (
+        "the egress IP is absent from the geoip database, which usually means the "
+        "database is stale rather than that the IP is wrong",
+        "the egress IP is absent from the geoip database, which usually means the "
+        "database is stale rather than that the IP is wrong"),
+    "no_timezone_for_ip": (
+        "the geoip database knows the IP but carries no timezone for it",
+        "the geoip database knows the IP but carries no timezone for it"),
+    "no_coordinates_for_ip": (
+        "the geoip database knows the IP but carries no coordinates",
+        "the geoip database knows the IP but carries no coordinates"),
+    "invalid_timezone": (
+        "the geoip database returned a zone this system's tz database does not "
+        "know - check tzdata",
+        "the geoip database returned a zone this system's tz database does not "
+        "know - check tzdata"),
+    "unknown": (
+        "unrecognised failure - the repr on the line above is all there is",
+        "unrecognised failure - the repr on the line above is all there is"),
+    "mixed": (
+        "the endpoints failed for DIFFERENT reasons, listed below",
+        "the endpoints failed for DIFFERENT reasons, listed below"),
+}
+
+
+def _remedy(kind: str, proxied: bool) -> str:
+    """The advice for one class, for the path the request actually took.
+
+    Falls back to the class name rather than inventing text: a class with no
+    entry is a bug in the table, and saying its name is more honest than
+    guessing what it means.
+    """
+    pair = _REMEDY.get(kind)
+    if not pair:
+        return kind
+    return pair[0] if proxied else pair[1]
+
+
+# `Tunnel connection failed: 407 Proxy Authentication Required` and friends. A
+# proxy's status code reaches us only as text inside a chained cause, so this is
+# one of the three places a message is read rather than a type inspected; the
+# other two are the DNS tokens and the SOCKS marker in `_classify`.
+_TUNNEL_STATUS = re.compile(r"Tunnel connection failed:\s*(\d{3})")
+
+# The tokens that mean "a name did not resolve". THREE spellings, because the
+# HTTP and the SOCKS paths through urllib3 do not agree, measured 2026-09-02:
+# an HTTP proxy with a bad hostname produces `NameResolutionError` in the text,
+# while socks5h:// produces a `NewConnectionError` whose text says only
+# `[Errno 11001] getaddrinfo failed`. Matching the first alone sent every SOCKS
+# hostname typo to `connect_failed`, whose advice is to check the PORT.
+# `gaierror` is the type name, which appears only when a bare `socket.gaierror`
+# is classified directly rather than through requests.
+_DNS_TOKENS = ("NameResolutionError", "getaddrinfo failed", "gaierror")
+
+# The networks that mean "this request never left the local network".
+#
+# NOT `ipaddress.is_private`, and this is the trap to know about: Python counts
+# the RFC 5737 DOCUMENTATION ranges (192.0.2/24, 198.51.100/24, 203.0.113/24) as
+# private, so `is_private` would reject the very addresses this package's own
+# tests use as stand-ins for a real egress - passing every test about private
+# replies while refusing every legitimate one.
+_NOT_ROUTABLE = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",   # RFC1918
+    "127.0.0.0/8", "169.254.0.0/16", "0.0.0.0/8",      # loopback, link-local, this-host
+    # RFC 6598 shared address space, handed out by a carrier-grade NAT. Never
+    # globally routed and never present in a geoip database, and `is_private` is
+    # False for it (measured), so the rejected shortcut would not have caught it
+    # and neither did the first version of this list.
+    "100.64.0.0/10",
+    # The IPv6 counterpart of each row above that has one: loopback,
+    # unique-local, link-local, the unspecified address, and the deprecated
+    # site-local block, whose `is_private` is also False.
+    "::1/128", "fc00::/7", "fe80::/10", "::/128", "fec0::/10",
+))
+
+
+def _classify(exc: BaseException) -> "tuple[str, str]":
+    """Name the failure class behind one failed attempt.
+
+    A PURE function - no network, no clock, no state, and no notion of whether a
+    proxy is in the path - which is what lets the whole classification be checked
+    against known-bad inputs without a proxy. The class names the MECHANISM; the
+    caller pairs it with the path to produce advice, because the caller is the
+    only place that already knows the path.
+
+    Classified on MEASURED evidence rather than on the exception type, because
+    the type does not separate the cases. Measured 2026-09-02: a closed proxy
+    port, a proxy hostname that does not resolve, a blackholed proxy address AND
+    a 407 all arrive as `requests.exceptions.ProxyError`, while the same closed
+    port behind socks5:// arrives as `ConnectTimeout` instead. What distinguishes
+    them lives in the chained cause, which reaches `str(exc)`.
+
+    ORDER IS LOAD-BEARING in three places, and each is marked below. The general
+    rule: any branch testing a SUBCLASS must precede the branch testing its base,
+    and `requests.exceptions` has two inheritance edges that are easy to miss -
+    `SSLError` and `ProxyError` both subclass `ConnectionError`, and
+    `InvalidSchema` subclasses both `RequestException` and `ValueError`.
+    """
+    text = f"{type(exc).__name__}: {exc}"
+
+    status = _TUNNEL_STATUS.search(text)
+    if status:
+        code = status.group(1)
+        if code == "407":
+            return "proxy_auth", f"proxy answered {code} to CONNECT"
+        return "proxy_rejected", f"proxy answered {code} to CONNECT"
+
+    # ORDER 1: before the bare-ValueError branch. `InvalidSchema` inherits from
+    # BOTH RequestException and ValueError, so without this a missing PySocks
+    # would be reported as a malformed reply. The `not isinstance(...)` guard on
+    # that branch is a second, independent defence; both are tested.
+    if isinstance(exc, requests.exceptions.InvalidSchema) and "SOCKS" in text:
+        return "socks_missing", "PySocks is not installed"
+
+    if isinstance(exc, requests.exceptions.HTTPError):
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        return "endpoint_http_error", f"endpoint answered HTTP {code}"
+
+    if isinstance(exc, ValueError) and not isinstance(exc, requests.RequestException):
+        # `ipaddress.ip_address` on a body that is not an address.
+        return "endpoint_not_an_ip", f"reply was not an IP ({str(exc)[:70]})"
+
+    if any(token in text for token in _DNS_TOKENS):
+        return "dns_failure", "a hostname did not resolve"
+
+    # ORDER 2: before the ConnectionError arm, which SSLError subclasses. Without
+    # this a certificate failure - the signature of the TLS-intercepting captive
+    # portal this classification exists to separate - was reported as a dead TCP
+    # port, sending the reader to check a host:port that was answering fine.
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "tls_failed", f"TLS failed ({str(exc)[:70]})"
+
+    # ORDER 3: before the ConnectionError arm, which ProxyError also subclasses.
+    # ReadTimeout is not a ConnectionError, but it is kept adjacent so the three
+    # ordered branches read as one group.
+    if isinstance(exc, requests.exceptions.ReadTimeout):
+        return "read_timeout", "connected, then no reply before the deadline"
+
+    if isinstance(exc, (requests.exceptions.ProxyError,
+                        requests.exceptions.ConnectTimeout,
+                        requests.exceptions.ConnectionError)):
+        return "connect_failed", "could not open a connection"
+
+    return "unknown", repr(exc)[:110]
 
 
 def _proxy_is_set(proxy: Optional[Dict[str, str]]) -> bool:
@@ -112,14 +362,13 @@ def discover_egress_ip(
     ``budget`` however many endpoints the list grows to.
     """
     proxies = _proxies_for_requests(proxy) if proxy else None
-    last_err: Optional[Exception] = None
+    attempts: "list[_Attempt]" = []
     deadline = time.monotonic() + budget
-    tried = 0
     for url in _IP_ECHO_ENDPOINTS:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        tried += 1
+        started = time.monotonic()
         try:
             # Una COPPIA, non uno scalare. `requests` applica un timeout scalare
             # alla fase di CONNESSIONE e poi di nuovo a quella di LETTURA, quindi
@@ -141,23 +390,59 @@ def discover_egress_ip(
             )
             resp.raise_for_status()
             ip = resp.text.strip()
-            ipaddress.ip_address(ip)  # validate (raises ValueError if not an IP)
-            return ip
+            parsed = ipaddress.ip_address(ip)  # raises ValueError if not an IP
         except Exception as exc:  # noqa: BLE001 - try the next endpoint
-            last_err = exc
+            kind, detail = _classify(exc)
+            attempts.append(
+                _Attempt(url, time.monotonic() - started, kind, detail))
             continue
+
+        if any(parsed in net for net in _NOT_ROUTABLE):
+            # A well-formed answer that cannot be an egress IP. Recorded as a
+            # failed attempt rather than returned, because until 2026-09-02 it
+            # WAS returned: a proxy that had stopped routing answered `10.x.x.x`
+            # here, sailed through, and failed two steps later as "not present
+            # in the geoip database" - which blames the database for a proxy
+            # that was not proxying.
+            attempts.append(_Attempt(
+                url, time.monotonic() - started, "not_routing",
+                f"{ip} is not a routable public address"))
+            continue
+        return ip
+
     spent = budget - (deadline - time.monotonic())
-    exhausted = (
-        f" The {budget:g}s budget ran out after {tried} of "
-        f"{len(_IP_ECHO_ENDPOINTS)} endpoints."
-        if tried < len(_IP_ECHO_ENDPOINTS)
-        else ""
-    )
-    raise GeoTimezoneError(
-        f"could not discover the proxy egress IP via {tried} "
-        f"endpoint(s) in {spent:.1f}s (last error: {last_err!r}). For SOCKS "
-        f"proxies make sure requests[socks] / PySocks is installed.{exhausted}"
-    )
+    tried = len(attempts)
+    total = len(_IP_ECHO_ENDPOINTS)
+
+    proxied = bool(proxies)
+    kinds = {a.kind for a in attempts}
+    if not attempts:
+        # NOT "mixed". Nothing failed for differing reasons, because nothing ran
+        # at all - the budget was already spent when this step started. The old
+        # code fell through to "mixed", so both the prose and `.kind`, which the
+        # class docstring tells callers to branch on instead of the prose, said
+        # the endpoints disagreed while promising a list that was empty.
+        kind = "no_endpoint_tried"
+    elif len(kinds) == 1:
+        kind = kinds.pop()
+    else:
+        kind = "mixed"
+    through = "through the proxy" if proxied else "directly (no proxy set)"
+
+    lines = [
+        f"could not discover the egress IP {through}: {_remedy(kind, proxied)}",
+        f"tried {tried} of {total} endpoint(s) in {spent:.1f}s of a {budget:g}s budget",
+    ]
+    lines.extend(a.line() for a in attempts)
+    if tried < total:
+        # The signature of the pathology fixed on 2026-08-10, kept visible so a
+        # regression is legible in the message instead of needing a bisection:
+        # one endpoint eating the whole budget means the other two never ran, so
+        # the redundancy that is supposed to cover a single outage never applies.
+        lines.append(
+            f"  NOTE: the budget ran out with {total - tried} endpoint(s) never "
+            f"tried, so the redundancy never came into play")
+    raise GeoTimezoneError("\n".join(lines), kind=kind, attempts=tuple(attempts))
 
 
 def _geo_record(ip: str, mmdb_path: Any) -> "Optional[Dict[str, Any]]":
@@ -200,13 +485,15 @@ def ip_to_coordinates(ip: str, mmdb_path: Any) -> "tuple[float, float]":
     """
     record = _geo_record(ip, mmdb_path)
     if not record:
-        raise GeoTimezoneError(f"egress IP {ip} not present in the geoip database")
+        raise GeoTimezoneError(
+            f"egress IP {ip} not present in the geoip database",
+            kind="ip_not_in_db")
     loc = record.get("location") or {}
     lat, lon = loc.get("latitude"), loc.get("longitude")
     if lat is None or lon is None:
         raise GeoTimezoneError(
-            f"no coordinates for egress IP {ip} in the geoip database"
-        )
+            f"no coordinates for egress IP {ip} in the geoip database",
+            kind="no_coordinates_for_ip")
     return float(lat), float(lon)
 
 
@@ -219,18 +506,22 @@ def ip_to_timezone(ip: str, mmdb_path: Any) -> str:
     """
     record = _geo_record(ip, mmdb_path)
     if not record:
-        raise GeoTimezoneError(f"egress IP {ip} not present in the geoip database")
+        raise GeoTimezoneError(
+            f"egress IP {ip} not present in the geoip database",
+            kind="ip_not_in_db")
     tz = (record.get("location") or {}).get("time_zone")
     if not tz:
-        raise GeoTimezoneError(f"no timezone for egress IP {ip} in the geoip database")
+        raise GeoTimezoneError(
+            f"no timezone for egress IP {ip} in the geoip database",
+            kind="no_timezone_for_ip")
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
     try:
         ZoneInfo(tz)
     except (ZoneInfoNotFoundError, ValueError) as exc:
         raise GeoTimezoneError(
-            f"geoip returned an invalid IANA zone {tz!r} for {ip}: {exc}"
-        ) from exc
+            f"geoip returned an invalid IANA zone {tz!r} for {ip}: {exc}",
+            kind="invalid_timezone") from exc
     return tz
 
 
@@ -350,11 +641,18 @@ def _warn_locale_fallback(proxy: Optional[Dict[str, str]], why: str) -> None:
     import sys
 
     where = "behind a proxy" if _proxy_is_set(proxy) else "with no proxy"
+    # The cause goes AFTER the sentence, indented, rather than inside a
+    # parenthesis in the middle of it. `why` became multi-line on 2026-09-02 when
+    # the egress failure started listing one line per endpoint, and spliced into
+    # the middle it left the warning's own advice glued to the last endpoint line,
+    # where neither a reader nor a log grep expects to find it.
+    detail = "\n".join("    " + line for line in why.split("\n"))
     print(
-        f"invisible-core: could not resolve the session locale {where} ({why}); "
+        f"invisible-core: could not resolve the session locale {where}; "
         f"falling back to en-US. The timezone is still resolved from the egress "
         f"IP, so this session may pair a non-US timezone with a US language - "
-        f"pass locale=\"xx-XX\" to set it explicitly.",
+        f"pass locale=\"xx-XX\" to set it explicitly.\n"
+        f"{detail}",
         file=sys.stderr,
     )
 
@@ -478,6 +776,38 @@ def _srflx_soppresso(proxy: Optional[Dict[str, str]],
     return c.get("udp") is True and c.get("udp_coerente") is True
 
 
+def _geoip_database(ip: str, proxied: bool) -> Any:
+    """The mmdb, or an error saying the DATABASE failed and not the network.
+
+    The distinction this exists to make: acquiring the database and looking an
+    address up in it are separate failures with separate remedies, and until
+    2026-09-02 the acquisition sat inside the same expression as the lookup,
+    under one blanket `except`. A failed download therefore reached the caller
+    wearing the face of a proxy that would not answer, and the reflex it invited
+    was to go and check the proxy, which was working.
+
+    Both TIMEZONE resolvers go through here rather than keeping a copy each.
+    `_coordinate` in `prepare_session_geo` still acquires the database on its own
+    line, and that is deliberate: coordinates are best-effort and swallow their
+    own failure, so routing them through a helper that RAISES would turn a
+    tolerated gap into a refused launch.
+
+    `proxied` selects the advice, and is passed rather than recomputed: the
+    caller has already decided it with `_proxy_is_set`, and deciding it twice is
+    the duplication that rule 16 names.
+    """
+    from .download import ensure_geoip_mmdb
+
+    try:
+        return ensure_geoip_mmdb()
+    except Exception as exc:  # noqa: BLE001
+        found = (f"the egress IP is {ip}, so the network path is fine, but "
+                 if proxied else f"the egress IP is {ip}, but ")
+        raise GeoTimezoneError(
+            f"{found}{_remedy('geoip_unavailable', proxied)}: {exc}",
+            kind="geoip_unavailable") from exc
+
+
 def prepare_session_geo(
     timezone: str, proxy: Optional[Dict[str, str]]
 ) -> SessionGeo:
@@ -535,7 +865,7 @@ def prepare_session_geo(
         # valore; senza, `ip` e' il fatto che questo giro di rete ha appena
         # pagato e `egress_ip` e' `None`. Portare il secondo significava
         # buttare la scoperta e farla rifare a `resolve_session_locale`.
-        return SessionGeo(ip_to_timezone(ip, ensure_geoip_mmdb()), ip, lat, lon,
+        return SessionGeo(ip_to_timezone(ip, _geoip_database(ip, proxy_set)), ip, lat, lon,
                           _srflx_soppresso(proxy, ip))
     except Exception:
         if proxy_set:
@@ -558,12 +888,11 @@ def resolve_session_timezone(
     tz = (timezone or "").strip()
     if tz and tz.lower() != "auto":
         return tz  # explicit IANA wins - no egress lookup
-    from .download import ensure_geoip_mmdb
 
     proxy_set = _proxy_is_set(proxy)
     try:
         ip = discover_egress_ip(proxy if proxy_set else None)
-        return ip_to_timezone(ip, ensure_geoip_mmdb())
+        return ip_to_timezone(ip, _geoip_database(ip, proxy_set))
     except Exception:
         if proxy_set:
             raise  # fail-early behind a proxy (timezone_mismatch trap)
