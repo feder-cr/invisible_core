@@ -4,13 +4,23 @@ Pure config for a patched Firefox stealth profile - **zero Playwright dependency
 
 `seed → fingerprint profile → Firefox prefs`, plus patched-binary download,
 proxy config, and geo/timezone resolution. Importing it does not start a browser,
-which is the point: the same fingerprint config backs an automation wrapper and a
-desktop profile manager without either depending on the other.
+which is the point: the same fingerprint config backs an automation wrapper and,
+through it, an MCP server, without either depending on the other.
+
+(It backed a desktop profile manager too, until that repository was deleted on
+2026-08-18. The package it published, `invisible-firefox`, is still on PyPI.)
 
 The shared foundation used by:
 
 - **[invisible_playwright](https://github.com/feder-cr/invisible_playwright)** - the
-  Playwright automation wrapper (`InvisiblePlaywright`).
+  Playwright automation wrapper (`InvisiblePlaywright`). The only direct consumer.
+
+And through it, for anyone who would rather prompt than script:
+
+- **[invisible-playwright-mcp](https://github.com/feder-cr/invisible-playwright-mcp)**
+  - the wrapper as an MCP server, for a client that brings its own model.
+- **[AIHawk](https://github.com/feder-cr/AIHawk)** - an interface and a model, from
+  one command.
 
 The engine itself lives in
 [firefox_antidetect_patch](https://github.com/feder-cr/firefox_antidetect_patch),
