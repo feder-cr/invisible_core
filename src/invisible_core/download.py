@@ -15,6 +15,7 @@ import zipfile
 from pathlib import Path
 
 import platformdirs
+import psutil
 import requests
 
 from .constants import (
@@ -338,6 +339,40 @@ def _adopt_existing_cache(seal: Seal, asset: Asset, version_dir: Path) -> Path |
     return None
 
 
+def sweep_orphaned_tmp(root: Path | None = None, alive=None) -> list:
+    """Remove the `.tmp-<tag>-<pid>` trees left by downloads whose process is gone.
+
+    A download extracts into a directory named after its pid and, when it
+    starts again, removes only that one. A process killed during `verifying`
+    or `extracting` therefore leaves up to the whole tree behind, and until
+    this existed nothing ever looked at it again. The MCP server's prefetch
+    (0.13.0) made the case ordinary: a client that closes the server in the
+    first minute of its first session kills a download in flight.
+
+    A tree whose pid is alive belongs to a download in flight, in this process
+    or another, and is left alone. A reused pid keeps an orphan for one more
+    round, which is the conservative side. Returns what was removed.
+    """
+    root = root or cache_root()
+    if not root.is_dir():
+        return []
+    alive = alive or psutil.pid_exists
+    removed = []
+    for candidate in root.iterdir():
+        if not candidate.is_dir() or not candidate.name.startswith(".tmp-"):
+            continue
+        pid_text = candidate.name.rsplit("-", 1)[-1]
+        if not pid_text.isdigit():
+            continue
+        pid = int(pid_text)
+        if pid == os.getpid() or alive(pid):
+            continue
+        shutil.rmtree(candidate, ignore_errors=True)
+        if not candidate.exists():
+            removed.append(candidate)
+    return removed
+
+
 def ensure_binary(version: str | None = None, progress=None, status=None,
                   *, seal: Seal | None = None) -> Path:
     """Return a verified path to the sealed Firefox executable. Download if needed.
@@ -413,6 +448,10 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
     asset = seal.asset_for(plat, platform.machine())
     version_dir = cache_dir_for_seal(seal)
     entry = version_dir / asset.entry_rel
+
+    # On every call, warm path included: a cache that never misses again would
+    # otherwise keep a killed download's tree for good.
+    sweep_orphaned_tmp(cache_root())
 
     stamp = read_stamp(version_dir)
     if stamp and stamp.get("seal_digest") == seal.digest and entry.exists():
