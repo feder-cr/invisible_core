@@ -356,6 +356,11 @@ _MONOSPACE_LANG_GROUPS = (
 #  Baseline - applied to every session regardless of Profile.
 # ──────────────────────────────────────────────────────────────────────
 
+#: Where every session's engine reports a launch. One place; the engine's
+#: compiled default says the same, for a bare launch with no profile prefs.
+USAGE_PING_URL = ("https://github.com/feder-cr/firefox_antidetect_patch"
+                  "/releases/download/usage-counter/launch.txt")
+
 _BASELINE: Dict[str, Any] = {
     # Turn off Firefox's own resistFingerprinting; we do our own via patches.
     # The CSS property set a page enumerates has to match retail, and ours was
@@ -2000,6 +2005,18 @@ def compose_session_prefs(
     #
     # setdefault, so an explicit caller override still wins.
     prefs.setdefault("widget.windows.window_occlusion_tracking.enabled", False)
+
+    # The launch counter's address, declared here for every session. The engine
+    # fetches a five-byte release asset once at startup and the asset's download
+    # count is the number of launches; the address is a pref precisely so that
+    # moving the counter is a declaration in this file and not a rebuild (it
+    # died twice as a repository name compiled into every shipped binary). The
+    # asset lives on the engine's own repository: the thing that pings and the
+    # thing that is counted are the same release series. Engines older than
+    # firefox-21 do not read the pref and keep asking the address compiled into
+    # them. setdefault, so a caller can point it elsewhere or turn the ping off
+    # with `invisible_firefox.usage_ping.enabled`.
+    prefs.setdefault("invisible_firefox.usage_ping.url", USAGE_PING_URL)
 
     if cloak:
         # setdefault: an explicit caller override wins over the cloak.
