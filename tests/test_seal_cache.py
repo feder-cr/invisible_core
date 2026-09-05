@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import platform
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -238,6 +239,26 @@ def test_stamped_matching_tree_is_served_with_no_network(cache, no_network, seal
     entry = build_tree(version_dir)
     stamp_for(version_dir, sealed)
     assert ensure_binary(seal=sealed) == entry
+
+
+def test_an_orphaned_tmp_tree_is_swept_on_the_warm_path(cache, no_network, sealed):
+    """A download killed during extraction left its `.tmp-<tag>-<pid>` tree in
+    the cache root for good, because only a fresh download by the SAME pid
+    ever removed it. The sweep runs on every call, warm path included, so a
+    cache that never misses again is still cleaned. The pid is one that has
+    provably exited: a child spawned and waited for here."""
+    version_dir = cache_dir_for_seal(sealed)
+    entry = build_tree(version_dir)
+    stamp_for(version_dir, sealed)
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    orphan = cache / (".tmp-%s-%d" % (sealed.tag, gone.pid))
+    (orphan / "firefox").mkdir(parents=True)
+    (orphan / "firefox" / "omni.ja").write_bytes(b"half-extracted")
+
+    assert ensure_binary(seal=sealed) == entry
+
+    assert not orphan.exists(), "the orphan survived a warm ensure_binary"
 
 
 # --------------------------------------------------------- adoption and D5
