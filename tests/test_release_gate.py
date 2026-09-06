@@ -595,23 +595,7 @@ def test_cw2_a_line_ending_flip_is_not_a_content_change(core):
     in today's sdist carry CRLF and the rest carry LF. The ledger is checked in
     and travels to Linux CI, so digesting raw bytes would refuse the first CI
     release over a change nobody made."""
-    flipped = 0
-    for p in sorted(core.rglob("*")):
-        if not p.is_file() or p.name == "PUBLISHED.json":
-            continue
-        blob = p.read_bytes()
-        if b"\x00" in blob:
-            continue
-        try:
-            blob.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        lf = blob.replace(b"\r\n", b"\n")
-        crlf = lf.replace(b"\n", b"\r\n")
-        if crlf != blob:
-            p.write_bytes(crlf)
-            flipped += 1
-    assert flipped > 5, "nothing was flipped, so this test proves nothing"
+    _flip_tree_line_endings(core)
 
     r = run_gate(core)
     text = out_of(r)
@@ -983,7 +967,24 @@ def test_d6b_a_build_whose_only_change_is_a_content_cr_reads_as_identical(core):
 # nothing at all. Two of them have their own detailed cases above (CW1, CW2);
 # they are repeated here so the whole set is provable in one run.
 
-def _flip_tree_to_crlf(root: Path) -> None:
+def _flip_tree_line_endings(root: Path) -> int:
+    """Rewrite every text file with the OTHER line ending, and count them.
+
+    Not "to CRLF": to whichever ending the file does not have. The previous
+    version converted to CRLF and asserted that more than five files had
+    changed, which inherited its precondition from the checkout instead of
+    establishing it. A fresh clone on Windows with `core.autocrlf=true` checks
+    the files out as CRLF already, so the conversion changed nothing, the
+    count stayed at zero and the case died on its own guard - on `main`, in
+    every fresh clone, before a single gate ran. Measured 2026-09-06 on two
+    clones of the same commit: 0 flipped with autocrlf=true, 52 with it off.
+    Flipping to the opposite ending makes the case prove the same property in
+    both trees: the gate must not read a line-ending change as content,
+    whichever way the change goes.
+
+    Shared by CW2 and the ordinary-afternoon noise case, so the two cannot
+    drift into two loops that flip different things.
+    """
     flipped = 0
     for p in sorted(root.rglob("*")):
         if not p.is_file() or p.name == "PUBLISHED.json":
@@ -995,11 +996,15 @@ def _flip_tree_to_crlf(root: Path) -> None:
             blob.decode("utf-8")
         except UnicodeDecodeError:
             continue
-        crlf = blob.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
-        if crlf != blob:
-            p.write_bytes(crlf)
+        lf = blob.replace(b"\r\n", b"\n")
+        if b"\n" not in lf:
+            continue
+        other = lf if lf != blob else lf.replace(b"\n", b"\r\n")
+        if other != blob:
+            p.write_bytes(other)
             flipped += 1
     assert flipped > 5, "nothing was flipped, so this case proves nothing"
+    return flipped
 
 
 def _write(root: Path, rel: str, text: str) -> None:
@@ -1017,7 +1022,7 @@ def _stray_pyc(root: Path) -> None:
 NOISE = [
     ("gitignore", lambda r: _write(r, ".gitignore", "__pycache__/\n*.pyc\ndist/\n")),
     ("gitattributes", lambda r: _write(r, ".gitattributes", "* text=auto\n*.png binary\n")),
-    ("crlf_whole_tree", _flip_tree_to_crlf),
+    ("line_endings_whole_tree", _flip_tree_line_endings),
     ("the_gate_itself", lambda r: _write(r, "scripts/version_gate.py",
                                          "# an edit to the gate is not a release\n")),
     ("notes_and_makefile", lambda r: (_write(r, "NOTES.md", "# scratch\n"),
