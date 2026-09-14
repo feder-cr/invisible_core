@@ -1281,11 +1281,29 @@ _CANVAS_NOISE_SKIP_MASK = 15
 
 
 def _apply_canvas_and_msaa(prefs: Dict[str, Any], profile: Profile) -> None:
-    # MSAA: on Windows, pin to 4 (Firefox default for ANGLE) so gl.SAMPLES is
-    # constant across all sessions. Different MSAA values cause different CN-set
-    # parameters hashes even with the same renderer -> detectable variation.
-    # Vanilla Intel Arc A750 parameters hash (66544db8) verified at msaa=4.
-    _msaa = profile.webgl.msaa_samples if sys.platform.startswith("linux") else 4
+    # MSAA: 4 (Firefox's default for ANGLE) on BOTH builds, so gl.SAMPLES is
+    # constant across all sessions and identical on the two platforms. Different
+    # MSAA values cause different CN-set parameters hashes even with the same
+    # renderer -> detectable variation. Vanilla Intel Arc A750 parameters hash
+    # (66544db8) verified at msaa=4.
+    #
+    # ⛔ THIS READ `profile.webgl.msaa_samples if sys.platform is linux else 4`
+    # until 2026-09-15, which applied the remedy above to Windows only and left
+    # Linux doing the thing the same comment calls detectable. Measured that day
+    # on eight seeds, the two builds emitted a DIFFERENT value on seven of them,
+    # and across 200 seeds Linux spread over {0, 2, 4, 8} while Windows was 4
+    # every time. The persona's declared GL_MAX_SAMPLES is the same on both, so
+    # on Linux a page could read a SAMPLES the persona's GPU does not pair with.
+    #
+    # The direction is not a preference: the target is Windows and the judge is
+    # retail Windows, so a divergence between our builds is closed by moving
+    # LINUX onto what Windows does, never the reverse.
+    #
+    # `profile.webgl.msaa_samples` stays SAMPLED - removing it from the forge
+    # would renormalise the draw and remap every identity - but nothing reads it
+    # any more, which is why it is no longer offered as a pin. The gate that
+    # holds this is `test_every_pinnable_key_reaches_the_browser_or_says_why`.
+    _msaa = 4
     # DEAD: appears in NO file of the engine source; MSAA sample counts come from the real GL driver.
     # prefs["zoom.stealth.webgl.msaa"]        = _msaa
     prefs["webgl.msaa-samples"]             = _msaa
