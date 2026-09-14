@@ -283,9 +283,22 @@ def test_generate_profile_pin_dark_theme_false():
 
 @pytest.mark.unit
 def test_generate_profile_pin_gpu_renderer_propagates():
-    p = generate_profile(seed=42, pin={"gpu.renderer": "FORCED_RENDERER"})
-    assert p.gpu.renderer == "FORCED_RENDERER"
-    assert p.to_prefs_dict()["webgl_renderer"] == "FORCED_RENDERER"
+    """A pinned renderer has to reach the BROWSER, not just the profile object.
+
+    This asserted `"FORCED_RENDERER"` came back out of `Profile.gpu.renderer` and
+    `to_prefs_dict()`, both of which are the sampler's own bookkeeping. Neither is
+    what the browser is told, so the test stayed green through the whole life of a
+    defect where the emitted `zoom.stealth.webgl.renderer` ignored the pin
+    entirely. A free string is refused now (it cannot carry its getParameter values
+    with it), so the pin names a validated persona and the assertion follows it all
+    the way to the pref."""
+    from invisible_core._webgl_personas import _gpu_pool
+    from invisible_core.prefs import translate_profile_to_prefs
+    wanted = _gpu_pool()[-1]
+    p = generate_profile(seed=42, pin={"gpu.renderer": wanted["renderer"]})
+    assert p.gpu.renderer == wanted["renderer"]
+    assert p.to_prefs_dict()["webgl_renderer"] == wanted["renderer"]
+    assert translate_profile_to_prefs(p)["zoom.stealth.webgl.renderer"] == wanted["renderer"]
 
 
 @pytest.mark.unit

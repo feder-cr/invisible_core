@@ -23,7 +23,7 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
-from ._webgl_personas import render_noise_seed, select_persona
+from ._webgl_personas import persona_for, render_noise_seed
 from ._headless import cloak_prefs
 from ._proxy import configure_proxy
 
@@ -1232,8 +1232,17 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
 
     Returns the persona, because `_apply_extension_lists` needs to know whether
     one was applied.
+
+    ⛔ This READS the profile's persona, it does not choose one. It used to call
+    `select_persona(profile.seed)`, which was a second answer to a question
+    `generate_profile` had already answered, and the two diverged as soon as a
+    `pin` arrived: the profile said one GPU and this function wrote another into
+    the prefs, so `pin={"gpu.renderer": ...}` changed the label and never the
+    browser. The choice lives in `_webgl_personas.choose_persona`, called once
+    from `generate_profile`; here we look the chosen entry back up by the
+    renderer+vendor the profile carries.
     """
-    persona = select_persona(profile.seed)
+    persona = persona_for(profile.gpu.renderer, profile.gpu.vendor)
     if persona:
         # Apply the FULL coherent WebGL override (renderer + vendor + webgl1/webgl2 extensions
         # + ~100 getParameter values + shader-precision formats). Setting ALL of them - not just

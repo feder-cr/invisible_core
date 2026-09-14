@@ -38,7 +38,6 @@ import secrets
 from typing import Any, Dict, List, Optional, Union
 
 from ._fpforge import generate_profile
-from ._webgl_personas import forced_gpu_class
 from .prefs import compose_session_prefs
 
 
@@ -130,7 +129,12 @@ def get_default_stealth_prefs(
         ``playwright.firefox.launch()`` or ``launch_persistent_context()``.
     """
     resolved_seed = int(seed) if seed is not None else secrets.randbits(31)
-    profile = generate_profile(resolved_seed, pin=pin, fixed_gpu_class=forced_gpu_class(resolved_seed))
+    # No `fixed_gpu_class=`: it used to be passed here as
+    # `forced_gpu_class(resolved_seed)`, which restated what `generate_profile`
+    # already derives from the persona it chooses. Passing it made this a second
+    # place that had to be kept in step with the persona choice, and call sites
+    # that forgot it produced a different profile for the same seed.
+    profile = generate_profile(resolved_seed, pin=pin)
     # One composition for all three entry points (prefs.py). Two things this
     # function did NOT do before 2026-08-01 and now does, both by taking the
     # shared layers rather than rebuilding them:

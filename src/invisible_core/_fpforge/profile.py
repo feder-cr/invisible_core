@@ -9,8 +9,7 @@ from ._sampler import sample as _sample_raw
 # Top level, not deferred: `_webgl_personas` imports nothing from this package at
 # module scope, so there is no cycle to work around - verified by importing the
 # package, this module and `_webgl_personas` each first in a fresh interpreter.
-from .._webgl_personas import forced_gpu_class as _forced_gpu_class
-from .._webgl_personas import select_persona as _select_persona
+from .._webgl_personas import choose_persona as _choose_persona
 
 
 @dataclass(frozen=True)
@@ -566,34 +565,36 @@ def generate_profile(
         for key in pin:
             _validate_pin_key(key)
 
-    # fixed_gpu_class re-conditions the whole bundle on a chosen class, so the
-    # bundle stays coherent with the WebGL persona actually exposed.
+    # ONE decision, taken here and nowhere else: which validated GPU persona this
+    # session presents. It settles both halves of the GPU identity - the class the
+    # whole bundle is conditioned on, and the renderer/vendor the page reads - and
+    # they are two halves of one question, which is why they must not be answered
+    # by two expressions.
     #
-    # IT DEFAULTS TO THE SEED'S OWN PERSONA CLASS, and that default is the fix
-    # for a live bug rather than a convenience. `prefs.translate_profile_to_prefs`
-    # applies `select_persona(profile.seed)` UNCONDITIONALLY, so the GPU a page
-    # sees is always the persona's - which means conditioning the bundle on that
-    # persona's class is not a policy a caller may choose, it is an invariant of
-    # the pipeline. Passing it was left to the caller, and of the five call sites
-    # three passed it and two did not:
+    # They used to be. `eff_class` was computed here from the pin, and the persona
+    # was drawn from the seed alone a few lines down, and `prefs._apply_gpu_persona`
+    # drew it from the seed AGAIN, so the pin reached the label and never the
+    # browser. Measured 2026-09-15 on seed 1561645783: `pin={"gpu.renderer": "...RX
+    # 7900 XTX..."}` gave a Profile reporting the AMD card while the emitted
+    # `zoom.stealth.webgl.renderer` stayed the seed's NVIDIA GTX 980, and
+    # `pin={"gpu.class_tier": "high_end"}` conditioned the bundle on a class the
+    # pool does not even contain. All three `gpu.*` pin keys were decorative.
     #
-    #   config.py, launcher.py, async_api.py     passed it
-    #   launch.py (the manager's LAUNCH path)    did not
-    #   manager/fingerprint.py (the UI preview)  did not
+    # Why the class cannot be a free choice: conditioning cores, screen, storage
+    # and audio on one tier while the page reads a GPU of another is the internal
+    # contradiction the per-GPU pool exists to remove. Measured over 500 seeds when
+    # this default was introduced, 355 (71%) of profiles from the call sites that
+    # omitted it emitted different prefs from the wrapper's for the same seed -
+    # storage quota, audio output latency, sample rate, screen size,
+    # devicePixelRatio, av1 - every one a value the identification service
+    # cross-checks against the reported GPU. That is why the class is now DERIVED
+    # from the persona instead of being passed in beside it.
     #
-    # Measured over 500 seeds before this default: 355 (71%) of manager profiles
-    # emitted different prefs from the wrapper's for the same seed - storage
-    # quota, audio output latency, sample rate, screen size, devicePixelRatio,
-    # av1 - every one of them a value the identification service cross-checks
-    # against the reported GPU. A profile advertising a mid_range renderer while
-    # carrying low_end storage and audio is exactly the internal contradiction
-    # the per-GPU pool exists to remove.
-    #
-    # An explicit `gpu.class_tier` pin still wins, then an explicit
-    # `fixed_gpu_class`; only the unspecified case changed.
-    eff_class = ((pin or {}).get("gpu.class_tier")
-                 or fixed_gpu_class
-                 or _forced_gpu_class(int(seed)))
+    # `fixed_gpu_class` survives as an argument for the published signature, and
+    # `choose_persona` treats it exactly like a `gpu.class_tier` pin.
+    persona = _choose_persona(int(seed), pin=pin, fixed_gpu_class=fixed_gpu_class)
+    eff_class = (persona["gpu_class"] if persona
+                 else ((pin or {}).get("gpu.class_tier") or fixed_gpu_class))
     raw = _sample_raw(int(seed), fixed_gpu_class=eff_class)
     # The GPU NAME the profile reports is the persona's, because the persona is
     # what the browser actually presents.
@@ -606,20 +607,20 @@ def generate_profile(
     # Nothing ever wrote the sampled name into a pref - measured on seed 42, the
     # 224 emitted prefs contain the persona (Intel HD Graphics) and no trace of
     # the sampled GTX 1650 - so `Profile.gpu.renderer` was a label that
-    # contradicted the page for every seed with a persona, and the
-    # profile-manager showed the label to the user.
+    # contradicted the page for every seed with a persona.
     #
     # The DRAW stays. Removing it would renormalise the marginal and remap every
     # identity, which is the weighted-pool rule; and its value still feeds
     # `classify_gpu` when no persona exists. What changes is only which of the
     # two names gets REPORTED, so there is one source instead of two.
     #
-    # This runs BEFORE `_apply_pins_to_raw`, so an explicit `gpu.renderer` pin
-    # still wins, exactly like `eff_class` above.
-    _persona = _select_persona(int(seed))
-    if _persona:
-        raw["webgl_renderer"] = _persona["renderer"]
-        raw["webgl_vendor"] = _persona["vendor"]
+    # `_apply_pins_to_raw` still runs after this and may write the same renderer
+    # over the top, which is now a no-op rather than a divergence: a pin that
+    # names something outside the pool has already been refused by
+    # `choose_persona`, so the only values that reach here agree with the persona.
+    if persona:
+        raw["webgl_renderer"] = persona["renderer"]
+        raw["webgl_vendor"] = persona["vendor"]
     # Seed the invariant font fields BEFORE pins, so a `font.*` pin overwrites
     # them through _apply_pins_to_raw like any sampled field, and so
     # `to_prefs_dict()` reports them alongside everything else.

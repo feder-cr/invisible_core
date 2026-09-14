@@ -1,7 +1,11 @@
 """The bundle must be conditioned on the GPU class the browser will actually report.
 
-`translate_profile_to_prefs` applies `select_persona(profile.seed)`
-UNCONDITIONALLY, so the renderer a page sees is always the persona's. Everything
+`generate_profile` chooses one validated persona for the session and everything
+downstream reads it, so the renderer a page sees is always that persona's.
+Until 2026-09-15 `translate_profile_to_prefs` chose its own by calling
+`select_persona(profile.seed)` again, which agreed with the profile's for as long
+as the only input was the seed and diverged the moment a `pin` arrived: the pin
+moved the label and never the browser. Everything
 the identification service cross-checks against that renderer - storage quota,
 audio output latency and sample rate, screen size, devicePixelRatio, codec
 support - is drawn from the bundle. If the bundle was conditioned on a different
@@ -24,10 +28,11 @@ every manager profile with a mismatched class was internally incoherent. Because
 BOTH manager paths were wrong in the same way, the UI preview agreed with the
 launch and nothing looked wrong from inside the product.
 
-The fix is structural rather than a fourth reminder: `generate_profile` defaults
-`fixed_gpu_class` to the seed's own persona class, so a call site cannot omit it.
-These tests hold that default in place and prove the two explicit overrides still
-win, because a default that cannot be overridden would break pinning.
+The fix is structural rather than a fourth reminder: `generate_profile` chooses the
+persona once and DERIVES the class from it, so a call site cannot omit it and cannot
+pass one that contradicts it. These tests hold that in place, prove the two explicit
+overrides still win - a default that cannot be overridden would break pinning - and
+prove that an override the pool cannot present is refused instead of half-applied.
 """
 from __future__ import annotations
 
@@ -81,14 +86,21 @@ def test_the_exposed_renderer_is_the_personas_on_the_bare_call_too():
 
 # ── the default must not swallow the overrides ────────────────────────────
 
-@pytest.mark.parametrize("tier", ["low_end", "mid_range", "high_end"])
+@pytest.mark.parametrize("tier", ["low_end", "mid_range"])
 def test_an_explicit_class_pin_still_wins(tier):
     """Pinning is a documented feature and it outranks the default. A default
-    that could not be overridden would silently ignore `pin`."""
+    that could not be overridden would silently ignore `pin`.
+
+    The tiers are the ones the validated pool can actually present. `high_end`
+    used to be in this list and passed, because the pin reached the sampler; it
+    never reached the persona, so the profile it produced carried high_end cores,
+    storage and screen behind a low_end GPU string - the cross-check contradiction
+    this whole file exists to prevent. It is now refused, and the refusal has its
+    own test below."""
     assert generate_profile(7, pin={"gpu.class_tier": tier}).gpu.class_tier == tier
 
 
-@pytest.mark.parametrize("tier", ["low_end", "high_end"])
+@pytest.mark.parametrize("tier", ["low_end", "mid_range"])
 def test_an_explicit_fixed_gpu_class_still_wins(tier):
     assert generate_profile(7, fixed_gpu_class=tier).gpu.class_tier == tier
 
@@ -96,9 +108,23 @@ def test_an_explicit_fixed_gpu_class_still_wins(tier):
 def test_a_pin_outranks_fixed_gpu_class():
     """The documented precedence, unchanged: pin, then fixed_gpu_class, then the
     seed's persona."""
-    p = generate_profile(7, pin={"gpu.class_tier": "high_end"},
+    p = generate_profile(7, pin={"gpu.class_tier": "mid_range"},
                          fixed_gpu_class="low_end")
-    assert p.gpu.class_tier == "high_end"
+    assert p.gpu.class_tier == "mid_range"
+
+
+@pytest.mark.parametrize("tier", ["high_end", "integrated_old", "integrated_modern"])
+def test_a_class_the_pool_cannot_present_is_refused_not_faked(tier):
+    """The other half of the precedence rule, and the one that was missing.
+
+    A class with no validated persona cannot be honoured: the bundle would be
+    conditioned on it while the page reads a GPU of a different class. Silently
+    conditioning half the profile is worse than not pinning at all, so it raises,
+    and the message names what IS available rather than only what is not."""
+    with pytest.raises(ValueError) as excinfo:
+        generate_profile(7, pin={"gpu.class_tier": tier})
+    assert tier in str(excinfo.value)
+    assert "low_end" in str(excinfo.value) and "mid_range" in str(excinfo.value)
 
 
 def test_the_profile_is_still_a_pure_function_of_the_seed():
@@ -180,11 +206,62 @@ def test_the_reported_vendor_follows_the_same_source():
 
 
 def test_an_explicit_pin_still_outranks_the_persona():
-    """Il caso che deve NON scattare. La persona e' la sorgente per il caso
-    non specificato; una pin esplicita resta la volonta' del chiamante, come
-    gia' vale per `gpu.class_tier`."""
-    p = generate_profile(42, pin={"gpu.renderer": "ANGLE (Prova, Scelta Mia)"})
-    assert p.gpu.renderer == "ANGLE (Prova, Scelta Mia)"
+    """An explicit pin is the caller's will and still outranks the seed's draw.
+
+    This test used to pass a renderer that exists nowhere - "ANGLE (Prova, Scelta
+    Mia)" - and assert it came back out of `Profile.gpu.renderer`. It was green
+    for as long as the defect existed, because the only thing it could fail on was
+    the value it had just handed in being echoed back, and the browser was never
+    asked. So it asserts on the emitted pref now: that is the answer that decides
+    what a page reads, and it is the one the old assertion could not distinguish."""
+    from invisible_core._webgl_personas import _gpu_pool
+    wanted = next(p for p in _gpu_pool() if p["renderer"] != select_persona(42)["renderer"])
+    p = generate_profile(42, pin={"gpu.renderer": wanted["renderer"]})
+    assert p.gpu.renderer == wanted["renderer"]
+    assert translate_profile_to_prefs(p)["zoom.stealth.webgl.renderer"] == wanted["renderer"]
+    assert translate_profile_to_prefs(p)["zoom.stealth.webgl.vendor"] == wanted["vendor"]
+
+
+def test_a_renderer_the_pool_cannot_present_is_refused_not_relabelled():
+    """A free string can never be honoured, so it must not be accepted.
+
+    The ~81 getParameter values, the shader precisions and the extension list
+    travel with the name; a name over foreign params is the mismatch FP Pro
+    scores at ~0.70. Accepting the string and quietly keeping the seed's persona
+    is what produced a Profile that reported one GPU while the page read another."""
+    with pytest.raises(ValueError) as excinfo:
+        generate_profile(42, pin={"gpu.renderer": "ANGLE (Nope, Not A Real Card)"})
+    assert "no validated GPU persona" in str(excinfo.value)
+    assert "Available renderers" in str(excinfo.value)
+
+
+def test_the_label_and_the_page_agree_for_every_seed_pinned_or_not():
+    """The single property the whole refactor exists to hold.
+
+    Whatever a caller pins, `Profile.gpu` and the emitted prefs must name the same
+    GPU - they are one decision read twice, not two decisions that happen to
+    agree. Measured before the fix on seed 1561645783: the profile reported an AMD
+    RX 7900 XTX and `zoom.stealth.webgl.renderer` carried the seed's NVIDIA GTX
+    980."""
+    from invisible_core._webgl_personas import _gpu_pool
+    other = _gpu_pool()[-1]
+    pins = [None,
+            {"gpu.class_tier": "mid_range"},
+            {"gpu.class_tier": "low_end"},
+            {"gpu.renderer": other["renderer"]},
+            {"gpu.vendor": other["vendor"]},
+            {"gpu.renderer": other["renderer"], "gpu.vendor": other["vendor"]}]
+    disagreements = []
+    for seed in range(60):
+        for pin in pins:
+            p = generate_profile(seed, pin=pin)
+            prefs = translate_profile_to_prefs(p)
+            if (p.gpu.renderer != prefs["zoom.stealth.webgl.renderer"]
+                    or p.gpu.vendor != prefs["zoom.stealth.webgl.vendor"]):
+                disagreements.append((seed, pin, p.gpu.renderer,
+                                      prefs["zoom.stealth.webgl.renderer"]))
+    assert not disagreements, (
+        "%d profile/page disagreements, first: %r" % (len(disagreements), disagreements[:1]))
 
 
 def test_the_class_still_comes_from_the_persona_not_from_the_reported_name():

@@ -218,15 +218,24 @@ def test_msaa_pinned_to_4_on_windows(monkeypatch):
 #  Canvas noise skip mask (Windows always uses intel path)
 # ──────────────────────────────────────────────────────────────────────
 
+def _persona_named(fragment):
+    """A real pool entry whose vendor contains `fragment`.
+
+    These tests used to pin invented renderer strings, a 4090 and a UHD 630, purely
+    as setup. A pin now has to name a validated persona, and reading the pool
+    instead of retyping a string also stops the test drifting the day the pool is
+    edited - those strings were a second copy of data that lives in one file."""
+    from invisible_core._webgl_personas import _gpu_pool
+    return next(e for e in _gpu_pool() if fragment in e["vendor"])
+
+
 
 @pytest.mark.unit
 def test_canvas_noise_mask_windows_uses_intel_path(monkeypatch):
     # CN3: on Windows _renderer_lo is hardcoded to "intel" → mask=15.
     monkeypatch.setattr(sys, "platform", "win32")
-    p = generate_profile(
-        seed=42,
-        pin={"gpu.renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11)"},
-    )
+    nvidia = _persona_named("NVIDIA")
+    p = generate_profile(seed=42, pin={"gpu.renderer": nvidia["renderer"]})
     prefs = translate_profile_to_prefs(p)
     assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
 
@@ -518,13 +527,9 @@ def test_canvas_noise_mask_intel_on_linux(monkeypatch):
     # exercises the live ``_renderer_lo`` branch on Linux (where the
     # value is read from the profile rather than hardcoded as on Windows).
     monkeypatch.setattr(sys, "platform", "linux")
-    p = generate_profile(
-        seed=42,
-        pin={
-            "gpu.renderer": "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-            "gpu.vendor": "Google Inc. (Intel)",
-        },
-    )
+    intel = _persona_named("Intel")
+    p = generate_profile(seed=42, pin={"gpu.renderer": intel["renderer"],
+                                       "gpu.vendor": intel["vendor"]})
     prefs = translate_profile_to_prefs(p)
     assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
 
@@ -536,13 +541,9 @@ def test_canvas_noise_mask_nvidia_on_linux(monkeypatch):
     # dev/test host even when an NVIDIA persona is exposed - the persona vendor does NOT drive
     # the noise rate anymore (would over-noise on an Intel host).
     monkeypatch.setattr(sys, "platform", "linux")
-    p = generate_profile(
-        seed=42,
-        pin={
-            "gpu.renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-            "gpu.vendor": "Google Inc. (NVIDIA)",
-        },
-    )
+    nvidia = _persona_named("NVIDIA")
+    p = generate_profile(seed=42, pin={"gpu.renderer": nvidia["renderer"],
+                                       "gpu.vendor": nvidia["vendor"]})
     prefs = translate_profile_to_prefs(p)
     assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
 
