@@ -74,6 +74,8 @@ __all__ = [
     "hook_config",
     "release_tag_in",
     "push_range",
+    "outside_the_hook",
+    "HOOK_LOCATION_VARIABLES",
     "GATE_NOTHING_TO_DO",
     "HookConfigError",
 ]
@@ -268,9 +270,34 @@ def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
     return ""
 
 
+#: The variables git exports to a hook to say WHICH repository the hook is
+#: about. They are right for the hook process itself, whose every git call is
+#: meant for this repository, and wrong for anything the hook launches: a test
+#: suite that builds a throwaway repository with `git init` inherits them, and
+#: with an absolute `GIT_DIR` - which is what git passes from a WORKTREE - its
+#: `init`, `add` and `commit` land in OUR repository instead. Measured on
+#: 2026-09-14: five test commits on a release branch, `core.bare = true` in the
+#: shared config, `origin/main` moved, all from one refused push.
+HOOK_LOCATION_VARIABLES = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX",
+    "GIT_NAMESPACE",
+)
+
+
+def outside_the_hook(env: Dict[str, str]) -> Dict[str, str]:
+    """`env` without the variables that tie a process to the hook's repository.
+
+    What a gate the hook launches is given, so that its git calls address the
+    repositories IT names and never the one git named to the hook.
+    """
+    return {k: v for k, v in env.items() if k not in HOOK_LOCATION_VARIABLES}
+
+
 def _subprocess_run(cmd: Sequence[str], cwd: Path) -> int:
     try:
-        return subprocess.run(list(cmd), cwd=str(cwd)).returncode
+        return subprocess.run(list(cmd), cwd=str(cwd),
+                              env=outside_the_hook(dict(os.environ))).returncode
     except FileNotFoundError:
         return 127
 

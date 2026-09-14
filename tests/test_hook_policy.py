@@ -708,3 +708,81 @@ def test_push_range_is_empty_when_the_commits_are_already_published(tmp_path):
     assert hooks.push_range(refs, repo) == "", (
         "i commit sono gia' su un remoto: non c'e' niente da scandire, e "
         "dirlo con un intervallo strano fa rifiutare il push")
+
+
+# ------------------------------------------------ what the hook hands a gate
+
+_LOCATION = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+             "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+             "GIT_PREFIX", "GIT_NAMESPACE")
+
+
+def test_a_gate_the_hook_launches_is_not_told_which_repository_the_hook_is_about(
+        tmp_path, monkeypatch):
+    """git exports `GIT_DIR` and its siblings to a hook, and from a WORKTREE
+    the value is absolute. A test suite the hook launches builds throwaway
+    repositories with `git init`; with those variables inherited, its `init`,
+    `add` and `commit` land in the hook's repository instead of the throwaway
+    one. Measured 2026-09-14 on a refused push of this package: five test
+    commits on the release branch, `core.bare = true` in the shared config and
+    `origin/main` moved - all from a suite that thought it was working in
+    `tmp_path`.
+
+    EXECUTED through the real runner with a real child process: the child
+    reports which of those variables it can see, and the answer has to be
+    none of them. The runner is the one place the hook spawns anything, so it
+    is the one place this can be true for every gate at once.
+
+    Known-bad: drop the `env=` from `_subprocess_run` and inherit the
+    environment again.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+
+    for name in _LOCATION:
+        monkeypatch.setenv(name, str(tmp_path / "hook-repo" / ".git" / "worktrees" / "x"))
+    monkeypatch.setenv("INVISIBLE_UNRELATED", "kept")
+    report = tmp_path / "seen.json"
+    code = hooks._subprocess_run(
+        [sys.executable, "-c",
+         "import json, os, sys; json.dump({k: v for k, v in os.environ.items() "
+         "if k.startswith('GIT_') or k == 'INVISIBLE_UNRELATED'}, "
+         "open(sys.argv[1], 'w'))", str(report)],
+        tmp_path)
+    assert code == 0
+    seen = json.loads(report.read_text(encoding="utf-8"))
+
+    leaked = sorted(k for k in seen if k in _LOCATION)
+    assert leaked == [], (
+        "the gate the hook launches is told which repository the hook is about, "
+        "so its throwaway repositories are ours: %s" % leaked)
+    assert seen.get("INVISIBLE_UNRELATED") == "kept", (
+        "the runner drops more than the repository location, so a gate loses "
+        "the environment it was configured with")
+    assert set(hooks.HOOK_LOCATION_VARIABLES) == set(_LOCATION)
+    # And the shape of the incident, with git itself: a throwaway `init` and
+    # `commit` run through the runner while an absolute GIT_DIR names a decoy
+    # repository must leave the decoy exactly as it was.
+    decoy = tmp_path / "hook-repo"
+    subprocess.run(["git", "init", "-q", str(decoy)], check=True, capture_output=True,
+                   env={k: v for k, v in os.environ.items() if k not in _LOCATION})
+    quiet = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                 GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    quiet = {k: v for k, v in quiet.items() if k not in _LOCATION}
+    subprocess.run(["git", "-C", str(decoy), "commit", "-q", "--allow-empty", "-m", "decoy"],
+                   check=True, capture_output=True, env=quiet)
+    before = subprocess.run(["git", "-C", str(decoy), "rev-parse", "HEAD"],
+                            check=True, capture_output=True, text=True, env=quiet).stdout
+    monkeypatch.setenv("GIT_DIR", str(decoy / ".git"))
+    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(name, "t" if "NAME" in name else "t@t")
+    throwaway = tmp_path / "throwaway"
+    assert hooks._subprocess_run(["git", "init", "-q", str(throwaway)], tmp_path) == 0
+    assert hooks._subprocess_run(["git", "-C", str(throwaway), "commit", "-q",
+                                  "--allow-empty", "-m", "c0"], tmp_path) == 0
+    after = subprocess.run(["git", "-C", str(decoy), "rev-parse", "HEAD"],
+                           check=True, capture_output=True, text=True, env=quiet).stdout
+    assert after == before, "the throwaway commit landed in the hook's repository"
+    assert (throwaway / ".git").is_dir(), "the throwaway repository was never made"
