@@ -143,19 +143,13 @@ _IDENTITY_MULTIPLIER = 2654435761
 _IDENTITY_MODULUS = 1_000_003
 
 
-def select_persona(seed: int) -> Optional[Dict]:
-    """Deterministic, prevalence-weighted GPU persona for this seed - on EVERY host.
+def _draw(pool: List[Dict], seed: int) -> Dict:
+    """The prevalence-weighted draw, over whatever slice of the pool it is given.
 
-    Same seed -> same persona (fppro_consistency: identity stable per seed). Different seeds
-    spread across the REAL Windows GPU mix by prevalence. Returns the Windows-ANGLE persona on
-    Linux/Mac too: we must always look Windows, and the C++ WebGL override (SanitizeRenderer +
-    pref-driven params/extensions) is platform-independent, so the same Windows GPU is presented
-    on any host without consulting the real GL backend (no more Linux "Generic Renderer")."""
-    if not _ENABLED:
-        return None
-    pool = _gpu_pool()
-    if not pool:
-        return None
+    Factored out of `select_persona` so that a class-restricted choice walks the
+    SAME cumulative arithmetic instead of a second copy of it. It must stay the
+    only place that walks a cumulative weight: two copies of this loop is how a
+    seed starts landing on one entry here and another one there."""
     total = sum(p["weight"] for p in pool) or 1.0
     h = (((int(seed) * _IDENTITY_MULTIPLIER) % _IDENTITY_MODULUS)
          / float(_IDENTITY_MODULUS) * total)
@@ -167,11 +161,141 @@ def select_persona(seed: int) -> Optional[Dict]:
     return pool[-1]
 
 
+def select_persona(seed: int) -> Optional[Dict]:
+    """Deterministic, prevalence-weighted GPU persona for this seed - on EVERY host.
+
+    Same seed -> same persona (fppro_consistency: identity stable per seed). Different seeds
+    spread across the REAL Windows GPU mix by prevalence. Returns the Windows-ANGLE persona on
+    Linux/Mac too: we must always look Windows, and the C++ WebGL override (SanitizeRenderer +
+    pref-driven params/extensions) is platform-independent, so the same Windows GPU is presented
+    on any host without consulting the real GL backend (no more Linux "Generic Renderer").
+
+    This is the answer when nothing is pinned. `choose_persona` is the general
+    one and the only entry point a caller should reach for; this stays because
+    the seed-only draw is also the baseline the general one is defined against.
+    """
+    if not _ENABLED:
+        return None
+    pool = _gpu_pool()
+    if not pool:
+        return None
+    return _draw(pool, seed)
+
+
+def _matches(entry: Dict, renderer: Optional[str], vendor: Optional[str]) -> bool:
+    return ((renderer is None or entry["renderer"] == renderer)
+            and (vendor is None or entry["vendor"] == vendor))
+
+
+def choose_persona(seed: int,
+                   pin: Optional[Dict] = None,
+                   fixed_gpu_class: Optional[str] = None) -> Optional[Dict]:
+    """THE answer to "which validated GPU persona does this session present?".
+
+    One function, because that question used to be answered in six places that
+    could not see one another: the wrapper's `launcher` and `async_api`, the
+    core's `config`, then `eff_class` and `_persona` inside `generate_profile`,
+    and then again from scratch in `prefs._apply_gpu_persona`. They agreed for
+    as long as the only input was the seed, and diverged the moment a `pin`
+    arrived, because a pin reached some of them and none of the ones that decide
+    what the browser is told. Measured 2026-09-15 on seed 1561645783:
+
+      pin={"gpu.renderer": "ANGLE (AMD, AMD Radeon RX 7900 XTX Direct3D11)"}
+        -> Profile.gpu.renderer = the AMD string
+        -> zoom.stealth.webgl.renderer = the seed's NVIDIA GTX 980, unchanged
+      pin={"gpu.class_tier": "high_end"}
+        -> the bundle conditioned on high_end
+        -> the page still shown a low_end GPU (and no high_end persona exists)
+
+    So all three `gpu.*` pin keys were decorative with respect to the page, while
+    the Profile object reported the pin back to whoever asked. The label lied and
+    the browser was never told.
+
+    A renderer string ALONE can never be honoured, which is why a pin SELECTS
+    from the validated pool rather than setting a free string: the ~81
+    getParameter values, the shader precisions and the extension list travel with
+    the name, and a name over foreign params is the name<->params mismatch FP Pro
+    scores (~0.70 - see `prefs._apply_gpu_persona`). The domain here is finite
+    and known (the pool), so a value the pool cannot present is REFUSED rather
+    than quietly dropped.
+
+    Every existing identity stays exactly where it was: a restriction is applied
+    only when it would change the outcome, so the unpinned answer, and a class
+    that already matches the seed's own draw, both return the plain draw.
+    """
+    if not _ENABLED:
+        return None
+    pool = _gpu_pool()
+    if not pool:
+        return None
+    base = _draw(pool, seed)
+    pin = pin or {}
+
+    renderer = pin.get("gpu.renderer")
+    vendor = pin.get("gpu.vendor")
+    if renderer is not None or vendor is not None:
+        if _matches(base, renderer, vendor):
+            return base
+        candidates = [p for p in pool if _matches(p, renderer, vendor)]
+        if not candidates:
+            raise ValueError(
+                "pin gpu.renderer/gpu.vendor "
+                f"({renderer!r}, {vendor!r}) names no validated GPU persona. "
+                "A renderer string carries its getParameter values and extension "
+                "list with it, so only a persona from the pool can be presented "
+                "coherently. Available renderers: "
+                + ", ".join(repr(r) for r in sorted({p["renderer"] for p in pool}))
+            )
+        # Entries that share a renderer AND a vendor carry identical `prefs`
+        # (asserted in tests), so which of them is returned cannot change what
+        # the page sees; the first wins, and pool order is frozen, so the choice
+        # is stable across runs.
+        return candidates[0]
+
+    wanted = pin.get("gpu.class_tier") or fixed_gpu_class
+    if wanted and base["gpu_class"] != wanted:
+        candidates = [p for p in pool if p["gpu_class"] == wanted]
+        if not candidates:
+            raise ValueError(
+                f"pin gpu.class_tier={wanted!r} has no validated GPU persona. "
+                "Conditioning the bundle on a class the pool cannot present is "
+                "the internal contradiction the per-GPU pool exists to remove. "
+                "Available classes: "
+                + ", ".join(repr(c) for c in sorted({p["gpu_class"] for p in pool}))
+            )
+        return _draw(candidates, seed)
+    return base
+
+
+def persona_for(renderer: str, vendor: str) -> Optional[Dict]:
+    """The pool entry a Profile's GPU label came from - a READ, not a decision.
+
+    `generate_profile` writes the chosen persona's renderer and vendor onto the
+    Profile, so this reads that decision back out. It is what `prefs` uses, and
+    the reason `prefs` no longer re-runs the draw: the persona a session presents
+    is chosen once, when the profile is generated, and everything downstream must
+    read it rather than reconstruct it from the seed. Entries sharing a
+    renderer+vendor carry identical `prefs`, so this cannot return a different
+    override from the one that was chosen."""
+    if not _ENABLED:
+        return None
+    for p in _gpu_pool():
+        if p["renderer"] == renderer and p["vendor"] == vendor:
+            return p
+    return None
+
+
 def forced_gpu_class(seed: int) -> Optional[str]:
     """The gpu_class the forge conditions the bundle on (== the selected GPU's class via
     classify_gpu), so cores/screen/fonts stay coherent with the GPU we expose. Does NOT
     affect FP Pro tampering_ml (proven) but matters for detectors that cross-check hardware
-    tier. None on Linux."""
+    tier. None on Linux.
+
+    ⛔ SUPERSEDED as an argument to `generate_profile`, and kept only because it is
+    a published name. `generate_profile` now derives the class from the persona it
+    chooses, so passing `fixed_gpu_class=forced_gpu_class(seed)` restates the
+    default and is one more place that has to be kept in step. Call
+    `generate_profile(seed, pin=...)` and let it decide."""
     p = select_persona(seed)
     return p["gpu_class"] if p else None
 
