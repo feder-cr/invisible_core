@@ -46,9 +46,21 @@ def test_validate_pin_key_dotted_gpu_renderer():
 
 
 @pytest.mark.unit
-def test_validate_pin_key_dotted_webgl_msaa_samples():
-    """VK5 - valid dotted path `webgl.msaa_samples`."""
-    _validate_pin_key("webgl.msaa_samples")
+def test_validate_pin_key_dotted_audio_sample_rate():
+    """VK5 - a valid dotted path from a group with more than one field.
+
+    This was `webgl.msaa_samples` until 2026-09-15, when that key came out of
+    the pin table: the emitted sample count is a constant on both builds, so a
+    pin had nothing left to move and had to refuse rather than look honoured.
+    The case VK5 covers is the dotted-path spelling, not that particular key."""
+    _validate_pin_key("audio.sample_rate")
+
+
+@pytest.mark.unit
+def test_validate_pin_key_rejects_the_retired_webgl_group():
+    """The retired key refuses by NAME, so an old script says what is wrong."""
+    with pytest.raises(ValueError, match="webgl"):
+        _validate_pin_key("webgl.msaa_samples")
 
 
 @pytest.mark.unit

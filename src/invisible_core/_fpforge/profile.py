@@ -279,7 +279,15 @@ _PIN_GROUPS = {
         "av1_enabled", "webm_encoder_enabled",
         "mediasource_webm", "mediasource_mp4", "webspeech_synth",
     },
-    "webgl": {"msaa_samples"},
+    # ⛔ `webgl.msaa_samples` WAS HERE and came out on 2026-09-15. It could not be
+    # honoured on Windows by design (the emitted value is pinned to 4 so
+    # gl.SAMPLES is constant), and honouring it on Linux is what made the two
+    # builds emit different values for the same seed on 7 measured seeds out of
+    # 8. The emitted value is now the same constant on both, so there is nothing
+    # left for a pin to move, and a key that cannot be honoured must refuse
+    # rather than look like it worked. `ScreenProfile`'s sibling fields that the
+    # engine DERIVES rather than reads are a different case and stay pinnable -
+    # see the exception table in `test_pin_surface.py`.
     # The seven rasterisation parameters belong here for the same reason every
     # other surface does: a declared value that cannot be pinned, inspected or
     # overridden is a constant buried in a different file, not a field. They

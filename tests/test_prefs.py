@@ -204,14 +204,18 @@ def test_gpu_renderer_persona_on_windows(monkeypatch):
 
 
 @pytest.mark.unit
-def test_msaa_pinned_to_4_on_windows(monkeypatch):
-    # PG4: even when profile.webgl.msaa_samples differs, Windows pins to 4.
+def test_msaa_is_4_and_not_pinnable(monkeypatch):
+    """PG4. This read "Windows pins to 4" and only asserted Windows, which is
+    how the Linux half stayed loose: the same seed emitted 4 here and a sampled
+    {0, 2, 4, 8} there, on a value whose own comment calls variation detectable.
+    Both builds emit 4 now, and the key is no longer offered as a pin. The
+    cross-platform assertion lives in tests/test_pin_surface.py."""
     monkeypatch.setattr(sys, "platform", "win32")
-    p = generate_profile(seed=42, pin={"webgl.msaa_samples": 8})
-    prefs = translate_profile_to_prefs(p)
-    assert prefs["webgl.msaa-samples"] == 4
+    prefs = translate_profile_to_prefs(generate_profile(seed=42))
     assert prefs["webgl.msaa-samples"] == 4
     assert prefs["webgl.msaa-force"] is True
+    with pytest.raises(ValueError):
+        generate_profile(seed=42, pin={"webgl.msaa_samples": 8})
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -499,26 +503,21 @@ def test_gpu_renderer_set_from_profile_on_linux(monkeypatch):
 
 
 @pytest.mark.unit
-def test_msaa_from_profile_on_linux(monkeypatch):
-    # PG3: on Linux, MSAA comes from the profile's sampled value rather
-    # than being pinned to 4 (which is the Windows ANGLE default).
+def test_msaa_on_linux_is_what_windows_emits(monkeypatch):
+    """PG3, inverted on 2026-09-15 because it asserted the divergence.
+
+    It read "on Linux, MSAA comes from the profile's sampled value rather than
+    being pinned to 4", which is exactly the tell: seven seeds out of eight
+    emitted a different count on the two builds. The target is Windows and the
+    judge is retail Windows, so Linux moves onto Windows, never the reverse.
+    PG3b went with it - the `> 0` guard on the force flag is still covered, by
+    test_msaa_force_follows_the_emitted_count in tests/test_pin_surface.py,
+    which derives the expectation instead of hard-coding a count that can no
+    longer occur."""
     monkeypatch.setattr(sys, "platform", "linux")
-    p = generate_profile(seed=42, pin={"webgl.msaa_samples": 8})
-    prefs = translate_profile_to_prefs(p)
-    assert prefs["webgl.msaa-samples"] == 8
-    assert prefs["webgl.msaa-samples"] == 8
+    prefs = translate_profile_to_prefs(generate_profile(seed=42))
+    assert prefs["webgl.msaa-samples"] == 4
     assert prefs["webgl.msaa-force"] is True
-
-
-@pytest.mark.unit
-def test_msaa_zero_disables_force_on_linux(monkeypatch):
-    # PG3b: MSAA=0 means "no MSAA" so ``webgl.msaa-force`` must be False.
-    # Verifies the ``> 0`` guard on the force flag.
-    monkeypatch.setattr(sys, "platform", "linux")
-    p = generate_profile(seed=42, pin={"webgl.msaa_samples": 0})
-    prefs = translate_profile_to_prefs(p)
-    assert prefs["webgl.msaa-samples"] == 0
-    assert prefs["webgl.msaa-force"] is False
 
 
 @pytest.mark.unit
