@@ -38,6 +38,7 @@ SEED = 1561645783
 
 #: Keys that legitimately emit no pref of their own. Each one needs a reason a
 #: reader can check, not a note that it is known.
+#:
 #: EMPTY, and that is the point. It held five keys when this gate was written -
 #: three `gpu.*`, `webgl.msaa_samples`, `codec.webspeech_synth` - then two
 #: `screen.avail_*` and `screen.tier`. Every one of them either became a pin
