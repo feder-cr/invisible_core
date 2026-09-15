@@ -399,9 +399,9 @@ def test_no_range_is_stated_out_loud_rather_than_passed_as_empty(tmp_path, capsy
 
 @pytest.mark.parametrize("refs,expected", [
     ("refs/heads/main NEW refs/heads/main OLD\n", "OLD..NEW"),
-    # Il remoto non ha mai visto questo ref. Senza un repo da interrogare la
-    # funzione non inventa un intervallo che non puo' verificare: risponde "".
-    # I due casi veri - con commit nuovi e senza - hanno i loro test in fondo.
+    # The remote has never seen this ref. With no repo to ask, the function
+    # does not invent a range it cannot verify: it answers "".
+    # The two real cases - with and without new commits - are tested at the end.
     ("refs/heads/f NEW refs/heads/f 0000000\n", ""),
     # A branch deletion pushes no content, so there is nothing to scan. Taking
     # it would build `X..0000000`, which git reads as a range going backwards.
@@ -643,10 +643,10 @@ def test_the_wiring_helper_fails_on_a_stub_that_is_not_one(tmp_path, stub, why):
         assert_pre_push_policy_is_wired(_git_repo(tmp_path, stub))
 
 
-# ------------------------------------------------- il ref nuovo sul remoto
+# ------------------------------------------------ the ref new on the remote
 
-def _repo_con_commit(tmp_path, n):
-    """Un repo con n commit e nessun remoto: tutti i commit sono "nuovi"."""
+def _repo_with_commits(tmp_path, n):
+    """A repo with n commits and no remote: every commit is "new"."""
     import subprocess
     r = tmp_path / "r"
     r.mkdir()
@@ -668,46 +668,46 @@ def _repo_con_commit(tmp_path, n):
 
 
 def test_push_range_on_a_new_ref_is_one_token_that_git_diff_accepts(tmp_path):
-    """UN token, sempre. E' il difetto che ha rifiutato una release.
+    """ONE token, always. This is the defect that refused a release.
 
-    Prima questo caso tornava la stringa "<sha> --not --remotes": tre token in
-    uno. Il name scanner sopravviveva, il gate della disclosure la passava a
-    `git diff` come SINGOLA revisione e otteneva "fatal: bad revision", e il
-    hook rifiutava il push per un errore proprio. Misurato 2026-08-11 spingendo
-    il tag v18.14.0, che non e' potuto partire.
+    This case used to return the string "<sha> --not --remotes": three tokens in
+    one. The name scanner survived it, the disclosure gate handed it to
+    `git diff` as a SINGLE revision and got "fatal: bad revision", and the hook
+    refused the push over an error of its own. Measured 2026-08-11 pushing the
+    tag v18.14.0, which could not go out.
     """
     import subprocess
-    repo, sha = _repo_con_commit(tmp_path, 3)
+    repo, sha = _repo_with_commits(tmp_path, 3)
     refs = "refs/heads/f %s refs/heads/f %s" % (sha, "0" * 40)
 
     rng = hooks.push_range(refs, repo)
 
-    assert rng, "con dei commit nuovi un intervallo ci deve essere"
+    assert rng, "with new commits there has to be a range"
     assert len(rng.split()) == 1, (
-        "push_range deve tornare UN token: %r ne ha %d, e chi lo riceve non "
-        "puo' sapere se spezzarlo" % (rng, len(rng.split())))
+        "push_range must return ONE token: %r has %d, and whoever receives it "
+        "cannot know whether to split it" % (rng, len(rng.split())))
     out = subprocess.run(["git", "-C", str(repo), "diff", "--name-only", rng],
                          capture_output=True, text=True)
     assert out.returncode == 0, (
-        "git diff rifiuta l'intervallo prodotto: %s" % out.stderr.strip())
+        "git diff refuses the range produced: %s" % out.stderr.strip())
 
 
 def test_push_range_is_empty_when_the_commits_are_already_published(tmp_path):
-    """Un TAG su un commit gia' pubblicato: niente di nuovo da leggere.
+    """A TAG on an already published commit: nothing new to read.
 
-    E' il caso reale che ha bloccato v18.14.0. Il ref e' nuovo sul remoto (sha
-    remoto tutto zeri) ma i COMMIT no, quindi la risposta giusta e' "", e un
-    intervallo qualunque al suo posto fa rifiutare un push legittimo.
+    This is the real case that blocked v18.14.0. The ref is new on the remote
+    (remote sha all zeroes) but the COMMITS are not, so the right answer is "",
+    and any range in its place refuses a legitimate push.
     """
     import subprocess
-    repo, sha = _repo_con_commit(tmp_path, 2)
+    repo, sha = _repo_with_commits(tmp_path, 2)
     subprocess.run(["git", "-C", str(repo), "update-ref",
                     "refs/remotes/origin/main", sha], check=True)
     refs = "refs/tags/v1.0.0 %s refs/tags/v1.0.0 %s" % (sha, "0" * 40)
 
     assert hooks.push_range(refs, repo) == "", (
-        "i commit sono gia' su un remoto: non c'e' niente da scandire, e "
-        "dirlo con un intervallo strano fa rifiutare il push")
+        "the commits are already on a remote: there is nothing to scan, and "
+        "saying so with an odd range makes the push be refused")
 
 
 # ------------------------------------------------ what the hook hands a gate

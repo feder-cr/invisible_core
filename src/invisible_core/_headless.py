@@ -176,8 +176,8 @@ def make_virtual_display():
     if sys.platform == "win32":
         return None
     raise RuntimeError(
-        f"invisible_playwright supporta Windows e Linux "
-        f"(macOS non e' piu' supportato; got {sys.platform!r})"
+        f"invisible_playwright supports Windows and Linux "
+        f"(macOS is no longer a supported platform; got {sys.platform!r})"
     )
 
 

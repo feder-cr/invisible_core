@@ -107,33 +107,33 @@ jobs:
         # was already on the index and `already-published` short-circuits
         # exactly that case. A workflow that only ever no-ops is green in the
         # same way an unexecuted branch is covered.
-        # `.[dev]` e non `-e .`: da oggi questo job esegue anche la suite (passo
-        # "la suite" qui sotto), e pytest sta nell'extra. Resta un extra di
-        # SVILUPPO in un job che NON ha credenziali: quelle vivono in `upload`,
-        # che continua a installare il minimo indispensabile.
+        # `.[dev]` and not `-e .`: from today this job also runs the suite (the
+        # "the suite" step below), and pytest lives in the extra. It stays a
+        # DEVELOPMENT extra in a job that has NO credentials: those live in
+        # `upload`, which keeps installing the bare minimum.
         run: python -m pip install -e ".[dev]" --quiet
       - name: the hooks are installed for anyone who clones this
         # The local pre-push layer is only real if .githooks is wired up. CI
         # cannot check somebody else's clone, but it can check that the wiring
         # this repo ships still works, so it cannot rot unnoticed.
         run: python scripts/install_hooks.py --check || python scripts/install_hooks.py
-      - name: la suite
-        # Un push di TAG non innesca il workflow ordinario dei test, che gira su
-        # rami e pull request. Senza questo passo, taggare e' un modo di
-        # pubblicare codice che nessun job ha eseguito.
+      - name: the suite
+        # A TAG push does not trigger the ordinary test workflow, which runs on
+        # branches and pull requests. Without this step, tagging is a way of
+        # publishing code no job has executed.
         #
-        # Il wrapper questo passo ce l'aveva dal 2026-08-01, con questa stessa
-        # motivazione scritta accanto; il core no, e nessun documento diceva
-        # perche'. Trovato il 2026-08-18 da un audit sui gate: `pytest` non
-        # compariva in tutto questo file.
+        # The wrapper had this step from 2026-08-01, with this same reasoning
+        # written beside it; the core did not, and no document said why. Found
+        # 2026-08-18 by an audit of the gates: `pytest` did not appear anywhere
+        # in this file.
         #
-        # ⛔ La mitigazione che esisteva NON basta, ed e' bene sapere quale
-        # era: il hook di pre-push esegue la suite anche quando si spinge un
-        # tag - misurato, il push di v20.15.0 ha impiegato quattro minuti
-        # proprio per questo. Ma i hook sono locali. Un tag creato
-        # dall'interfaccia web, dall'API, o da un clone senza `core.hooksPath`
-        # non ne incontra nessuno, e i tag non sono coperti dalla protezione
-        # del ramo. Questo passo e' l'unico che sta dalla parte del server.
+        # ⛔ The mitigation that did exist is NOT enough, and it is worth knowing
+        # which one it was: the pre-push hook runs the suite even when pushing a
+        # tag - measured, the v20.15.0 push took four minutes for exactly that
+        # reason. But hooks are local. A tag created from the web interface, from
+        # the API, or from a clone without `core.hooksPath` meets none of them,
+        # and tags are not covered by the branch protection. This step is the
+        # only one standing on the server's side.
         run: python -m pytest -q
 
       - name: version gate

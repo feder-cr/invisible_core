@@ -171,39 +171,39 @@ def test_availheight_matches_the_taskbar_with_no_pin_at_all():
         assert s.avail_height == s.height - s.taskbar_px
 
 
-# ── Il NOME, non solo la classe ─────────────────────────────────────────────
-# La classe era gia' forzata dalla persona (i test sopra). Il NOME no: veniva
-# dal pool dei 444 in `webgl_renderer_pool.json`, mentre la pagina riceve quello
-# della persona da `webgl_gpu_pool.json`. Due pool, due risposte alla stessa
-# domanda, e il profile-manager mostrava all'utente quella che il browser non
-# avrebbe mai riportato - misurato sul seme 42: GTX 1650 all'utente, Intel HD
-# Graphics alla pagina.
+# ── The NAME, not just the class ────────────────────────────────────────────
+# The class was already forced by the persona (the tests above). The NAME was
+# not: it came from the pool of 444 in `webgl_renderer_pool.json`, while the
+# page receives the persona's, from `webgl_gpu_pool.json`. Two pools, two
+# answers to the same question, and the profile-manager showed the user the one
+# the browser would never report - measured on seed 42: GTX 1650 to the user,
+# Intel HD Graphics to the page.
 
 def test_the_reported_gpu_name_is_the_one_the_page_receives():
-    """La domanda "che GPU ha questo profilo" deve avere UNA risposta.
+    """The question "which GPU does this profile have" must have ONE answer.
 
-    Non e' una preferenza di stile: `p.gpu.renderer` e' il campo che qualunque
-    consumatore mostra a un utente (`invisible_firefox/manager/fingerprint.py`
-    lo faceva nella UI del profile-manager, prima della sua cancellazione del
-    2026-08-18) - e un utente che legge un nome e ne vede un altro in una
-    pagina di test conclude che il prodotto non funziona. La proprieta' resta
-    valida per qualunque futuro consumatore, non solo per quello cancellato.
+    It is not a matter of style: `p.gpu.renderer` is the field any consumer
+    shows a user (`invisible_firefox/manager/fingerprint.py` did so in the
+    profile-manager's UI, before it was deleted on 2026-08-18) - and a user who
+    reads one name and sees another on a test page concludes the product does
+    not work. The property holds for any future consumer, not only for the
+    deleted one.
     """
     from invisible_core.prefs import translate_profile_to_prefs
-    disaccordi = []
+    disagreements = []
     for seed in range(200):
         p = generate_profile(seed)
-        atteso = translate_profile_to_prefs(p).get("zoom.stealth.webgl.renderer")
-        if atteso and p.gpu.renderer != atteso:
-            disaccordi.append((seed, p.gpu.renderer, atteso))
-    assert not disaccordi, (
-        "%d semi su 200 riportano un nome di GPU diverso da quello che la "
-        "pagina riceve; il primo e' %r" % (len(disaccordi), disaccordi[:1]))
+        expected = translate_profile_to_prefs(p).get("zoom.stealth.webgl.renderer")
+        if expected and p.gpu.renderer != expected:
+            disagreements.append((seed, p.gpu.renderer, expected))
+    assert not disagreements, (
+        "%d seeds out of 200 report a GPU name different from the one the page "
+        "receives; the first is %r" % (len(disagreements), disagreements[:1]))
 
 
 def test_the_reported_vendor_follows_the_same_source():
-    """Il vendor viene cross-controllato contro il renderer, quindi non basta
-    correggere il nome: i due devono uscire dalla stessa persona."""
+    """The vendor is cross-checked against the renderer, so correcting the name
+    is not enough: the two have to come out of the same persona."""
     from invisible_core._webgl_personas import select_persona
     for seed in (0, 42, 999, 45061):
         p = generate_profile(seed)
@@ -273,9 +273,9 @@ def test_the_label_and_the_page_agree_for_every_seed_pinned_or_not():
 
 
 def test_the_class_still_comes_from_the_persona_not_from_the_reported_name():
-    """Il secondo caso che deve NON scattare. Il nome riportato e' cambiato;
-    la CLASSE su cui il bundle e' condizionato non deve essersi mossa, o
-    l'estrazione pesata rimappa ogni identita'."""
+    """The second case that must NOT fire. The reported name changed; the CLASS
+    the bundle is conditioned on must not have moved, or the weighted draw
+    remaps every identity."""
     for seed in (0, 42, 999, 45061):
         persona = select_persona(seed)
         if persona:

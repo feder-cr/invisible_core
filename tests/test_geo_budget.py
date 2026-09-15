@@ -37,19 +37,18 @@ def clock(monkeypatch):
     return c
 
 
-def _costo_reale(timeout):
-    """Quanto puo' costare UNA richiesta, secondo `requests` e non secondo noi.
+def _real_cost(timeout):
+    """What ONE request can cost, according to `requests` and not to us.
 
-    Un timeout SCALARE non limita la richiesta: `requests` lo applica alla fase
-    di connessione e poi di nuovo a quella di lettura, quindi `timeout=10` puo'
-    spendere venti secondi. Una COPPIA `(connessione, lettura)` costa al massimo
-    la loro somma.
+    A SCALAR timeout does not bound the request: `requests` applies it to the
+    connect phase and then again to the read phase, so `timeout=10` can spend
+    twenty seconds. A PAIR `(connect, read)` costs at most their sum.
 
-    Questo banco modellava lo scalare come costo totale - cioe' l'intento invece
-    della libreria - ed e' la ragione per cui il difetto e' sopravvissuto sotto
-    quattro test verdi: misurato il 2026-08-10 su un proxy che non rispondeva,
-    l'errore riportava `20.1s` con `budget=15` e "1 of 3 endpoints". Il budget
-    non era mai stato rispettato in produzione, e qui risultava rispettato.
+    This bench modelled the scalar as the total cost - the intent instead of the
+    library - and that is why the defect survived under four green tests:
+    measured 2026-08-10 against a proxy that did not answer, the error reported
+    `20.1s` with `budget=15` and "1 of 3 endpoints". The budget had never been
+    honoured in production, and here it came out honoured.
     """
     return sum(timeout) if isinstance(timeout, tuple) else 2.0 * timeout
 
@@ -60,7 +59,7 @@ def _hang_all(monkeypatch, clock, *, cost: float):
 
     def fake_get(url, proxies=None, timeout=None):
         seen.append(timeout)
-        clock.now += min(_costo_reale(timeout), cost)
+        clock.now += min(_real_cost(timeout), cost)
         raise OSError("timed out")
 
     monkeypatch.setattr(_geo.requests, "get", fake_get)
@@ -79,8 +78,8 @@ def test_the_step_stops_at_the_budget_however_many_endpoints_there_are(
     seen = _hang_all(monkeypatch, clock, cost=99.0)
     with pytest.raises(_geo.GeoTimezoneError):
         _geo.discover_egress_ip(timeout=10.0, budget=15.0)
-    speso = sum(_costo_reale(t) for t in seen)
-    assert speso <= 15.0 + 1e-9, f"spent {speso}s against a 15s budget"
+    spent = sum(_real_cost(t) for t in seen)
+    assert spent <= 15.0 + 1e-9, f"spent {spent}s against a 15s budget"
     assert clock.now - 1000.0 <= 15.0 + 1e-9
 
 

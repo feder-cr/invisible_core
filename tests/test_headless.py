@@ -43,14 +43,14 @@ def test_make_virtual_display_returns_none_on_win32(monkeypatch):
 
 @pytest.mark.unit
 def test_make_virtual_display_raises_on_darwin(monkeypatch):
-    """macOS non e' piu' supportato: un Mac si ferma qui invece di procedere.
+    """macOS is no longer supported: a Mac stops here instead of carrying on.
 
-    Fino a firefox-20 tornava ``None`` (il binario si nascondeva da solo via
-    ``cloak_prefs()``). Da firefox-21 il Mac non e' piu' un target: il rifiuto
-    va dato al confine, con un messaggio che nomina il perche', non lasciato a
-    un fallimento oscuro piu' a valle."""
+    Until firefox-20 this returned ``None`` (the binary cloaked itself through
+    ``cloak_prefs()``). From firefox-21 the Mac is not a target any more: the
+    refusal belongs at the boundary, with a message naming the why, rather than
+    left to an obscure failure further downstream."""
     monkeypatch.setattr(headless.sys, "platform", "darwin")
-    with pytest.raises(RuntimeError, match="macOS non e' piu' supportato"):
+    with pytest.raises(RuntimeError, match="macOS is no longer a supported"):
         make_virtual_display()
 
 
@@ -73,7 +73,7 @@ def test_make_virtual_display_accepts_linux_variants(monkeypatch):
 @pytest.mark.unit
 def test_make_virtual_display_raises_on_unsupported_platform(monkeypatch):
     monkeypatch.setattr(headless.sys, "platform", "freebsd14")
-    with pytest.raises(RuntimeError, match="Windows e Linux"):
+    with pytest.raises(RuntimeError, match="Windows and Linux"):
         make_virtual_display()
 
 
@@ -155,32 +155,32 @@ def test_occlusion_tracking_is_off_even_without_the_cloak():
 
     `widget.windows.window_occlusion_tracking.enabled` stava in `CLOAK_PREFS`,
     che `compose_session_prefs` fonde SOLO con `cloak=True` - e `cloak` richiede
-    `headless=True`. Quindi il percorso di default, headful, girava con il tracker
-    ACCESO, e una pagina in quella sessione poteva leggere un browser messo in
-    background: `requestAnimationFrame` a 1 Hz, `setTimeout` clampato a 1000 ms,
-    `visibilityState` hidden, `enumerateDevices()` che non risolve mai. Sono
-    segnali SOPPRESSI su superfici che un rilevatore legge, cioe' un FAIL per la
-    regola 12, non un dettaglio di prestazioni.
+    `headless=True`. So the default path, headful, ran with the tracker ON, and a
+    page in that session could read a browser put into the background:
+    `requestAnimationFrame` at 1 Hz, `setTimeout` clamped to 1000 ms,
+    `visibilityState` hidden, `enumerateDevices()` never resolving. Those are
+    SUPPRESSED signals on surfaces a detector reads, that is, a FAIL under rule
+    12, not a performance detail.
 
-    L'input noto-cattivo e' il codice di ieri: con la pref dentro `CLOAK_PREFS`
-    questa asserzione e' rossa per `cloak=False` e verde per `cloak=True`, ed e'
-    esattamente la differenza che nessuno controllava.
+    The known-bad input is yesterday's code: with the pref inside `CLOAK_PREFS`
+    this assertion is red for `cloak=False` and green for `cloak=True`, which is
+    exactly the difference nobody was checking.
     """
     from invisible_core._fpforge import generate_profile
     from invisible_core.prefs import compose_session_prefs
 
-    profilo = generate_profile(seed=4242)
-    chiave = "widget.windows.window_occlusion_tracking.enabled"
+    profile = generate_profile(seed=4242)
+    key = "widget.windows.window_occlusion_tracking.enabled"
 
-    senza = compose_session_prefs(profilo, cloak=False).prefs
-    assert senza[chiave] is False, (
-        "senza cloak il tracker resterebbe acceso, e la pagina leggerebbe un "
-        "browser in background")
+    without = compose_session_prefs(profile, cloak=False).prefs
+    assert without[key] is False, (
+        "without cloak the tracker would stay on, and the page would read a "
+        "browser in the background")
 
-    con = compose_session_prefs(profilo, cloak=True).prefs
-    assert con[chiave] is False
+    with_cloak = compose_session_prefs(profile, cloak=True).prefs
+    assert with_cloak[key] is False
 
-    # E un override esplicito del chiamante deve ancora vincere: e' un setdefault.
-    forzata = compose_session_prefs(profilo, cloak=False,
-                            extra_prefs={chiave: True}).prefs
-    assert forzata[chiave] is True
+    # And an explicit caller override must still win: it is a setdefault.
+    forced = compose_session_prefs(profile, cloak=False,
+                            extra_prefs={key: True}).prefs
+    assert forced[key] is True
