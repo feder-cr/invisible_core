@@ -196,9 +196,9 @@ def release_tag_in(push_refs: str, prefixes: Sequence[str] = ("v",)) -> str:
     return ""
 
 
-#: L'albero vuoto di git. Non e' una costante nostra: e' lo SHA-1 dell'oggetto
-#: albero senza voci, identico in ogni repository esistente, ed e' la base che
-#: git stesso usa quando "prima non c'era niente".
+#: Git's empty tree. Not a constant of ours: it is the SHA-1 of the tree object
+#: with no entries, identical in every repository that exists, and it is the base
+#: git itself uses for "there was nothing before this".
 _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
@@ -215,7 +215,7 @@ def _revision_exists(rev: str, repo: Optional[Path]) -> bool:
 
 
 def _commits_not_on_a_remote(local_sha: str, repo: Optional[Path]) -> list:
-    """I commit raggiunti da `local_sha` che nessun remoto ha ancora."""
+    """The commits reachable from `local_sha` that no remote has yet."""
     if repo is None:
         return []
     try:
@@ -232,25 +232,24 @@ def _commits_not_on_a_remote(local_sha: str, repo: Optional[Path]) -> list:
 def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
     """UN intervallo di revisioni valido per `git diff` e `git rev-list`, o "".
 
-    Il valore di ritorno e' sempre UN SOLO token, e questo e' il punto.
+    The return value is always ONE token, and that is the point.
 
-    Prima restituiva `f"{local_sha} --not --remotes"` quando il remoto non
-    aveva mai visto il ref: tre token in una stringa sola. Chi la riceveva
-    doveva indovinare se spezzarla, e i due consumatori indovinavano diverso -
-    il name scanner sopravviveva, il gate della disclosure la passava a
-    `git diff` come singola revisione e otteneva `fatal: bad revision`. Il hook
-    allora RIFIUTAVA il push, correttamente ma per un errore proprio: misurato
-    2026-08-11 spingendo il tag v18.14.0, con la conseguenza che una release
-    non poteva partire.
+    It used to return `f"{local_sha} --not --remotes"` when the remote had never
+    seen the ref: three tokens in a single string. Whoever received it had to
+    guess whether to split it, and the two consumers guessed differently - the
+    name scanner survived, while the disclosure gate handed it to `git diff` as a
+    single revision and got `fatal: bad revision`. The hook then REFUSED the
+    push, correctly but for a fault of its own: measured 2026-08-11 pushing the
+    tag v18.14.0, and the consequence was that a release could not start.
 
-    Il caso che lo scatenava e' quello di sempre per un tag: il ref e' nuovo sul
-    remoto (sha remoto tutto zeri) ma i COMMIT sono gia' pubblicati. La risposta
-    giusta li' non e' un intervallo strano, e' "non c'e' niente di nuovo da
-    leggere", e si dice con "".
+    The case that triggered it is the ordinary one for a tag: the ref is new on
+    the remote (remote sha all zeroes) while the COMMITS are already published.
+    The right answer there is not a strange range, it is "there is nothing new to
+    read", and that is said with "".
 
-    `repo` serve a chiederlo a git invece di dedurlo. Senza, la funzione resta
-    quella di prima per il caso normale e non inventa: un intervallo che non
-    puo' verificare non lo restituisce.
+    `repo` is there so this can ask git instead of deducing. Without it the
+    function behaves as it did for the ordinary case and invents nothing: a range
+    it cannot verify is a range it does not return.
     """
     for local_sha, _remote_ref, remote_sha in _ref_lines(push_refs):
         if remote_sha and set(remote_sha) == {"0"}:
@@ -260,11 +259,11 @@ def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
             piu_vecchio = nuovi[-1]
             if _revision_exists(f"{piu_vecchio}^", repo):
                 return f"{piu_vecchio}^..{local_sha}"
-            # Il piu' vecchio e' la RADICE, quindi non ha un genitore. La base
-            # giusta e' l'albero vuoto - l'hash canonico di git, uguale in ogni
-            # repository - che rende "tutto e' nuovo" un intervallo normale
-            # invece di un caso speciale. Trovato dal test: senza questo ramo
-            # git risponde "ambiguous argument <sha>^".
+            # The oldest one is the ROOT, so it has no parent. The right base is
+            # the empty tree - git's canonical hash, the same in every repository
+            # - which turns "everything is new" into an ordinary range instead of
+            # a special case. Found by the test: without this branch git answers
+            # "ambiguous argument <sha>^".
             return f"{_EMPTY_TREE}..{local_sha}"
         return f"{remote_sha}..{local_sha}"
     return ""

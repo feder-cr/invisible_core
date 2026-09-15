@@ -538,7 +538,7 @@ def test_a_single_endpoint_cannot_eat_the_whole_budget(monkeypatch):
 # La decisione sul srflx viene dalle CAPACITA' dell'uscita, non dallo schema.
 # ---------------------------------------------------------------------------
 
-class _CapacitaFinte:
+class _FakeCapability:
     """Sostituisce la sonda di rete. Nessun proxy, nessun socket, nessuna attesa."""
 
     def __init__(self, risposta):
@@ -553,9 +553,9 @@ class _CapacitaFinte:
 
 
 def _decidi(monkeypatch, risposta, egress="203.0.113.7"):
-    from invisible_core import _capacita, _geo
-    finta = _CapacitaFinte(risposta)
-    monkeypatch.setattr(_capacita, "capacita", finta)
+    from invisible_core import _capability, _geo
+    finta = _FakeCapability(risposta)
+    monkeypatch.setattr(_capability, "capability", finta)
     return _geo._srflx_soppresso({"server": "socks5://gw:1080"}, egress), finta
 
 
@@ -588,20 +588,20 @@ def test_con_udp_coerente_il_srflx_si_SOPPRIME(monkeypatch):
     # ⛔ SERVONO DUE CONDIZIONI, non una: che l'uscita porti UDP coerente E che
     # il browser quell'UDP lo mandi dentro il proxy. Questo test ne provava una
     # sola, e per un'ora la funzione ne controllava una sola.
-    monkeypatch.setattr(_proxy, "INSTRADIAMO_UDP_NEL_SOCKS", True)
-    soppresso, _ = _decidi(monkeypatch, {"udp": True, "udp_coerente": True})
+    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
+    soppresso, _ = _decidi(monkeypatch, {"udp": True, "udp_matches_tcp": True})
     assert soppresso is True
     assert SessionGeo("tz", "203.0.113.7", None, None, True).srflx_da_dichiarare() is None
 
 
 def test_con_udp_INCOERENTE_si_dichiara(monkeypatch):
     """UDP c'e' ma esce da un altro indirizzo: il srflx vero porterebbe quello."""
-    soppresso, _ = _decidi(monkeypatch, {"udp": True, "udp_coerente": False})
+    soppresso, _ = _decidi(monkeypatch, {"udp": True, "udp_matches_tcp": False})
     assert soppresso is False
 
 
 def test_senza_udp_si_dichiara(monkeypatch):
-    soppresso, _ = _decidi(monkeypatch, {"udp": False, "udp_coerente": None})
+    soppresso, _ = _decidi(monkeypatch, {"udp": False, "udp_matches_tcp": None})
     assert soppresso is False
 
 
@@ -626,10 +626,10 @@ def test_l_uscita_gia_scoperta_viene_RIUSATA_non_rimisurata(monkeypatch):
     decisione, e quei 4-19 secondi sarebbero spesi per niente.
     """
     from invisible_core import _proxy
-    monkeypatch.setattr(_proxy, "INSTRADIAMO_UDP_NEL_SOCKS", True)
-    _, finta = _decidi(monkeypatch, {"udp": False, "udp_coerente": None})
+    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
+    _, finta = _decidi(monkeypatch, {"udp": False, "udp_matches_tcp": None})
     assert finta.chiamate, "la sonda non e' stata chiamata affatto"
-    assert finta.chiamate[0].get("uscita_tcp_nota") == "203.0.113.7"
+    assert finta.chiamate[0].get("known_tcp_exit") == "203.0.113.7"
 
 
 def test_senza_proxy_la_sonda_NON_viene_nemmeno_chiamata(monkeypatch):
@@ -641,9 +641,9 @@ def test_senza_proxy_la_sonda_NON_viene_nemmeno_chiamata(monkeypatch):
     proxy. Docstring e asserzione dicevano cose opposte su cosa fare con un
     indirizzo in mano, e a decidere era l'assenza del fatto invece della regola.
     """
-    from invisible_core import _capacita, _geo
-    finta = _CapacitaFinte({"udp": True, "udp_coerente": True})
-    monkeypatch.setattr(_capacita, "capacita", finta)
+    from invisible_core import _capability, _geo
+    finta = _FakeCapability({"udp": True, "udp_matches_tcp": True})
+    monkeypatch.setattr(_capability, "capability", finta)
     assert _geo._srflx_soppresso(None, "203.0.113.7") is True
     assert finta.chiamate == [], "sondare senza proxy e' un giro di rete sprecato"
 
@@ -661,8 +661,8 @@ def test_la_domanda_riceve_risposta_in_UN_SOLO_posto():
 def test_la_stickiness_non_entra_piu_in_nessuna_decisione():
     """Decisione del proprietario 2026-08-25, piu' il fatto che quel campo mentiva."""
     import inspect
-    from invisible_core import _capacita
-    corpo = inspect.getsource(_capacita.misura)
+    from invisible_core import _capability
+    corpo = inspect.getsource(_capability.measure)
     corpo = corpo.split('"""')[2] if corpo.count('"""') >= 2 else corpo
     assert "e_sticky" not in corpo, (
         "la stickiness e' tornata dentro misura(): costava sei giri di rete su "
@@ -681,16 +681,16 @@ def test_udp_coerente_NON_basta_se_il_browser_non_instrada_l_udp_nel_proxy(monke
     e non per costruzione. E' la forma di difetto che questo progetto paga: una
     condizione la cui sicurezza dipende da un fatto che non verifica.
     """
-    from invisible_core import _capacita, _geo, _proxy
+    from invisible_core import _capability, _geo, _proxy
 
-    monkeypatch.setattr(_capacita, "capacita",
-                        lambda p, **k: {"udp": True, "udp_coerente": True})
+    monkeypatch.setattr(_capability, "capability",
+                        lambda p, **k: {"udp": True, "udp_matches_tcp": True})
 
-    monkeypatch.setattr(_proxy, "INSTRADIAMO_UDP_NEL_SOCKS", False)
+    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", False)
     assert _geo._srflx_soppresso({"server": "socks5://g:1"}, "203.0.113.7") is False, (
         "senza instradamento dell'UDP nel proxy si DEVE continuare a dichiarare")
 
-    monkeypatch.setattr(_proxy, "INSTRADIAMO_UDP_NEL_SOCKS", True)
+    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
     assert _geo._srflx_soppresso({"server": "socks5://g:1"}, "203.0.113.7") is True, (
         "con l'instradamento acceso E l'UDP coerente il ramo deve accendersi, "
         "altrimenti la costante non e' una condizione ma un interruttore morto")
@@ -701,7 +701,7 @@ def test_l_instradamento_udp_e_dichiarato_in_un_posto_solo():
     import inspect
     from invisible_core import _geo, _proxy
 
-    assert _proxy.INSTRADIAMO_UDP_NEL_SOCKS is False, (
+    assert _proxy.UDP_GOES_THROUGH_SOCKS is False, (
         "se un giorno si accende, va acceso QUI e la pref "
         "network.proxy.socks_remote_udp va emessa nello stesso commit")
     # ⛔ IL CONTROLLO VA SUL CODICE, NON SUL COMMENTO. La prima stesura di
@@ -711,14 +711,14 @@ def test_l_instradamento_udp_e_dichiarato_in_un_posto_solo():
     righe = [r.split("#")[0] for r in
              inspect.getsource(_geo._srflx_soppresso).splitlines()]
     codice = chr(10).join(righe)
-    assert "INSTRADIAMO_UDP_NEL_SOCKS" in codice, (
+    assert "UDP_GOES_THROUGH_SOCKS" in codice, (
         "la decisione non legge la costante: il fatto tornerebbe a essere "
         "scritto in due posti")
     assert "Preferences" not in codice and "socks_remote_udp" not in codice, (
         "_geo sta leggendo la pref per conto suo invece della costante")
 
 
-def _conta_scoperte(monkeypatch):
+def _count_probes(monkeypatch):
     """Rende la scoperta deterministica e CONTA quante volte viene chiamata."""
     import invisible_core.download as dl
     from invisible_core import _geo
@@ -754,7 +754,7 @@ def test_senza_proxy_l_indirizzo_si_scopre_UNA_volta_sola(monkeypatch):
     """
     from invisible_core import _geo
 
-    conteggio = _conta_scoperte(monkeypatch)
+    conteggio = _count_probes(monkeypatch)
     geo = _geo.prepare_session_geo("auto", None)
     loc = _geo.resolve_session_locale(geo.egress_ip, None)
 
@@ -787,7 +787,7 @@ def test_senza_proxy_il_motore_non_riceve_ne_srflx_ne_filtro_ipv6(monkeypatch):
     from invisible_core import _geo
     from invisible_core.launch import build_launch_env
 
-    _conta_scoperte(monkeypatch)
+    _count_probes(monkeypatch)
     geo = _geo.prepare_session_geo("auto", None)
 
     assert geo.egress_ip == "203.0.113.7", "il fatto deve essere in mano"
@@ -816,7 +816,7 @@ def test_dietro_un_proxy_una_scoperta_fallita_NON_cade_sull_indirizzo_diretto(mo
     """
     from invisible_core import _geo
 
-    conteggio = _conta_scoperte(monkeypatch)
+    conteggio = _count_probes(monkeypatch)
     conteggio["n"] = 0
     loc = _geo.resolve_session_locale(None, {"server": "socks5://g:1"})
 

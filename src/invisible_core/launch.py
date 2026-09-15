@@ -81,13 +81,12 @@ def build_launch_env(
     prefs: Dict[str, Any],
     *,
     timezone: Optional[str] = None,
-    #: L'indirizzo da DICHIARARE come srflx, oppure None per non dichiarare
-    #: niente. ⛔ NON e' l'IP di uscita, e il nome vecchio (`egress_ip`) lo
-    #: faceva credere: e' la decisione che `SessionGeo.srflx_da_dichiarare`
-    #: prende guardando le CAPACITA' dell'uscita. Il gemello nel wrapper
-    #: (`_session.build_env`) porta lo stesso nome apposta: erano gia' due
-    #: punti di atterraggio, e due nomi diversi avrebbero reso invisibile
-    #: che sono la stessa cosa.
+    #: The address to DECLARE as srflx, or None to declare nothing. ⛔ It is NOT
+    #: the exit IP, and the old name (`egress_ip`) made it look like one: it is
+    #: the decision `SessionGeo.srflx_da_dichiarare` makes by looking at what the
+    #: exit is CAPABLE of. The twin in the wrapper (`_session.build_env`) carries
+    #: the same name on purpose: there were already two landing points, and two
+    #: different names would have hidden that they are the same thing.
     srflx_dichiarato: Optional[str] = None,
     manifest_path: "Optional[str | os.PathLike[str]]" = None,
     base_env: Optional[Dict[str, str]] = None,
@@ -124,10 +123,10 @@ def build_launch_env(
         env["STEALTHFOX_WEBRTC_PUBLIC_IP"] = webrtc_ip
         # SOLO dietro un proxy. Un Firefox retail dual-stack emette un srflx
         # IPv6 con l'indirizzo globale VERO in chiaro (l'mDNS offusca solo gli
-        # host): dietro un proxy IPv4 sarebbe un leak e un'incoerenza, senza
-        # proxy e' semplicemente cio' che fa un browser normale. Misurato il
-        # 2026-08-25: retail 6 candidati, noi 3, perche' filtravamo sempre.
-        # Stessa riga e stessa ragione in `_session.build_env` del wrapper.
+        # hosts): behind an IPv4 proxy that would be a leak and an inconsistency,
+        # without a proxy it is simply what an ordinary browser does. Measured
+        # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
+        # Same line and same reason in the wrapper's `_session.build_env`.
         env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] = "1"
     return env
 
@@ -281,33 +280,33 @@ def build_launch_plan(
     locale: str = "auto",
     pin: Optional[Dict[str, Any]] = None,
     binary_ver: Optional[str] = None,
-    # <M> IL BINARIO CHE IL CHIAMANTE HA GIA'. Senza questo parametro la
-    # funzione risolve SEMPRE un motore - `ensure_binary()` - anche quando chi
-    # chiama il binario ce l'ha in mano e usa questo piano solo per le prefs e
-    # per l'ambiente. E' un lavoro inutile nel caso migliore e un rifiuto nel
-    # caso vero: con un sigillo LOCALE non c'e' niente da scaricare, quindi
-    # `ensure_binary()` solleva e si porta dietro ogni chiamante, compresi i
-    # test e2e che il binario lo passano a mano due righe piu' sotto. Misurato
-    # il 2026-08-28: 21 rossi sull'e2e, identici sui due transport, tutti
-    # questo.
+    # <M> THE BINARY THE CALLER ALREADY HAS. Without this parameter the function
+    # ALWAYS resolves an engine - `ensure_binary()` - even when the caller is
+    # holding the binary and wants this plan only for the prefs and the
+    # environment. That is wasted work in the best case and a refusal in the real
+    # one: with a LOCAL seal there is nothing to download, so `ensure_binary()`
+    # raises and takes every caller with it, including the e2e tests that hand
+    # the binary in two lines below. Measured 2026-08-28: 21 reds on the e2e,
+    # identical on both transports, all of them this.
     binary_path: Optional[str] = None,
     extra_args: Optional[List[str]] = None,
-    # ⛔ IL DEFAULT ERA "about:blank", TOLTO IL 2026-08-20 col revert del newtab.
-    # Un URL sulla riga di comando ha la PRECEDENZA sulla pagina d'avvio, quindi
-    # finche' c'era il lancio diretto non apriva about:home nemmeno con i cinque
-    # file del sorgente riportati a upstream e le prefs newtab tolte: era la
-    # seconda soppressione, indipendente da `browser.startup.page`.
+    # ⛔ THE DEFAULT WAS "about:blank", REMOVED 2026-08-20 WITH THE NEWTAB REVERT.
+    # A URL on the command line TAKES PRECEDENCE over the startup page, so while
+    # it was there the direct launch did not open about:home even with the five
+    # source files restored to upstream and the newtab prefs gone: it was the
+    # second suppression, independent of `browser.startup.page`.
     #
-    # E ne chiude anche un'altra, misurata il 2026-08-20: un URL iniziale spegne
-    # le chiamate ad `accounts.firefox.com` e `addons.mozilla.org` che il retail
-    # fa all'avvio (2/2 senza URL, 0/2 con). Su Playwright quell'argomento lo
-    # impone la libreria e non e' nostro; QUI era nostro, ed era una scelta.
+    # And it closes another one, measured 2026-08-20: an initial URL silences the
+    # calls to `accounts.firefox.com` and `addons.mozilla.org` that retail makes
+    # at startup (2/2 without a URL, 0/2 with). On Playwright that argument is
+    # imposed by the library and is not ours; HERE it was ours, and it was a
+    # choice.
     #
-    # Il parametro resta pubblico: chi vuole una pagina la passa esplicitamente.
+    # The parameter stays public: anyone who wants a page passes one explicitly.
     url: str = "",
-    # ⛔ Anche il lancio diretto deve poterlo accendere, o la funzione esiste
-    # solo per chi passa dal wrapper. Il default e' False come di la': il punto
-    # e' il default, non l'interruttore.
+    # ⛔ The direct launch must be able to switch this on too, or the function
+    # exists only for whoever comes through the wrapper. The default is False as
+    # it is over there: the point is the default, not the switch.
     show_cursor: Optional[bool] = None,
 ) -> LaunchPlan:
     """The single direct-launch entry point (no Playwright, no Qt).
@@ -329,16 +328,17 @@ def build_launch_plan(
     from ._geo import prepare_session_geo, resolve_session_locale
     from .prefs import compose_session_prefs
 
-    # ⛔ QUESTO PERCORSO NON HA UN PROXY, E LO DICE PRIMA DI FARE QUALUNQUE
-    # ALTRA COSA. Lancia il binario con subprocess, quindi non tiene nessuna
-    # connessione di protocollo e non puo' mandare `Browser.setBrowserProxy`,
-    # che dal 2026-08-30 e' l'unica strada. Prima ce n'erano tre e questa
-    # scriveva prefs di instradamento sue: e' la duplicazione che ha prodotto
-    # il difetto, quindi e' stata cancellata invece che riparata.
+    # ⛔ THIS PATH HAS NO PROXY, AND IT SAYS SO BEFORE DOING ANYTHING ELSE. It
+    # launches the binary with subprocess, so it holds no protocol connection and
+    # cannot send `Browser.setBrowserProxy`, which since 2026-08-30 is the only
+    # road. There used to be three, and this one wrote routing prefs of its own:
+    # that duplication is what produced the defect, so it was deleted rather than
+    # repaired.
     #
-    # Il rifiuto sta QUI, sopra `prepare_session_geo`, e non e' un dettaglio:
-    # quella riga risolve fuso e lingua ATTRAVERSO il proxy. Rifiutare dopo
-    # vorrebbe dire aver gia' costruito mezza sessione sul paese del proxy.
+    # The refusal sits HERE, above `prepare_session_geo`, and that is not a
+    # detail: that line resolves timezone and locale THROUGH the proxy. Refusing
+    # afterwards would mean half a session had already been built on the proxy's
+    # country.
     if proxy and (proxy.get("server") or "").strip().lower() not in ("", "direct://"):
         raise ValueError(
             "build_launch_plan() cannot take a proxy: it starts the binary "
@@ -347,10 +347,10 @@ def build_launch_plan(
             "given announces one country and connects from another. Drive the "
             "proxy through invisible_playwright, which holds the connection.")
 
-    # <M> Si risolve solo se serve. `ensure_binary` verifica il motore contro
-    # il sigillo, che e' giusto quando il motore lo scegliamo noi; quando lo
-    # sceglie il chiamante quella verifica la fa il chiamante - e il posto in
-    # cui la fa e' `conn.launch`, non qui.
+    # <M> Resolved only when it is needed. `ensure_binary` checks the engine
+    # against the seal, which is right when we are the ones choosing the engine;
+    # when the caller chooses it, the caller does that check - and the place it
+    # does it is `conn.launch`, not here.
     if binary_path:
         binary = str(binary_path)
     else:

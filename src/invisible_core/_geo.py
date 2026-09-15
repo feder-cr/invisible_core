@@ -765,15 +765,15 @@ def _srflx_soppresso(proxy: Optional[Dict[str, str]],
     # non per costruzione, che e' esattamente la forma di difetto che questo
     # progetto paga: una condizione la cui sicurezza dipende da un fatto che non
     # verifica.
-    from ._proxy import INSTRADIAMO_UDP_NEL_SOCKS
-    if not INSTRADIAMO_UDP_NEL_SOCKS:
+    from ._proxy import UDP_GOES_THROUGH_SOCKS
+    if not UDP_GOES_THROUGH_SOCKS:
         return False
     try:
-        from ._capacita import capacita
-        c = capacita(proxy, uscita_tcp_nota=egress_ip)
+        from ._capability import capability
+        c = capability(proxy, known_tcp_exit=egress_ip)
     except Exception:  # noqa: BLE001
         return False
-    return c.get("udp") is True and c.get("udp_coerente") is True
+    return c.get("udp") is True and c.get("udp_matches_tcp") is True
 
 
 def _geoip_database(ip: str, proxied: bool) -> Any:

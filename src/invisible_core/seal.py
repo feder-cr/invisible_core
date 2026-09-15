@@ -39,17 +39,17 @@ from typing import Dict, Optional, Tuple
 # five legs and there is no way to recover the other four from it.
 SUPPORTED_SEAL_SCHEMA = 2
 
-# Le gambe che pubblichiamo, cioe' le coppie (piattaforma, architettura) per
-# cui esiste un asset scaricabile. UNICA dichiarazione: la legge il rifiuto in
-# download.py e la legge il gate del rilascio (scripts/roll_seal.py), che fino
-# al 2026-08-26 contava e basta - EXPECTED_ASSETS = 5, un numero scritto a
-# mano che il primo rilascio a tre gambe avrebbe fatto fallire, e che comunque
-# non poteva vedere QUALE piattaforma manca. Un conteggio non distingue "tre
-# gambe giuste" da "tre gambe di cui una che nessuno puo' scaricare".
-# Le due macOS sono uscite il 2026-08-26; i sigilli gia' pubblicati le
-# contengono ancora e restano leggibili come storia.
-GAMBE_SUPPORTATE = (("linux", "arm64"), ("linux", "x86_64"), ("win32", "x86_64"))
-PIATTAFORME_SUPPORTATE = tuple(dict.fromkeys(p for p, _ in GAMBE_SUPPORTATE))
+# The legs we publish: the (platform, arch) pairs an asset can be downloaded
+# for. THE ONE DECLARATION - the refusal in download.py reads it, and so does
+# the release gate (scripts/roll_seal.py), which until 2026-08-26 only counted:
+# EXPECTED_ASSETS = 5, a hand-written number that the first three-leg release
+# would have failed on, and which could not see WHICH platform was missing
+# anyway. A count cannot tell "three right legs" from "three legs, one of them
+# downloadable by nobody".
+# The two macOS ones went out on 2026-08-26; seals already published still
+# carry them and stay readable as history.
+SUPPORTED_LEGS = (("linux", "arm64"), ("linux", "x86_64"), ("win32", "x86_64"))
+SUPPORTED_PLATFORMS = tuple(dict.fromkeys(p for p, _ in SUPPORTED_LEGS))
 READABLE_SEAL_SCHEMAS = (2,)
 SEAL_FILE_ENV = "INVISIBLE_SEAL_FILE"
 STAMP_NAME = ".invisible-seal.json"

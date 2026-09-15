@@ -34,7 +34,7 @@ class ScreenProfile:
     #: nsScreen::PixelDepth reads nsDeviceContext::GetDepth(), the real panel,
     #: and it went unnoticed for as long as it did because both development
     #: machines are 24-bit, so it agreed cross-OS by coincidence. Pinnable and
-    #: overridable like every other surface (rule 6, tutto allo stesso livello).
+    #: overridable like every other surface (rule 6, everything at one level).
     color_depth: int = 24
 
     #: Height of the Windows taskbar, i.e. how much shorter availHeight is
@@ -419,26 +419,25 @@ FONT_CLEARTYPE_GAMMA = 2200
 FONT_CLEARTYPE_CONTRAST = 100
 FONT_CLEARTYPE_LEVEL = 100
 FONT_CLEARTYPE_PIXEL_STRUCTURE = 1
-#: ⛔ 0 = DWRITE_RENDERING_MODE_DEFAULT, e non e' "lasciar decidere alla
-#: macchina": DEFAULT dice a DirectWrite di scegliere la modalita' dal CORPO del
-#: testo e dalla tabella `gasp` del font. Il corpo lo decide la pagina, il font e'
-#: il NOSTRO, quindi la scelta e' calcolata da cose che dichiariamo noi e nessun
-#: valore entra dall'host. Le altre cinque modalita' sono costanti che sopprimono
-#: quella scelta.
+#: ⛔ 0 = DWRITE_RENDERING_MODE_DEFAULT, and that is NOT "let the machine
+#: decide": DEFAULT tells DirectWrite to pick the mode from the text SIZE and
+#: from the font's `gasp` table. The size is the page's, the font is OURS, so the
+#: choice is computed from things we declare and no value enters from the host.
+#: The other five modes are constants that suppress that choice.
 #:
-#: Fino al 2026-08-17 qui c'era 5 (NATURAL_SYMMETRIC), che non aggancia alla
-#: griglia dei pixel a nessun corpo. Misurato contro un retail 151.0 firmato su
-#: dieci disegni, con lo screenshot privilegiato e non da canvas - i livelli di
-#: grigio distinti per disegno:
+#: Until 2026-08-17 this was 5 (NATURAL_SYMMETRIC), which snaps to the pixel grid
+#: at no size at all. Measured against a signed retail 151.0 over ten drawings,
+#: with the privileged screenshot rather than a canvas read - distinct grey
+#: levels per drawing:
 #:
-#:   retail            varia 9-17 col CORPO (9-12 sotto i 24px, 17 sopra)
-#:   modalita' 5       16-19 a qualunque corpo, 0 coincidenze su 10
-#:   modalita' 0       6 coincidenze su 10, e AZZECCA tutti i corpi piccoli
+#:   retail    varies 9-17 with the SIZE (9-12 below 24px, 17 above)
+#:   mode 5    16-19 at any size, 0 matches out of 10
+#:   mode 0    6 matches out of 10, and gets every small size right
 #:
-#: E sull'insieme dei valori, che conta piu' del conteggio: il retail usa 20
-#: grigi distinti, la modalita' 0 ne condivide 17 con soli 2 estranei, la
-#: modalita' 5 ne condivide 16 con 6 estranei. Lo sweep completo delle sei
-#: modalita' e' in `70-known-bugs.md` [B152]: la 5 e' la PEGGIORE delle sei.
+#: And on the SET of values, which counts for more than the tally: retail uses 20
+#: distinct greys, mode 0 shares 17 of them with only 2 strangers, mode 5 shares
+#: 16 with 6 strangers. The full sweep of all six modes is in
+#: `70-known-bugs.md` [B152]: 5 is the WORST of the six.
 FONT_CLEARTYPE_RENDERING_MODE = 0
 FONT_FREETYPE_GAMMA = 220
 FONT_FREETYPE_CONTRAST = 100
