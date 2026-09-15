@@ -21,7 +21,7 @@ from invisible_core.constants import (
     FIREFOX_UPSTREAM_VERSION,
     RELEASE_URL_TEMPLATE,
 )
-from invisible_core.seal import GAMBE_SUPPORTATE
+from invisible_core.seal import SUPPORTED_LEGS
 
 
 @pytest.mark.unit
@@ -68,18 +68,17 @@ def test_archive_name_linux():
 
 @pytest.mark.unit
 @pytest.mark.parametrize("machine", ["arm64", "x86_64"])
-def test_macos_e_rifiutato_non_dimenticato(machine):
-    """⛔ Questo caso ASSERIVA il contrario fino al 2026-08-26.
+def test_macos_is_refused_rather_than_forgotten(machine):
+    """⛔ This case ASSERTED the opposite until 2026-08-26.
 
-    Diceva `ARCHIVE_NAME("darwin", "arm64")` deve tornare un nome che finisce in
-    `.tar.gz` e contiene `macos-arm64`. Da `firefox-21` non esiste piu' nessun
-    asset macOS, quindi la richiesta deve essere RIFIUTATA.
+    It said `ARCHIVE_NAME("darwin", "arm64")` must return a name ending in
+    `.tar.gz` and containing `macos-arm64`. Since `firefox-21` there is no macOS
+    asset at all, so the request must be REFUSED.
 
-    Non e' stato cancellato di proposito: una decisione senza nessuno che la
-    sorvegli e' una decisione che qualcuno disfa per sbaglio. Se un giorno un
-    sigillo tornasse a portare darwin, questo caso lo direbbe. Il rifiuto arriva
-    da `Seal.asset_for`, che non trova la coppia, ed e' lo stesso `seal.json` la
-    fonte - non un elenco scritto qui.
+    It was deliberately not deleted: a decision nobody watches is a decision
+    somebody undoes by accident. If a seal ever carried darwin again, this case
+    would say so. The refusal comes from `Seal.asset_for`, which does not find
+    the pair, and the source is that same `seal.json` - not a list written here.
     """
     with pytest.raises(NotImplementedError):
         ARCHIVE_NAME("darwin", machine)
@@ -143,8 +142,8 @@ def test_archive_name_arm64_supported(machine):
     gets "fixed" without anyone checking the asset actually exists.
     """
     assert ARCHIVE_NAME("linux", machine) == f"{BINARY_BASENAME}-linux-arm64.tar.gz"
-    # La riga su darwin che stava qui e' uscita col mac il 2026-08-26; il
-    # rifiuto ha il suo caso apposta, sopra.
+    # The darwin line that stood here went with the mac on 2026-08-26; the
+    # refusal has a case of its own, above.
 
 
 @pytest.mark.unit
@@ -156,7 +155,7 @@ def test_archive_name_rejects_unsupported_platforms(platform_key):
         ARCHIVE_NAME(platform_key, "x86_64")
 
 
-# ---- ARCHIVE_NAME ↔ BINARY_ENTRY_REL invariant ---------------------------- #
+# ---- ARCHIVE_NAME â†” BINARY_ENTRY_REL invariant ---------------------------- #
 # For every supported platform there MUST be an entry in BINARY_ENTRY_REL,
 # otherwise ensure_binary() will raise NotImplementedError AFTER having
 # already downloaded a 110 MB tarball - terrible UX.
@@ -166,15 +165,14 @@ def test_binary_entry_rel_covers_every_supported_platform():
     """If ARCHIVE_NAME accepts a platform key, BINARY_ENTRY_REL must declare
     where the executable lives inside the archive for it.
 
-    ⛔ L'elenco delle piattaforme era scritto a mano - `["win32", "linux",
-    "darwin"]` - ed e' diventato rosso da solo il giorno in cui il mac e' uscito
-    dal sigillo. E' lo stesso difetto di `EXPECTED_ASSETS = 5` in
-    `roll_seal.py`: un conteggio o un elenco scritto in un posto che non e'
-    l'autorita' invecchia al primo cambio di matrice. Ora si deriva da
-    `GAMBE_SUPPORTATE`, che e' la sola dichiarazione, e questo caso continuera' a
-    valere qualunque insieme di gambe spediamo.
+    ⛔ The platform list used to be hand-written - `["win32", "linux",
+    "darwin"]` - and went red by itself the day the mac left the seal. It is the
+    same defect as `EXPECTED_ASSETS = 5` in `roll_seal.py`: a count, or a list,
+    written somewhere that is not the authority goes stale at the first change
+    of matrix. It is derived from `SUPPORTED_LEGS` now, which is the one
+    declaration, and this case will hold for whatever set of legs we ship.
     """
-    for plat, arch in GAMBE_SUPPORTATE:
+    for plat, arch in SUPPORTED_LEGS:
         ARCHIVE_NAME(plat, arch)  # must not raise
         assert plat in BINARY_ENTRY_REL, (
             f"ARCHIVE_NAME accepts {plat!r} but BINARY_ENTRY_REL has no entry "

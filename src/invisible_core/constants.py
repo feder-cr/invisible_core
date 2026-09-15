@@ -98,9 +98,9 @@ def ARCHIVE_NAME(platform_key: str, machine: str) -> str:
         return f"{BINARY_BASENAME}-win-{arch}.zip"
     if pk == "linux":
         return f"{BINARY_BASENAME}-linux-{arch}.tar.gz"
-    # macOS non e' piu' supportato: nessun nome darwin si costruisce. I seal delle
-    # release vecchie contengono ancora asset darwin (letti dal ramo non-locale
-    # sopra, che prende il nome dal seal), ma un seal LOCALE non li produce piu'.
+    # macOS is no longer supported: no darwin name is ever built. Seals from old
+    # releases still carry darwin assets - read by the non-local branch above,
+    # which takes the name from the seal - but a LOCAL seal produces none.
     raise NotImplementedError(f"unsupported platform: {platform_key}")
 
 

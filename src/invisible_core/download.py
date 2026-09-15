@@ -29,8 +29,8 @@ from .constants import (
 from .seal import (
     Asset,
     EngineMismatch,
-    GAMBE_SUPPORTATE,
-    PIATTAFORME_SUPPORTATE,
+    SUPPORTED_LEGS,
+    SUPPORTED_PLATFORMS,
     Seal,
     SealError,
     SealMismatch,
@@ -426,24 +426,24 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
             f"the code never reads sends the reader hunting in the wrong function.)")
 
     plat = sys.platform
-    if plat not in PIATTAFORME_SUPPORTATE:
-        # La CONDIZIONE viene dalla dichiarazione in seal.py, non da un nome
-        # scritto qui: era `plat == "darwin"`, cioe' lo stesso fatto in un
-        # secondo posto. Il messaggio resta specifico dove sappiamo dire
-        # qualcosa di utile.
+    if plat not in SUPPORTED_PLATFORMS:
+        # The CONDITION comes from the declaration in seal.py, not from a name
+        # written here: it used to be `plat == "darwin"`, which is the same fact
+        # in a second place. The message stays specific where there is something
+        # useful to say.
         if plat == "darwin":
             raise NotImplementedError(
-                "macOS non e' piu' una piattaforma supportata: da firefox-21 in poi non "
-                "vengono piu' pubblicati binari per Mac, e questo pacchetto non ne scarica.\n"
-                "I seal delle release precedenti contengono ancora gli asset macOS - restano "
-                "leggibili come storia - ma un nuovo avvio su Mac si ferma qui invece di "
-                "tentare un download che non esiste.\n"
-                "Su Windows e Linux non cambia niente."
+                "macOS is no longer a supported platform: no Mac binaries have been "
+                "published since firefox-21, and this package downloads none.\n"
+                "Seals from earlier releases still carry the macOS assets - they stay "
+                "readable as history - but a new start on a Mac stops here instead of "
+                "attempting a download that does not exist.\n"
+                "Nothing changes on Windows or Linux."
             )
         raise NotImplementedError(
-            "questa piattaforma non e' fra quelle per cui pubblichiamo un motore: "
-            "%s. Le gambe dichiarate sono %s."
-            % (plat, ", ".join("%s/%s" % g for g in GAMBE_SUPPORTATE))
+            "this platform is not one we publish an engine for: %s. The declared "
+            "legs are %s."
+            % (plat, ", ".join("%s/%s" % g for g in SUPPORTED_LEGS))
         )
     asset = seal.asset_for(plat, platform.machine())
     version_dir = cache_dir_for_seal(seal)
@@ -489,9 +489,9 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
         _extract(archive_path, tmp_dir)
 
     tmp_entry = tmp_dir / asset.entry_rel
-    # (nessun post-extract per darwin: macOS rifiuta al confine sopra, quindi
-    #  questo percorso non e' piu' raggiungibile per un Mac. La funzione e' stata
-    #  rimossa con la fine del supporto macOS il 2026-08-26.)
+    # (no post-extract step for darwin: macOS is refused at the boundary above,
+    #  so this path is no longer reachable for a Mac. The function went with the
+    #  end of macOS support on 2026-08-26.)
     if not tmp_entry.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise RuntimeError(f"binary not found after extraction: {tmp_entry}")

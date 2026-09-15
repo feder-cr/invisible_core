@@ -79,10 +79,10 @@ CONTRACT = {
         "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
-        # ⛔ Il LETTORE degli endpoint, e sta qui perche' il consumatore
-        # lo importa invece di averne una copia: il 2026-08-30 ne e' esistita
-        # una nel wrapper per la durata di una correzione, ed era la stessa
-        # duplicazione che aveva prodotto il difetto, un piano piu' in basso.
+        # ⛔ The endpoint READER, and it is here because the consumer imports it
+        # instead of keeping a copy: on 2026-08-30 one existed in the wrapper for
+        # the duration of a fix, and it was the same duplication that had
+        # produced the defect, one floor further down.
         "parse_proxy",
         "ensure_geoip_mmdb",
         # `forced_gpu_class` LEFT on 2026-09-15, and the function did not.
@@ -192,16 +192,16 @@ CONTRACT = {
     },
     "invisible_core.download": {
         "cache_root", "ensure_binary",
-        # ⛔ USCITE il 2026-08-28 con la cancellazione di Node. `_download_file`,
-        # `_parse_checksums` e `_sha256_file` erano entrate il 2026-08-24 per
-        # `invisible_playwright._node`, che scaricava da nodejs.org il Node su cui
-        # girava il driver biforcato. Tolto il driver, nessun consumatore le importa
-        # piu', e questo gate l'ha detto da solo: un contratto che promette di piu'
-        # di quanto qualcuno usi congela questo pacchetto per nessuno.
+        # ⛔ LEFT on 2026-08-28 with the deletion of Node. `_download_file`,
+        # `_parse_checksums` and `_sha256_file` had come in on 2026-08-24 for
+        # `invisible_playwright._node`, which downloaded from nodejs.org the Node
+        # the forked driver ran on. With the driver gone, no consumer imports
+        # them any more, and this gate said so on its own: a contract promising
+        # more than anyone uses freezes this package for nobody.
         #
-        # ⛔ NON sono state cancellate dal core - restano scritte, provate e usate
-        # da `ensure_binary`. Quello che finisce qui e' la PROMESSA di non cambiarle
-        # per un consumatore che non c'e' piu'.
+        # ⛔ They were NOT deleted from the core - they stay written, tested and
+        # used by `ensure_binary`. What ends here is the PROMISE not to change
+        # them, made for a consumer that no longer exists.
         # `engine_status` left on 2026-08-18 with the deletion of
         # `invisible_firefox`, which showed the engine's state in its UI. Not
         # deleted from the core and still covered by test_doctor_fix.py,

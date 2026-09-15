@@ -83,23 +83,22 @@ DELIBERATE = {
     # has no trajectory generator of their own, so the binary's is left on.
     "stealthfox.humanize",
     "stealthfox.humanize.maxTime",
-    # Terzo fratello, stessa ragione dei due sopra: governa la cadenza del
-    # generatore DEL BINARIO, che solo il percorso pubblico accende. Prima non
-    # era dichiarato da nessuno e il motore usava il proprio default compilato
-    # di 10 ms, che misurato dava il 79% degli intervalli piu' fitti di quanto
-    # un 60 Hz reale possa consegnare.
+    # Third sibling, same reason as the two above: it governs the cadence of THE
+    # BINARY's generator, which only the public path turns on. Before, nobody
+    # declared it and the engine used its own compiled default of 10 ms, which
+    # measured gave 79% of the intervals tighter than a real 60 Hz can deliver.
     "stealthfox.humanize.stepMs",
 }
 
 
 def test_the_two_core_paths_compose_the_same_prefs(tmp_path, no_network):
-    # ⛔ SENZA PROXY DA ENTRAMBI I LATI dal 2026-08-30, e non e' una rinuncia:
-    # il lancio diretto adesso RIFIUTA un proxy, perche' non tiene una
-    # connessione su cui mandare il comando del motore ed era l'unico percorso
-    # rimasto a inventarsi prefs di instradamento sue. Che rifiuti lo prova
-    # `test_il_lancio_diretto_RIFIUTA_un_proxy_invece_di_inventarsi_una_strada`
-    # in `tests/test_proxy.py`; qui si confronta cio' che i due percorsi
-    # compongono, che e' un'altra domanda e vale senza proxy come con.
+    # ⛔ NO PROXY ON EITHER SIDE since 2026-08-30, and it is not a retreat: the
+    # direct launch now REFUSES a proxy, because it holds no connection to send
+    # the engine's command on and it was the last path still inventing routing
+    # prefs of its own. That it refuses is proved by
+    # `test_the_direct_launch_REFUSES_a_proxy_instead_of_inventing_a_road`
+    # in `tests/test_proxy.py`; here what the two paths COMPOSE is compared,
+    # which is a different question and holds without a proxy as well as with.
     plan = build_launch_plan(SEED, profile_dir=tmp_path / "direct",
                              timezone=TZ, locale=LOCALE)
     direct = read_user_js(plan.profile_dir / "user.js")

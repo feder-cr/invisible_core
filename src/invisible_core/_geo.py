@@ -371,19 +371,19 @@ def discover_egress_ip(
         started = time.monotonic()
         try:
             # Una COPPIA, non uno scalare. `requests` applica un timeout scalare
-            # alla fase di CONNESSIONE e poi di nuovo a quella di LETTURA, quindi
-            # `timeout=10` puo' spendere venti secondi in una chiamata sola e
-            # sfondare da solo un budget di quindici. Misurato il 2026-08-10 con
-            # un proxy che aveva smesso di instradare: l'errore riportava
-            # `20.1s` con `budget=15` e "1 of 3 endpoints", cioe' il primo si e'
-            # mangiato tutto e la ridondanza degli altri due non e' mai entrata
-            # in gioco. Il commento della funzione descriveva gia' l'intento
-            # giusto - il budget limita il passo intero - ed era il codice a
-            # implementarne un altro.
+            # to the CONNECT phase and then again to the READ phase, so
+            # `timeout=10` can spend twenty seconds in a single call and blow a
+            # budget of fifteen on its own. Measured 2026-08-10 with a proxy that
+            # had stopped routing: the error reported `20.1s` against
+            # `budget=15` and "1 of 3 endpoints" - the first one ate everything
+            # and the redundancy of the other two never came into play. The
+            # function's comment already described the right intent - the budget
+            # bounds the whole step - and it was the code implementing a
+            # different one.
             #
-            # Meta' per fase garantisce che UNA chiamata non superi il rimanente,
-            # quindi il ciclo arriva davvero al secondo e al terzo endpoint
-            # quando il primo tace.
+            # Half per phase guarantees that ONE call cannot exceed what is left,
+            # so the loop really does reach the second and third endpoint when
+            # the first goes quiet.
             slice_ = min(timeout, remaining)
             resp = requests.get(
                 url, proxies=proxies, timeout=(slice_ / 2, slice_ / 2)
@@ -446,16 +446,16 @@ def discover_egress_ip(
 
 
 def _geo_record(ip: str, mmdb_path: Any) -> "Optional[Dict[str, Any]]":
-    """L'UNICO punto che apre il database e legge un record.
+    """The ONE place that opens the database and reads a record.
 
-    Le tre funzioni qui sotto - fuso, locale e coordinate - leggono lo STESSO
-    record dello STESSO IP, e prima di questa funzione due di loro ripetevano
-    le stesse tre righe. Aggiungere la terza avrebbe fatto tre copie di come si
-    legge il database, che e' la regola 16 violata mentre la si applica.
+    The three functions below - timezone, locale and coordinates - read the SAME
+    record of the SAME IP, and before this function two of them repeated the same
+    three lines. Adding the third would have made three copies of how the
+    database is read, which is rule 16 broken while applying it.
 
-    Torna ``None`` se l'IP non c'e': chi chiama decide se e' fatale (il fuso,
-    che dietro un proxy deve fallire rumorosamente) o no (il locale, che ha un
-    ripiego dichiarato).
+    Returns ``None`` when the IP is not there: the caller decides whether that is
+    fatal (the timezone, which behind a proxy must fail loudly) or not (the
+    locale, which has a declared fallback).
     """
     import maxminddb
 
@@ -465,23 +465,23 @@ def _geo_record(ip: str, mmdb_path: Any) -> "Optional[Dict[str, Any]]":
 
 
 def ip_to_coordinates(ip: str, mmdb_path: Any) -> "tuple[float, float]":
-    """Map ``ip`` -> (latitudine, longitudine) dallo stesso record del fuso.
+    """Map ``ip`` -> (latitude, longitude) from the same record as the timezone.
 
-    ⛔ E' la fonte UNICA della posizione dichiarata: il motore non chiede piu'
-    niente all'hardware (niente WiFi, niente GPS, niente cella) e non chiede
-    niente a Google. La posizione esce dall'IP di uscita del proxy, esattamente
-    come il fuso e la lingua, quindi le tre cose non possono contraddirsi.
+    ⛔ It is the ONE source of the declared position: the engine no longer asks
+    the hardware anything (no WiFi, no GPS, no cell) and asks Google nothing. The
+    position comes out of the proxy's exit IP, exactly as the timezone and the
+    language do, so the three cannot contradict one another.
 
-    ⛔ LA PRECISIONE NON VIENE DA QUI, e non e' una dimenticanza: misurato il
-    2026-08-20 su un record vero, ``location`` porta ``latitude``,
-    ``longitude`` e ``time_zone`` e **non** ``accuracy_radius``. Dichiararla e'
-    un'altra decisione, e vive nel Profile: una posizione derivata da un IP con
-    una precisione da GPS sarebbe incoerente per costruzione.
+    ⛔ THE ACCURACY DOES NOT COME FROM HERE, and that is not an oversight:
+    measured 2026-08-20 on a real record, ``location`` carries ``latitude``,
+    ``longitude`` and ``time_zone`` and **not** ``accuracy_radius``. Declaring it
+    is a separate decision and lives in the Profile: a position derived from an
+    IP with GPS-grade accuracy would be incoherent by construction.
 
-    Solleva :class:`GeoTimezoneError` - stessa classe del fuso, perche' e' lo
-    stesso guasto - se l'IP manca o il record non porta le coordinate. **Non si
-    inventa un ripiego**: senza dichiarazione il motore rifiuta, che e' la
-    regola 7.
+    Raises :class:`GeoTimezoneError` - the same class as the timezone, because it
+    is the same failure - when the IP is missing or the record carries no
+    coordinates. **No fallback is invented**: without a declaration the engine
+    refuses, which is rule 7.
     """
     record = _geo_record(ip, mmdb_path)
     if not record:
@@ -601,15 +601,16 @@ def resolve_session_locale(egress_ip: Optional[str], proxy: Optional[Dict[str, s
     from .download import ensure_geoip_mmdb
 
     try:
-        # ⛔ SI RIUSA CIO' CHE IL CHIAMANTE HA GIA': `prepare_session_geo` ha
-        # gia' pagato questo round-trip e adesso porta il risultato anche senza
-        # proxy. Si scopre solo se non c'e' niente da riusare - il caso di un
-        # fuso esplicito, in cui nessuno ha ancora chiesto niente alla rete.
+        # ⛔ WHAT THE CALLER ALREADY HAS IS REUSED: `prepare_session_geo` has
+        # already paid this round trip and now carries the result even without a
+        # proxy. Discovery happens only when there is nothing to reuse - the case
+        # of an explicit timezone, where nobody has asked the network anything
+        # yet.
         #
-        # E la scoperta resta VIETATA dietro un proxy: se li' `egress_ip` manca,
-        # la scoperta e' fallita, e cadere sull'indirizzo diretto derivarebbe la
-        # lingua dal paese di CASA mentre il fuso dice quello del proxy. Meglio
-        # `en-US` di una contraddizione fra due campi.
+        # And discovery stays FORBIDDEN behind a proxy: if `egress_ip` is missing
+        # there, discovery has failed, and falling back to the direct address
+        # would derive the language from the HOME country while the timezone says
+        # the proxy's. `en-US` is better than a contradiction between two fields.
         ip = egress_ip
         if ip is None and not _proxy_is_set(proxy):
             ip = discover_egress_ip(None)
@@ -662,118 +663,116 @@ class SessionGeo(NamedTuple):
 
     ``timezone`` follows the precedence in the module docstring.
 
-    ⛔ ``egress_ip`` E' UN FATTO, NON UNA DECISIONE: l'indirizzo da cui questa
-    sessione esce davvero, scoperto una volta, con o senza proxy. Se poi quel
-    valore venga DICHIARATO al motore come srflx lo decide
-    :meth:`srflx_da_dichiarare`, e la risposta senza proxy e' no.
+    ⛔ ``egress_ip`` IS A FACT, NOT A DECISION: the address this session really
+    leaves from, discovered once, with or without a proxy. Whether that value is
+    then DECLARED to the engine as an srflx is decided by
+    :meth:`srflx_to_declare`, and without a proxy the answer is no.
 
-    Fino al 2026-08-26 questo campo valeva ``None`` senza proxy, e il "no" era
-    espresso proprio da quel ``None``. Un campo solo per due significati:
-    l'effetto era che ``prepare_session_geo`` scopriva l'indirizzo per il fuso,
-    **lo buttava via**, e ``resolve_session_locale`` doveva riscoprirlo. Due
-    richieste identiche a un servizio esterno, dall'indirizzo vero, prima che il
-    browser esista - dove un utente vero ne fa zero. Il fatto adesso si porta,
-    e il "no" vive dove viveva gia' la decisione.
+    Until 2026-08-26 this field was ``None`` without a proxy, and the "no" was
+    expressed by that very ``None``. One field for two meanings: the effect was
+    that ``prepare_session_geo`` discovered the address for the timezone, **threw
+    it away**, and ``resolve_session_locale`` had to discover it again. Two
+    identical requests to an external service, from the real address, before the
+    browser exists - where a real user makes zero. The fact is carried now, and
+    the "no" lives where the decision already lived.
     """
 
     timezone: str
     egress_ip: Optional[str]
-    #: La posizione dichiarata, dallo STESSO record dell'IP di uscita da cui
-    #: escono fuso e lingua. ``None`` quando non c'e' un IP da cui derivarla
-    #: (nessun proxy, o scoperta fallita): in quel caso il motore NON riceve
-    #: nessuna dichiarazione e rifiuta, invece di chiedere all'hardware.
+    #: The declared position, from the SAME record of the exit IP the timezone
+    #: and the language come from. ``None`` when there is no IP to derive it from
+    #: (no proxy, or discovery failed): in that case the engine receives NO
+    #: declaration and refuses, rather than asking the hardware.
     #:
-    #: Hanno un default perche' ``SessionGeo`` si costruisce per posizione con
-    #: due argomenti in sei punti fra codice e test: aggiungerli senza default
-    #: sarebbe stato un cambiamento non retrocompatibile di un tipo esportato.
+    #: They have defaults because ``SessionGeo`` is built positionally with two
+    #: arguments in six places across code and tests: adding them without
+    #: defaults would have been a breaking change to an exported type.
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    #: ⛔ UN INTERRUTTORE, E IL SUO DEFAULT E' QUELLO PRUDENTE.
+    #: ⛔ A SWITCH, AND ITS DEFAULT IS THE CAUTIOUS ONE.
     #:
-    #: La prima stesura era un campo che portava l'INDIRIZZO da dichiarare, con
-    #: default ``None``. Sbagliato, e un test lo ha colto subito: ``SessionGeo``
-    #: si costruisce per posizione in sei punti fra codice e test, e tutti
-    #: quelli che non conoscevano il campo nuovo hanno smesso di dichiarare il
-    #: srflx **per distrazione**. Cioe' il default cadeva dal lato che porta al
-    #: messaggio peggiore che un rilevatore possa scrivere.
+    #: The first draft was a field carrying the ADDRESS to declare, defaulting to
+    #: ``None``. Wrong, and a test caught it immediately: ``SessionGeo`` is built
+    #: positionally in six places across code and tests, and everyone who did not
+    #: know about the new field stopped declaring the srflx **by accident**. That
+    #: is, the default fell on the side that leads to the worst sentence a
+    #: detector can write.
     #:
-    #: Invertito: ``False`` significa "dichiara", che e' il comportamento di
-    #: sempre, e per spegnerlo bisogna dirlo. Vale ``True`` SOLO quando l'uscita
-    #: ha UDP dimostrato E coerente, perche' li' il srflx vero nasce gia' con
-    #: l'indirizzo giusto e dichiararne uno aggiungerebbe un candidato senza
-    #: allocazione corrispondente.
-    srflx_soppresso: bool = False
+    #: Inverted: ``False`` means "declare", which is the behaviour it has always
+    #: had, and switching it off has to be said. It is ``True`` ONLY when the exit
+    #: has UDP both demonstrated AND coherent, because there the real srflx is
+    #: already born with the right address and declaring one would add a
+    #: candidate with no matching allocation.
+    srflx_suppressed: bool = False
 
-    def srflx_da_dichiarare(self) -> Optional[str]:
-        """L'indirizzo che il motore deve annunciare come srflx, o ``None``.
+    def srflx_to_declare(self) -> Optional[str]:
+        """The address the engine must announce as its srflx, or ``None``.
 
-        ⛔ E' L'UNICO POSTO in cui questa domanda riceve risposta. I due
-        costruttori di env - ``launch.build_launch_env`` nel core e
-        ``_session.build_env`` nel wrapper - la chiamano, non la ricalcolano:
-        erano gia' due punti di atterraggio, e la stessa regola scritta due
-        volte avrebbe potuto divergere.
+        ⛔ THE ONE PLACE where this question is answered. The two env builders -
+        ``launch.build_launch_env`` in the core and ``_session.build_env`` in the
+        wrapper - call it rather than recomputing it: they were already two
+        landing points, and the same rule written twice could have drifted.
         """
-        return None if self.srflx_soppresso else self.egress_ip
+        return None if self.srflx_suppressed else self.egress_ip
 
 
-def _srflx_soppresso(proxy: Optional[Dict[str, str]],
+def _srflx_suppressed(proxy: Optional[Dict[str, str]],
                      egress_ip: Optional[str]) -> bool:
-    """Dichiarare un srflx sintetico, o lasciar passare quello vero?
+    """Declare a synthetic srflx, or let the real one through?
 
-    Il criterio viene dal codice di un rilevatore vero, letto e non dedotto
-    (`docs_research/scrapfly-re/00-WEBRTC-LEAK.md`): la sua configurazione non
-    contiene nessuno STUN, solo TURN, e la username dell'allocazione e' lo
-    stesso identificativo che il POST di verifica manda al backend. Quindi in un
-    browser onesto **un srflx puo' venire soltanto da un'allocazione riuscita**,
-    e candidato lato client e prova lato server coincidono per costruzione. E'
-    quell'implicazione che un candidato dichiarato rompe.
+    The criterion comes from a real detector's code, read rather than deduced:
+    its configuration contains no STUN at all, only TURN, and the allocation's
+    username is the same identifier its verification POST sends to the backend.
+    So in an honest browser **an srflx can only come from a successful
+    allocation**, and the client-side candidate and the server-side proof
+    coincide by construction. It is that implication a declared candidate
+    breaks.
 
     Da qui la regola, che ha tre rami:
 
-    * **nessun proxy**: lo STUN vero risponde con l'indirizzo da cui si esce
-      davvero, quindi il srflx nasce gia' giusto e con la sua allocazione. Non
-      si dichiara niente. Fino al 2026-08-26 questo ramo non era scritto qui:
-      lo stesso esito usciva dal fatto che ``egress_ip`` valesse ``None`` senza
-      proxy, cioe' la decisione era codificata nell'ASSENZA di un fatto. Le due
-      cose sono ora separate, e questo ramo dice a voce cio' che prima si
-      otteneva per effetto collaterale.
-    * **UDP dimostrato e coerente** (l'UDP esce dallo stesso indirizzo del TCP):
-      il srflx vero nascera' gia' con l'indirizzo giusto. Non si dichiara niente:
-      dichiarare aggiungerebbe un candidato senza allocazione corrispondente.
-    * **tutto il resto**: si dichiara l'IP di uscita, che e' il comportamento di
-      sempre. Senza un srflx il rilevatore scrive *"Javascript is manipulated"*,
-      cioe' accusa il browser; con lui scrive *"VPN/PROXY detected"*, cioe'
-      accusa la rete. La differenza fra i due messaggi e' questa riga.
+    * **no proxy**: the real STUN answers with the address traffic actually
+      leaves from, so the srflx is born correct and with its own allocation.
+      Nothing is declared. Until 2026-08-26 this branch was not written here: the
+      same outcome fell out of ``egress_ip`` being ``None`` without a proxy - the
+      decision was encoded in the ABSENCE of a fact. The two are separated now,
+      and this branch says out loud what used to be obtained as a side effect.
+    * **UDP demonstrated and coherent** (UDP leaves from the same address as
+      TCP): the real srflx will already be born with the right address. Nothing
+      is declared: declaring would add a candidate with no matching allocation.
+    * **everything else**: the exit IP is declared, which is the behaviour it has
+      always had. Without an srflx the detector writes *"Javascript is
+      manipulated"*, which accuses the browser; with one it writes *"VPN/PROXY
+      detected"*, which accuses the network. The difference between those two
+      sentences is this line.
 
-    ⛔ E LA SONDA NON PUO' FAR FALLIRE UN LANCIO. Qualunque cosa vada storta -
-    rete, timeout, un campo che non c'e' - si ricade sul ramo prudente. Una
-    capacita' si sfrutta solo quando e' DIMOSTRATA.
+    ⛔ AND THE PROBE CANNOT FAIL A LAUNCH. Whatever goes wrong - network, a
+    timeout, a field that is not there - falls back to the cautious branch. A
+    capability is only exploited once it is DEMONSTRATED.
     """
     if not egress_ip:
-        return False  # niente da dichiarare comunque: il ramo prudente
+        return False  # nothing to declare anyway: the cautious branch
     if not _proxy_is_set(proxy):
-        return True  # connessione diretta: il srflx vero e' gia' la verita'
-    # ⛔ PRIMA DELLA SONDA, perche' se questo e' falso la sonda non serve.
+        return True  # direct connection: the real srflx already IS the truth
+    # ⛔ BEFORE THE PROBE, because if this is false the probe is pointless.
     #
-    # Che l'USCITA porti UDP coerente non basta: deve anche essere il BROWSER a
-    # mandarci l'UDP. Con `network.proxy.socks_remote_udp` spenta l'UDP scavalca
-    # il proxy, quindi un srflx vero nascerebbe con l'indirizzo di CASA - e
-    # smettere di dichiarare, li', sarebbe una fuga vera invece di un rimedio.
+    # That the EXIT carries coherent UDP is not enough: the BROWSER has to be the
+    # one sending us the UDP. With `network.proxy.socks_remote_udp` off, UDP goes
+    # around the proxy, so a real srflx would be born with the HOME address - and
+    # to stop declaring there would be a real leak instead of a remedy.
     #
-    # La prima stesura di questa funzione, il 2026-08-25, non lo controllava. Il
-    # ramo era irraggiungibile per fortuna (nessun fornitore ha UDP usabile) e
-    # non per costruzione, che e' esattamente la forma di difetto che questo
-    # progetto paga: una condizione la cui sicurezza dipende da un fatto che non
-    # verifica.
-    from ._proxy import INSTRADIAMO_UDP_NEL_SOCKS
-    if not INSTRADIAMO_UDP_NEL_SOCKS:
+    # The first draft of this function, on 2026-08-25, did not check it. The
+    # branch was unreachable by luck (no provider has usable UDP) and not by
+    # construction, which is exactly the shape of defect this project pays for: a
+    # condition whose safety rests on a fact it does not verify.
+    from ._proxy import UDP_GOES_THROUGH_SOCKS
+    if not UDP_GOES_THROUGH_SOCKS:
         return False
     try:
-        from ._capacita import capacita
-        c = capacita(proxy, uscita_tcp_nota=egress_ip)
+        from ._capability import capability
+        c = capability(proxy, known_tcp_exit=egress_ip)
     except Exception:  # noqa: BLE001
         return False
-    return c.get("udp") is True and c.get("udp_coerente") is True
+    return c.get("udp") is True and c.get("udp_matches_tcp") is True
 
 
 def _geoip_database(ip: str, proxied: bool) -> Any:
@@ -837,13 +836,13 @@ def prepare_session_geo(
 
     # Timezone resolution - same precedence as resolve_session_timezone.
     def _coordinate(ip: "Optional[str]") -> "tuple[Optional[float], Optional[float]]":
-        """Le coordinate sono BEST-EFFORT, il fuso no, e la differenza e' voluta.
+        """Coordinates are BEST-EFFORT, the zone is not, and the gap is meant.
 
-        Un fuso sbagliato dietro un proxy e' la trappola `tz_mismatch` e deve
-        far fallire il lancio. Una posizione ASSENTE invece non e' una
-        contraddizione: e' un browser a cui nessuno ha ancora chiesto dove sia,
-        e il motore la rifiuta in modo pulito. Far fallire il lancio per questo
-        sarebbe piu' fragile senza essere piu' fedele.
+        A wrong timezone behind a proxy is the `tz_mismatch` trap and has to fail
+        the launch. A MISSING position, on the other hand, is not a
+        contradiction: it is a browser nobody has asked where it is yet, and the
+        engine refuses it cleanly. Failing a launch over that would be more
+        brittle without being more faithful.
         """
         if not ip:
             return None, None
@@ -855,18 +854,18 @@ def prepare_session_geo(
     if tz and tz.lower() != "auto":
         lat, lon = _coordinate(egress_ip)
         return SessionGeo(tz, egress_ip, lat, lon,
-                          _srflx_soppresso(proxy, egress_ip))  # explicit IANA wins
+                          _srflx_suppressed(proxy, egress_ip))  # explicit IANA wins
     try:
         ip = egress_ip if proxy_set else discover_egress_ip(None)
         if ip is None:  # proxy set but discovery failed above
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
         lat, lon = _coordinate(ip)
-        # ⛔ SI PORTA `ip`, NON `egress_ip`. Dietro un proxy sono lo stesso
-        # valore; senza, `ip` e' il fatto che questo giro di rete ha appena
-        # pagato e `egress_ip` e' `None`. Portare il secondo significava
-        # buttare la scoperta e farla rifare a `resolve_session_locale`.
+        # ⛔ IT CARRIES `ip`, NOT `egress_ip`. Behind a proxy they are the same
+        # value; without one, `ip` is the fact this round-trip has just paid for
+        # and `egress_ip` is `None`. Carrying the second meant throwing the
+        # discovery away and making `resolve_session_locale` do it again.
         return SessionGeo(ip_to_timezone(ip, _geoip_database(ip, proxy_set)), ip, lat, lon,
-                          _srflx_soppresso(proxy, ip))
+                          _srflx_suppressed(proxy, ip))
     except Exception:
         if proxy_set:
             raise  # fail-early behind a proxy (timezone_mismatch trap)

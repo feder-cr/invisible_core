@@ -416,13 +416,13 @@ _BASELINE: Dict[str, Any] = {
     #   §17.B), fed the egress IP via STEALTHFOX_WEBRTC_PUBLIC_IP from
     #   launcher._build_env (auto-discovered from the proxy).
     # IPv6: media.peerconnection.ice.disableIPv6 is DEAD on FF150 (read by no
-    #   ICE-gathering code). Il filtro vero e' in nICEr (addrs.cpp), e dal
-    #   2026-08-25 legge UNA sola fonte: la variabile d'ambiente
-    #   STEALTHFOX_WEBRTC_DISABLE_IPV6, scritta incondizionatamente da
-    #   `launch.build_launch_env` e dal `_session.build_env` del wrapper.
-    #   La pref `zoom.stealth.webrtc.disable_ipv6` NON si scrive piu': il ponte
-    #   nativo non la legge, e una pref che nessun C++ legge e' proprio cio' che
-    #   `test_no_orphan_prefs_in_baseline` vieta di emettere.
+    #   ICE-gathering code). The real filter is in nICEr (addrs.cpp), and since
+    #   2026-08-25 it reads ONE source: the environment variable
+    #   STEALTHFOX_WEBRTC_DISABLE_IPV6, written unconditionally by
+    #   `launch.build_launch_env` and by the wrapper's `_session.build_env`.
+    #   The pref `zoom.stealth.webrtc.disable_ipv6` is NOT written any more: the
+    #   native bridge does not read it, and a pref no C++ reads is precisely what
+    #   `test_no_orphan_prefs_in_baseline` forbids emitting.
     "media.peerconnection.enabled":                       True,
     "media.peerconnection.ice.no_host":                   False,
     "media.peerconnection.ice.default_address_only":      False,
@@ -464,43 +464,43 @@ _BASELINE: Dict[str, Any] = {
 
     # First-run / welcome UI noise.
     #
-    # ⛔ QUI STAVA `browser.startup.page: 0`, TOLTA IL 2026-08-20 col revert del
-    # newtab. Era l'ULTIMO punto vivo che sopprimeva about:home: con 0 la finestra
-    # iniziale parte vuota anche con i cinque file del sorgente riportati a
-    # upstream e le cinque prefs newtab tolte, quindi il revert sarebbe stato
-    # completo a meta' e la pagina non si sarebbe vista lo stesso. Il default di
-    # Gecko e' 1, cioe' la home page, che e' cio' che fa un retail.
-    # Le tre righe qui sotto restano: sono la finestra di benvenuto e il
-    # controllo del browser predefinito, che sono un'altra cosa dal newtab.
+    # ⛔ `browser.startup.page: 0` USED TO BE HERE, REMOVED 2026-08-20 with the
+    # newtab revert. It was the LAST live point suppressing about:home: with 0 the
+    # first window comes up empty even with the five source files returned to
+    # upstream and the five newtab prefs taken out, so the revert would have been
+    # half done and the page still would not have shown. Gecko's default is 1,
+    # the home page, which is what a retail does.
+    # The three lines below stay: they are the welcome window and the
+    # default-browser check, which are a different thing from the newtab.
     "browser.shell.checkDefaultBrowser":                  False,
     "browser.aboutwelcome.enabled":                       False,
     "browser.startup.upgradeDialog.enabled":              False,
-    # ⛔ QUI STAVA `termsofuse.acceptedVersion: 999`, ED ERA UNA DICHIARAZIONE
-    # MORTA. Tolta il 2026-08-19 dopo averla misurata, non dedotta.
+    # ⛔ `termsofuse.acceptedVersion: 999` USED TO BE HERE, AND IT WAS A DEAD
+    # DECLARATION. Removed 2026-08-19 after measuring it rather than deducing it.
     #
-    # Non faceva niente per due ragioni indipendenti, e ognuna basta:
-    #  1. duplicava il default upstream: browser/app/profile/firefox.js
-    #     dichiara gia' termsofuse.acceptedVersion a 999 di suo.
-    #  2. da sola non sarebbe bastata comunque. hasUserAcceptedCurrentTOU
-    #     (TelemetryReportingPolicy.sys.mjs:536) vuole ANCHE
-    #     termsofuse.acceptedDate non nulla, e upstream la mette a "0".
-    #     Misurato: con la sola versione il modale esce lo stesso.
+    # It did nothing for two independent reasons, and either one is enough:
+    #  1. it duplicated the upstream default: browser/app/profile/firefox.js
+    #     already declares termsofuse.acceptedVersion as 999 on its own.
+    #  2. on its own it would not have been enough anyway. hasUserAcceptedCurrentTOU
+    #     (TelemetryReportingPolicy.sys.mjs:536) ALSO wants
+    #     termsofuse.acceptedDate to be non-null, and upstream sets it to "0".
+    #     Measured: with the version alone the modal comes up regardless.
     #
-    # E non e' riparabile da qui in nessun caso: le prefs di questo dizionario
-    # viaggiano sul protocollo e Browser.enable le applica DOPO l'avvio, mentre
-    # il modale nasce con la finestra. Misurato: le stesse prefs passate come
-    # firefox_user_prefs non riparano, scritte in un user.js prima del lancio
-    # riparano. Il rimedio vive nel default compilato del nostro Firefox:
+    # And it is not repairable from here in any case: the prefs in this dict
+    # travel over the protocol and Browser.enable applies them AFTER startup,
+    # while the modal is born with the window. Measured: the same prefs passed as
+    # firefox_user_prefs do not repair it, written into a user.js before launch
+    # they do. The remedy lives in the compiled default of our Firefox:
     # browser/app/profile/firefox.js, termsofuse.acceptedDate.
     #
-    # Cosa costava tenerla: su una build MOZILLA_OFFICIAL il modale dei termini
-    # d'uso copre il viewport e mangia OGNI evento di mouse - fuoco su BODY,
-    # zero mousedown, zero mousemove - mentre la tastiera continua a funzionare.
-    # Questa riga sembrava proteggerci e non proteggeva niente.
+    # What keeping it cost: on a MOZILLA_OFFICIAL build the terms-of-use modal
+    # covers the viewport and eats EVERY mouse event - focus on BODY, zero
+    # mousedown, zero mousemove - while the keyboard keeps working. This line
+    # looked like it protected us and protected nothing.
 
-    # ⛔ LE CINQUE PREFS DEL NEWTAB SONO STATE TOLTE (2026-08-20), ED E' UNA
-    # DECISIONE DEL PROPRIETARIO: "voglio riavere il codice originale, dei 34mb
-    # rimettere questo processo in piedi". Erano queste:
+    # ⛔ THE FIVE NEWTAB PREFS WERE REMOVED (2026-08-20), AND IT IS AN OWNER
+    # DECISION: "I want the original code back, of the 34mb, put this process
+    # back on its feet". They were these:
     #
     #   browser.newtabpage.enabled                                   False
     #   browser.newtab.preload                                       False
@@ -508,75 +508,75 @@ _BASELINE: Dict[str, Any] = {
     #   browser.newtabpage.activity-stream.feeds.section.topstories  False
     #   browser.newtabpage.activity-stream.enabled                   False
     #
-    # La seconda e' quella che teneva GIU' il processo preallocato della nuova
-    # scheda, quindi senza toglierla il revert del sorgente non bastava: i
-    # cinque file di Firefox sono tornati a upstream, ma il processo sarebbe
-    # rimasto spento da qui. Ora il retail e noi partiamo dagli stessi default.
+    # The second one is what held the new tab's preallocated process DOWN, so
+    # without removing it the source revert was not enough: the five Firefox
+    # files went back to upstream, but the process would have stayed off from
+    # here. Now retail and we start from the same defaults.
     #
-    # ⛔ LA REGRESSIONE E' TORNATA IL 2026-08-23, ED E' STATA CHIUSA NEL MOTORE:
-    # queste righe restano tolte e non vanno rimesse.
+    # ⛔ THE REGRESSION CAME BACK ON 2026-08-23, AND IT WAS CLOSED IN THE ENGINE:
+    # these lines stay removed and must not be put back.
     #
-    # Il segnale era quello previsto - la PRIMA `page.goto()` che muore, non le
-    # successive - ma con un altro messaggio: "Navigation ... interrupted by
-    # another navigation to about:newtab", e subito dopo, se si aspettava,
-    # "can't access property loadURI, browsingContext is undefined". Il gate
-    # `fppro_full` falliva 2 volte su 2.
+    # The signal was the expected one - the FIRST `page.goto()` dying, not the
+    # later ones - but with a different message: "Navigation ... interrupted by
+    # another navigation to about:newtab", and right after, if you waited,
+    # "can't access property loadURI, browsingContext is undefined". The
+    # `fppro_full` gate failed 2 times out of 2.
     #
-    # ⛔ E LA DIAGNOSI SCRITTA QUI SOPRA ERA SBAGLIATA IN DUE PUNTI, misurati
-    # entrambi quel giorno con Playwright puro sullo stesso binario:
+    # ⛔ AND THE DIAGNOSIS WRITTEN ABOVE WAS WRONG IN TWO PLACES, both measured
+    # that day with plain Playwright on the same binary:
     #
-    #  1. Non e' la fetch di `TopSitesFeed`. E' il browser PREALLOCATO della
-    #     nuova scheda: `JugglerFrameParent` riconosceva il target confrontando
-    #     `browserId` con l'`id` di un BrowsingContext - due contatori diversi -
-    #     e con browserId 12 contro bcId 12 quel browser estraneo si prendeva il
-    #     canale della pagina. Da fuori si vedeva un secondo
-    #     `Page.frameAttached mainframe-12` sulla stessa sessione.
-    #  2. **Aspettare NON e' il rimedio**, ed era la riga che stava qui. Con
-    #     l'attesa vera - non un ritardo fisso: si aspettava che `about:newtab`
-    #     fosse arrivato E caricato - la `goto` successiva riusciva **0 volte su
-    #     9**, perche' a quel punto il frame che il client crede principale non
-    #     esiste sotto il browser della scheda. Il ritardo di 0,4 s che il
-    #     wrapper aveva riusciva solo quando VINCEVA LA CORSA, cioe' a caso.
+    #  1. It is not the `TopSitesFeed` fetch. It is the new tab's PREALLOCATED
+    #     browser: `JugglerFrameParent` recognised the target by comparing
+    #     `browserId` against a BrowsingContext's `id` - two different counters -
+    #     and with browserId 12 against bcId 12 that unrelated browser took over
+    #     the page's channel. From outside you saw a second
+    #     `Page.frameAttached mainframe-12` on the same session.
+    #  2. **Waiting is NOT the remedy**, and that was the line sitting here. With
+    #     a real wait - not a fixed delay: it waited for `about:newtab` to have
+    #     arrived AND loaded - the following `goto` succeeded **0 times out of
+    #     9**, because by then the frame the client believes is the main one does
+    #     not exist under the tab's browser. The 0.4 s delay the wrapper had
+    #     worked only when it WON THE RACE, that is, at random.
     #
-    # Il rimedio sta dove sta la causa: `juggler/JugglerFrameParent.sys.mjs`
-    # smentisce il riconoscimento numerico con l'elemento `<browser>` a cui il
-    # contesto appartiene. Con quello, e con la preallocazione ACCESA come vuole
-    # il proprietario, 10 giri su 10 riusciti e nessun mainframe di troppo.
-    # I numeri per esteso in `70-known-bugs.md` [B166].
+    # The remedy is where the cause is: `juggler/JugglerFrameParent.sys.mjs`
+    # overrules the numeric match with the `<browser>` element the context
+    # belongs to. With that, and with preallocation ON as the owner wants, 10
+    # runs out of 10 succeeded and no extra mainframe.
+    # The numbers in full in `70-known-bugs.md` [B166].
 
     # ══════════════════════════════════════════════════════════════════════
-    #  LE TRE CHIAVI API, DICHIARATE QUI E IN NESSUN ALTRO POSTO
+    #  THE THREE API KEYS, DECLARED HERE AND NOWHERE ELSE
     # ══════════════════════════════════════════════════════════════════════
     #
-    # Decisione del proprietario, 2026-08-20: "voglio portare questi valori su
-    # invisible_core, trova il modo che ogni volta che firefox si avvia li legga
-    # e li setti prendendoli da invisible_core, come stiamo fondamentalmente
-    # facendo per tutte le altre cose che invisible_core genera".
+    # Owner decision, 2026-08-20: "I want to bring these values into
+    # invisible_core, find a way for firefox to read and set them from
+    # invisible_core every time it starts, the way we are basically doing for
+    # everything else invisible_core generates".
     #
-    # PRIMA: erano incise nel binario a tempo di compilazione. `configure`
-    # leggeva tre keyfile da $APIKEYDIR e sostituiva `@MOZ_..._API_KEY@` dentro
-    # `AppConstants.sys.mjs`, che a runtime e' una costante congelata.
+    # BEFORE: they were burned into the binary at compile time. `configure` read
+    # three keyfiles from $APIKEYDIR and substituted `@MOZ_..._API_KEY@` inside
+    # `AppConstants.sys.mjs`, which at runtime is a frozen constant.
     #
-    # ADESSO: quel percorso non esiste piu' - tolte le tre voci di
-    # AppConstants.sys.mjs, i tre DEFINES di toolkit/modules/moz.build e le tre
-    # --with-*-api-keyfile del .mozconfig - e il solo lettore del motore,
-    # `URLFormatter.sys.mjs`, legge queste pref (`stealthDeclaredApiKey`).
+    # NOW: that path no longer exists - the three AppConstants.sys.mjs entries,
+    # the three DEFINES in toolkit/modules/moz.build and the three
+    # --with-*-api-keyfile in the .mozconfig are gone - and the engine's only
+    # reader, `URLFormatter.sys.mjs`, reads these prefs (`stealthDeclaredApiKey`).
     #
-    # ⛔ E L'ASSENZA SI RIFIUTA. Senza dichiarazione il motore torna la stringa
-    # vuota e registra un errore in console: `checkGoogleSafeBrowsingKey` la
-    # legge come falsy e SPEGNE il provider, quindi non parte nessuna richiesta
-    # con una chiave finta o con un segnaposto dentro. E' la regola 7: se la
-    # dichiarazione manca si rifiuta, non si inventa un default.
+    # ⛔ AND AN ABSENCE IS REFUSED. With no declaration the engine returns the
+    # empty string and logs an error to the console: `checkGoogleSafeBrowsingKey`
+    # reads it as falsy and TURNS THE PROVIDER OFF, so no request ever goes out
+    # with a fake key or a placeholder inside it. This is rule 7: if the
+    # declaration is missing you refuse, you do not invent a default.
     #
-    # ⛔ I VALORI SONO QUELLI DI MOZILLA, byte per byte, ed e' deliberato.
-    # Il proprietario, 2026-08-20: "devono essere byte per byte identiche a
-    # quelle dentro il Firefox scaricato dal loro sito". Sono le stesse chiavi
-    # che ogni Firefox retail porta gia' in chiaro dentro `omni.ja`, quindi
-    # dichiararle qui non pubblica niente che non sia gia' pubblico - ma resta
-    # una scelta, non un dettaglio, ed e' scritta qui perche' si veda.
+    # ⛔ THE VALUES ARE MOZILLA'S, byte for byte, and that is deliberate.
+    # The owner, 2026-08-20: "they must be byte for byte identical to the ones
+    # inside the Firefox downloaded from their site". They are the same keys
+    # every retail Firefox already carries in the clear inside `omni.ja`, so
+    # declaring them here publishes nothing that is not already public - but it
+    # stays a choice, not a detail, and it is written here so that it is seen.
     #
-    # Il dominio e' FINITO E NOTO - tre chiavi - quindi la regola 2 e'
-    # soddisfatta e la regola 1 si applica: il core dichiara, il motore obbedisce.
+    # The domain is FINITE AND KNOWN - three keys - so rule 2 is satisfied and
+    # rule 1 applies: the core declares, the engine obeys.
     "zoom.stealth.apikey.google_location_service": "AIzaSyB0mAay6Zu8JTU8XTQtXJLri9eY9wISq6o",
     "zoom.stealth.apikey.google_safebrowsing":     "AIzaSyC7jsptDS3am4tPx4r3nxis7IMjBc5Dovo",
     "zoom.stealth.apikey.mozilla":                 "7e40f68c-7938-4c5d-9f95-e61647c213eb",
@@ -618,43 +618,42 @@ _BASELINE: Dict[str, Any] = {
     #: permissions by default, so the call is refused exactly as it is for a
     #: user who dismisses the prompt.
     "geo.provider.network.url":                           "",
-    #: ⛔ `browser.region.network.url` e `browser.region.update.enabled` NON
-    #: si emettono piu' - decisione del proprietario, 2026-08-17. Non e' una
-    #: dimenticanza: e' il caso in cui sopprimere ALLONTANA dal retail.
+    #: ⛔ `browser.region.network.url` and `browser.region.update.enabled` are
+    #: NOT emitted any more - owner decision, 2026-08-17. It is not an
+    #: oversight: it is the case where suppressing moves AWAY from retail.
     #:
-    #: Sono il servizio di REGIONE di Firefox, che non c'entra con la
-    #: geolocalizzazione di una pagina - quella la ferma la riga qui sopra,
-    #: che resta ed e' portante. Un Firefox standard chiede la regione UNA
-    #: volta per sessione, e noi lo facevamo comunque: misurato il
-    #: 2026-08-17, il prodotto manda quella richiesta anche con la pref vuota
-    #: emessa, mentre un lancio nudo con la stessa pref la azzera. Spedivamo
-    #: quindi una dichiarazione che prometteva cio' che non faceva.
+    #: They are Firefox's REGION service, which has nothing to do with a page's
+    #: geolocation - that one is stopped by the line above, which stays and is
+    #: load-bearing. A standard Firefox asks for the region ONCE per session,
+    #: and we were doing it anyway: measured 2026-08-17, the product sends that
+    #: request even with the empty pref emitted, while a bare launch with the
+    #: same pref zeroes it. So we were shipping a declaration that promised
+    #: what it did not do.
     #:
-    #: E c'e' una ragione di realness oltre alla somiglianza: la regione
-    #: derivata dall'uscita CONCORDA con il fuso e la lingua che dichiariamo
-    #: dalla stessa uscita, mentre una regione congelata al default puo'
-    #: contraddirli.
-    #: ⛔ QUESTA RIGA NON FA NIENTE SULLA NOSTRA BUILD, e resta qui annotata
-    #: invece che cancellata perche' la conoscenza costa piu' della riga.
+    #: And there is a realness reason beyond the resemblance: a region derived
+    #: from the exit AGREES with the timezone and the language we declare from
+    #: that same exit, while a region frozen at the default can contradict them.
+    #: ⛔ THIS LINE DOES NOTHING ON OUR BUILD, and it stays here annotated
+    #: instead of deleted because the knowledge costs more than the line.
     #:
-    #: `services/settings/Utils.sys.mjs` rifiuta l'override del server quando
-    #: `AppConstants.RELEASE_OR_BETA` e' vero, salvo test in corso,
-    #: `MOZ_REMOTE_SETTINGS_DEVTOOLS=1` nell'ambiente, o un URL gia' nella lista
-    #: ammessa. La nostra build impacchettata dichiara `RELEASE_OR_BETA: true` -
-    #: viene da `--enable-release` nel mozconfig - e la stringa vuota non e' fra
-    #: gli URL ammessi. Quindi `Utils.SERVER_URL` ricade sul ramo `else` e
-    #: restituisce il server VERO di Mozilla, e Gecko logga "Ignoring preference
-    #: override of remote settings server".
+    #: `services/settings/Utils.sys.mjs` refuses the server override when
+    #: `AppConstants.RELEASE_OR_BETA` is true, except under a running test,
+    #: `MOZ_REMOTE_SETTINGS_DEVTOOLS=1` in the environment, or a URL already in
+    #: the allowed list. Our packaged build declares `RELEASE_OR_BETA: true` -
+    #: it comes from `--enable-release` in the mozconfig - and the empty string
+    #: is not among the allowed URLs. So `Utils.SERVER_URL` falls to the `else`
+    #: branch and returns Mozilla's REAL server, and Gecko logs "Ignoring
+    #: preference override of remote settings server".
     #:
-    #: Conseguenza misurabile: ogni sessione interroga Remote Settings e scarica
-    #: gli attachment attraverso il proxy. Vedi `70-known-bugs.md` [B156].
+    #: Measurable consequence: every session queries Remote Settings and
+    #: downloads the attachments through the proxy. See `70-known-bugs.md` [B156].
     #:
-    #: NON si spegne il poll in blocco: `webcompat-interventions` deve
-    #: continuare ad aggiornarsi ed e' FEDELTA'. E non si spegne la revoca dei
-    #: certificati per guadagnare memoria - deciso il 2026-08-16: e' un
-    #: declassamento di sicurezza su un browser che guidano utenti veri, e non e'
-    #: nemmeno invisibile, perche' un rilevatore puo' servire da un host con
-    #: certificato revocato e guardare se carichiamo.
+    #: The poll is NOT turned off wholesale: `webcompat-interventions` has to
+    #: keep updating and that is FIDELITY. And certificate revocation is not
+    #: turned off to win memory - decided 2026-08-16: it is a security
+    #: downgrade on a browser real users drive, and it is not even invisible,
+    #: because a detector can serve from a host with a revoked certificate and
+    #: watch whether we load.
     "services.settings.server":                           "",
     "browser.search.geoSpecificDefaults":                 False,
     "browser.contentblocking.report.lockwise.enabled":    False,
@@ -663,47 +662,47 @@ _BASELINE: Dict[str, Any] = {
 
     "browser.translations.enable":                        False,
 
-    # ⛔ QUI STAVANO SEI PREF CHE SPEGNEVANO HTTP/3, Alt-Svc, ECH e i record
-    # DNS HTTPS. TOLTE IL 2026-08-25: erano un segnale SOPPRESSO, e la ragione
-    # scritta accanto non reggeva alla misura.
+    # ⛔ SIX PREFS USED TO SIT HERE TURNING OFF HTTP/3, Alt-Svc, ECH and HTTPS
+    # DNS records. REMOVED 2026-08-25: they were a SUPPRESSED signal, and the
+    # reason written beside them did not survive measurement.
     #
-    # Il commento diceva: "SOCKS5 proxy doesn't support UDP ASSOCIATE so HTTP/3
-    # fails". Vero dietro un proxy - misurato: il gateway di un provider
-    # residenziale rifiuta `UDP ASSOCIATE` con `rep=7` su 8 peer su 8. Ma le
-    # pref erano INCONDIZIONATE, e senza proxy il proxy non c'entra niente.
+    # The comment said: "SOCKS5 proxy doesn't support UDP ASSOCIATE so HTTP/3
+    # fails". True behind a proxy - measured: a residential provider's gateway
+    # refuses `UDP ASSOCIATE` with `rep=7` on 8 peers out of 8. But the prefs
+    # were UNCONDITIONAL, and with no proxy the proxy has nothing to do with it.
     #
-    # Misurato leggendo `performance.getEntriesByType('navigation')[0]
-    # .nextHopProtocol`, che e' il protocollo VERO della connessione, detto dal
-    # browser stesso:
+    # Measured by reading `performance.getEntriesByType('navigation')[0]
+    # .nextHopProtocol`, which is the connection's REAL protocol, said by the
+    # browser itself:
     #
-    #   senza proxy, come spedivamo   cloudflare-quic.com:  h2 -> h2 -> h2
-    #   senza proxy, pref tolte       cloudflare-quic.com:  h2 -> **h3** -> h3
+    #   no proxy, as we shipped    cloudflare-quic.com:  h2 -> h2 -> h2
+    #   no proxy, prefs removed    cloudflare-quic.com:  h2 -> **h3** -> h3
     #
-    # Cioe' eravamo l'unico browser sulla connessione a non parlare MAI HTTP/3,
-    # e Scrapfly lo stampa in chiaro (`http3_supported: false`). Un Firefox
-    # retail su una connessione di casa lo usa.
+    # That is, we were the only browser on the connection that NEVER spoke
+    # HTTP/3, and a detector prints it in the clear (`http3_supported: false`).
+    # A retail Firefox on a home connection uses it.
     #
-    # **E dietro proxy non serve nessuna condizione**, che e' la parte che
-    # rende il rimedio semplice: con le pref al default del motore e un proxy
-    # configurato, Firefox **si astiene da solo**. Misurato su entrambi gli
-    # schemi, con e senza le pref, quattro corse: sempre `h2 -> h2 -> h2`, con
-    # gli stessi tempi (22-24 s). Non ci prova e fallisce: semplicemente non usa
-    # QUIC quando c'e' un proxy, esattamente come farebbe il retail.
+    # **And behind a proxy no condition is needed at all**, which is what makes
+    # the remedy simple: with the prefs at the engine's default and a proxy
+    # configured, Firefox **abstains on its own**. Measured on both schemes,
+    # with and without the prefs, four runs: always `h2 -> h2 -> h2`, with the
+    # same timings (22-24 s). It does not try and fail: it simply does not use
+    # QUIC when there is a proxy, exactly as retail would.
     #
-    # Il criterio, dettato dal proprietario lo stesso giorno: **si spegne una
-    # cosa solo se e' davvero indisponibile E non la si puo' falsificare.** Qui
-    # non e' indisponibile (senza proxy funziona) e dietro proxy se ne occupa il
-    # motore, quindi non c'e' niente da spegnere.
+    # The criterion, dictated by the owner the same day: **you turn something
+    # off only if it is genuinely unavailable AND cannot be faked.** Here it is
+    # not unavailable (without a proxy it works) and behind a proxy the engine
+    # takes care of it, so there is nothing to turn off.
     #
-    # `echconfig` e `use_https_rr_as_altsvc` valgono `true` nel motore e sono
-    # uscite con le altre: ECH cambia il ClientHello, cioe' proprio cio' che
-    # JA3/JA4 misurano, e un HTTPS RR in meno e' una via di scoperta che il
-    # retail ha e noi no.
+    # `echconfig` and `use_https_rr_as_altsvc` are `true` in the engine and went
+    # out with the rest: ECH changes the ClientHello, which is precisely what
+    # JA3/JA4 measure, and one missing HTTPS RR is a discovery path retail has
+    # and we do not.
 
-    # Le connessioni speculative RESTANO spente, e la ragione e' diversa: sotto
-    # carico producono un annullamento anticipato del canale
-    # (NS_BINDING_FAILED). E' un rimedio a un guasto osservato, non una difesa
-    # di fingerprint - e non e' stato rimisurato, quindi non si tocca.
+    # Speculative connections STAY off, and the reason is a different one: under
+    # load they produce an early cancellation of the channel
+    # (NS_BINDING_FAILED). That is a remedy for an observed failure, not a
+    # fingerprint defence - and it has not been re-measured, so it is not touched.
     "network.predictor.enabled":                          False,
     "network.dns.disablePrefetch":                        True,
     "network.dns.disablePrefetchFromHTTPS":               True,
@@ -763,15 +762,14 @@ _BASELINE: Dict[str, Any] = {
     # Telemetry & data reporting.
 
     # ------------------------------------------------------------------
-    # ⛔ QUI NON C'E' NIENTE, ED E' UNA DECISIONE - non una dimenticanza.
-    # Proprietario, 2026-08-19: il prodotto deve fare esattamente cio' che fa
-    # un Firefox retail, quindi le prefs che sopprimevano traffico che il
-    # retail fa sono state TOLTE, non impostate al valore del retail. Togliere
-    # eredita il default di Gecko, che e' per definizione quello del retail;
-    # impostare lascia un valore nostro che puo' divergere quando upstream
-    # cambia idea.
+    # ⛔ THERE IS NOTHING HERE, AND IT IS A DECISION - not an oversight.
+    # Owner, 2026-08-19: the product must do exactly what a retail Firefox does,
+    # so the prefs that suppressed traffic retail makes were REMOVED, not set to
+    # retail's value. Removing inherits Gecko's default, which is by definition
+    # retail's; setting leaves a value of ours that can diverge when upstream
+    # changes its mind.
     #
-    # Tolte qui: browser.safebrowsing.{malware,phishing,downloads,
+    # Removed here: browser.safebrowsing.{malware,phishing,downloads,
     # downloads.remote}.enabled, toolkit.telemetry.{enabled,unified},
     # datareporting.{healthreport.uploadEnabled,policy.dataSubmissionEnabled},
     # app.{update.enabled,normandy.enabled,shield.optoutstudies.enabled},
@@ -780,16 +778,17 @@ _BASELINE: Dict[str, Any] = {
     # network.{captive-portal-service,connectivity-service}.enabled,
     # dom.push.connection.enabled, network.http.speculative-parallel-limit.
     #
-    # ⛔ E NON VANNO RIDICHIARATE "per sicurezza" al valore del retail: sul
-    # percorso Juggler - quello che usa il prodotto - PLAYWRIGHT NON SCRIVE
-    # NESSUNA PREF. Il blocco delle ~86 che si trova cercando in giro vive in
-    # `bidi/bidiFirefox.ts` e si raggiunge solo con `channel` che inizia per
-    # `moz-`, che noi non passiamo mai; la classe base ha `prepareUserDataDir`
-    # col corpo VUOTO. Misurato: un profilo Playwright nudo ha 48 prefs, tutte
-    # e 48 presenti anche nel profilo del retail firmato, e nessun `user.js`.
+    # ⛔ AND THEY MUST NOT BE RE-DECLARED "to be safe" at retail's value: on the
+    # Juggler path - the one the product uses - PLAYWRIGHT WRITES NO PREF AT
+    # ALL. The block of ~86 you find by searching around lives in
+    # `bidi/bidiFirefox.ts` and is only reached with a `channel` starting with
+    # `moz-`, which we never pass; the base class has `prepareUserDataDir` with
+    # an EMPTY body. Measured: a bare Playwright profile has 48 prefs, all 48 of
+    # them present in the signed retail's profile too, and no `user.js`.
     #
-    # `app.update.enabled` non e' fra queste per scelta: e' una pref MORTA,
-    # rimossa da Firefox (UpdateTelemetry.sys.mjs:54). La impostavamo a vuoto.
+    # `app.update.enabled` is not among these by choice: it is a DEAD pref,
+    # removed from Firefox (UpdateTelemetry.sys.mjs:54). We were setting it to
+    # nothing.
     #
     # Since 2026-08-31 OUR engine has no updater at all: the build options were
     # removed from update-programs.configure, so the check never runs and the
@@ -801,32 +800,32 @@ _BASELINE: Dict[str, Any] = {
     # updating out from under the seal that pins it. Dropping it would break
     # that path in order to tidy up this one.
     #
-    # Contesto completo: docs/firefox-stealth-architecture/27-retail-network-parity.md
+    # Full context: docs/firefox-stealth-architecture/27-retail-network-parity.md
     # ------------------------------------------------------------------
 
-    # ⛔ L'UNICA ECCEZIONE ALLA PARITA', E RESTA FINCHE' LA BUILD NON HA LA CHIAVE.
-    # Misurato nel sorgente 2026-08-19, catena completa:
+    # ⛔ THE ONLY EXCEPTION TO PARITY, AND IT STAYS UNTIL THE BUILD HAS THE KEY.
+    # Measured in the source 2026-08-19, the whole chain:
     #   browser.safebrowsing.downloads.remote.url =
     #     https://sb-ssl.google.com/safebrowsing/clientreport/download
     #       ?key=%GOOGLE_SAFEBROWSING_API_KEY%          (all.js:3448)
-    #   letta via FormatURLPref                          (ApplicationReputation.cpp:1603-1606)
-    #     -> la sentinella `no-google-safebrowsing-api-key` finisce NELLA URL
-    #   SendRemoteQueryInternal rifiuta solo URL vuoto o about:blank: la chiave
-    #     non la controlla mai.
-    # Quindi con questa pref ereditata a `true` e senza chiave vera, OGNI
-    # download binario manda a Google una POST con la sentinella dentro la
-    # query. Nessun retail emette quella stringa: non e' un'assenza, e' un
-    # segnale positivo che ci dichiara build senza chiave, verso il destinatario
-    # che stiamo cercando di non insospettire.
+    #   read through FormatURLPref                       (ApplicationReputation.cpp:1603-1606)
+    #     -> the `no-google-safebrowsing-api-key` sentinel ends up IN THE URL
+    #   SendRemoteQueryInternal refuses only an empty URL or about:blank: it
+    #     never checks the key at all.
+    # So with this pref inherited as `true` and no real key, EVERY binary
+    # download sends Google a POST with the sentinel inside the query. No retail
+    # emits that string: it is not an absence, it is a positive signal declaring
+    # us a keyless build, towards exactly the recipient we are trying not to
+    # make suspicious.
     #
-    # Il percorso degli AGGIORNAMENTI LISTA e' protetto e non ha questo problema:
-    # checkGoogleSafeBrowsingKey azzera updateURL e gethashURL quando la chiave
-    # manca (SafeBrowsing.sys.mjs:537-568, :637-643). Solo la reputazione dei
-    # download scavalca il controllo.
+    # The LIST-UPDATE path is protected and does not have this problem:
+    # checkGoogleSafeBrowsingKey blanks updateURL and gethashURL when the key is
+    # missing (SafeBrowsing.sys.mjs:537-568, :637-643). Only download reputation
+    # goes around the check.
     #
-    # ⛔ SI TOGLIE QUANDO `--with-google-safebrowsing-api-keyfile` e' in vigore
-    # nella build: da quel momento questa riga diventa essa stessa la divergenza.
-    # Il gancio condizionale e' gia' nel .mozconfig di firefox-21.
+    # ⛔ IT COMES OUT WHEN `--with-google-safebrowsing-api-keyfile` is in force in
+    # the build: from that moment this line itself becomes the divergence. The
+    # conditional hook is already in firefox-21's .mozconfig.
     "browser.safebrowsing.downloads.remote.enabled":      False,
 
     # Updates: inert on our own engine, live for a caller bringing their own
@@ -872,14 +871,14 @@ _BASELINE: Dict[str, Any] = {
     # does nothing - the second translation is paid only where the defect is.
     "zoom.stealth.webgl.shader_output_language":          "essl",
 
-    # ⛔ `zoom.stealth.text.*` e non `zoom.stealth.font.*`, e la distinzione
-    # non e' estetica: `test_fonts_are_not_configured_via_prefs` nel wrapper
-    # pretende che NESSUNA pref `zoom.stealth.font.` sia emessa, perche' il
-    # binario e' autosufficiente per i font e la loro configurazione vive
-    # nel manifest. Questi due non configurano un font: dicono come si
-    # RASTERIZZA, e quello spazio esiste gia' - `zoom.stealth.text.
-    # coverage_ladder` sta li'. Il test lo ha trovato lo stesso giorno in
-    # cui erano stati messi nello spazio sbagliato, prima che spedissero.
+    # ⛔ `zoom.stealth.text.*` and not `zoom.stealth.font.*`, and the distinction
+    # is not cosmetic: `test_fonts_are_not_configured_via_prefs` in the wrapper
+    # demands that NO `zoom.stealth.font.` pref is emitted, because the binary
+    # is self-sufficient for fonts and their configuration lives in the
+    # manifest. These two do not configure a font: they say how it is
+    # RASTERISED, and that namespace already exists - `zoom.stealth.text.
+    # coverage_ladder` lives there. The test caught it the same day they had
+    # been put in the wrong namespace, before they shipped.
     # How FreeType loads a glyph: the hinting style, and whether antialiasing
     # is on. DECLARED, never asked of the host.
     #
@@ -1064,10 +1063,10 @@ _ACCEPT_LANG_TABLE = {
     "xcl": "xcl, hy", "xh": "xh-ZA, xh", "zam": "zam, es-MX, es",
 }
 
-#: Le SEI lingue in cui Firefox NON aggiunge ", en-US, en" in coda
-#: (`add_en_us = false` nel sorgente citato sopra). Tutte le altre lo aggiungono.
-_ACCEPT_LANG_SENZA_EN = {
-    "en": None,          # la tabella per `en` dipende dalla regione, vedi sotto
+#: The SIX languages where Firefox does NOT append ", en-US, en"
+#: (`add_en_us = false` in the source cited above). Every other one appends it.
+_ACCEPT_LANG_NO_EN = {
+    "en": None,          # the `en` table depends on the region, see below
     "my": "my, en-GB, en",
     "ro": "ro-RO, ro-GB, en",
     "sco": "sco, en-GB, en",
@@ -1077,57 +1076,56 @@ _ACCEPT_LANG_SENZA_EN = {
 
 
 def _accept_language(locale: str) -> str:
-    """`intl.accept_languages` esattamente come lo costruisce Firefox 151.
+    """`intl.accept_languages` exactly as Firefox 151 builds it.
 
-    ⛔ QUESTA FUNZIONE RESTITUIVA DUE VOCI PER OGNI LOCALE, E PER 89 LINGUE SU 95
-    ERA SBAGLIATO. Restituiva `"<locale>, <base>"` con il commento "la forma di
-    default del desktop (es. `en-US, en`)". Quella forma e' giusta **solo per
-    l'inglese**, che e' una delle sei lingue in cui Firefox non aggiunge la coda.
+    ⛔ THIS FUNCTION USED TO RETURN TWO ENTRIES FOR EVERY LOCALE, AND FOR 89
+    LANGUAGES OUT OF 95 THAT WAS WRONG. It returned `"<locale>, <base>"` with the
+    comment "the desktop default form (e.g. `en-US, en`)". That form is right
+    **only for English**, which is one of the six languages where Firefox does
+    not append the tail.
 
-    Il sorgente e' `locale_service_default_accept_languages`
-    (`intl/locale/rust/locale_service_glue/src/lib.rs:82-234`) e fa due cose:
-    una TABELLA di casi speciali per lingua, e poi
+    The source is `locale_service_default_accept_languages`
+    (`intl/locale/rust/locale_service_glue/src/lib.rs:82-234`) and it does two
+    things: a TABLE of per-language special cases, and then
 
         if add_en_us { format!("{langs}, en-US, en") } else { langs }
 
-    con `add_en_us` VERO di default e falso solo per en, my, ro, sco, sl, szl.
-    Il ramo di default della tabella e' `"{lang}-{region}, {lang}"`, cioe'
-    esattamente la nostra vecchia formula: mancava solo la coda, che e' il pezzo
-    che si vede.
+    with `add_en_us` TRUE by default and false only for en, my, ro, sco, sl, szl.
+    The table's default branch is `"{lang}-{region}, {lang}"`, that is, exactly
+    our old formula: only the tail was missing, which is the part that shows.
 
-    Cosa costava, misurato: un profilo italiano emetteva
+    What it cost, measured: an Italian profile emitted
         it-IT,it;q=0.9
-    dove un Firefox italiano vero emette
+    where a real Italian Firefox emits
         it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7
-    su OGNI richiesta HTTP e in `navigator.languages`.
+    on EVERY HTTP request and in `navigator.languages`.
 
-    ⛔ E PERCHE' NON ERA STATO VISTO: il confronto col retail era stato fatto
-    contro una build **en-US**, cioe' l'unico caso in cui la vecchia formula e
-    quella vera coincidono per costruzione. Il braccio di controllo era scelto
-    male, non la misura sbagliata. Quando si confronta una funzione che dipende
-    da un parametro, il braccio non puo' stare sul valore in cui il difetto si
-    annulla.
+    ⛔ AND WHY IT HAD NOT BEEN SEEN: the comparison against retail had been made
+    against an **en-US** build, that is, the one case where the old formula and
+    the real one coincide by construction. The control arm was badly chosen, not
+    the measurement wrong. When comparing a function that depends on a parameter,
+    the arm cannot sit on the value where the defect cancels itself out.
     """
     lang = locale.replace("_", "-")
-    pezzi = lang.split("-")
-    base = pezzi[0]
-    regione = pezzi[1] if len(pezzi) > 1 else None
+    parts = lang.split("-")
+    base = parts[0]
+    region = parts[1] if len(parts) > 1 else None
 
     if base == "en":
-        # unico ramo con sotto-casi per regione, e senza coda
+        # the only branch with per-region sub-cases, and with no tail
         return {"CA": "en-CA, en-US, en", "GB": "en-GB, en",
-                "ZA": "en-ZA, en-GB, en-US, en"}.get(regione, "en-US, en")
-    if base in _ACCEPT_LANG_SENZA_EN:
-        return _ACCEPT_LANG_SENZA_EN[base]
+                "ZA": "en-ZA, en-GB, en-US, en"}.get(region, "en-US, en")
+    if base in _ACCEPT_LANG_NO_EN:
+        return _ACCEPT_LANG_NO_EN[base]
 
     if base == "ca" and "valencia" in lang.lower():
         langs = "ca-valencia, ca"
-    elif base == "zh" and regione == "CN":
+    elif base == "zh" and region == "CN":
         langs = "zh-CN, zh, zh-TW, zh-HK"
     elif base in _ACCEPT_LANG_TABLE:
         langs = _ACCEPT_LANG_TABLE[base]
-    elif regione:
-        langs = f"{base}-{regione}, {base}"
+    elif region:
+        langs = f"{base}-{region}, {base}"
     else:
         langs = base
     return f"{langs}, en-US, en"
@@ -1446,16 +1444,17 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["ui.prefersReducedMotion"]          = _a11y
     prefs["ui.prefersReducedTransparency"]    = _a11y
     prefs["ui.invertedColors"]                = _a11y
-    # La quarta della famiglia, aggiunta il 2026-08-24. Governa `forced-colors`
-    # e, di rimbalzo, `prefers-contrast`: quest'ultimo Gecko lo DERIVA dal
-    # rapporto di contrasto dei colori effettivi e non ha nessun override, ma il
-    # primo termine del suo if e' proprio questo flag.
+    # The fourth of the family, added 2026-08-24. It governs `forced-colors`
+    # and, on the rebound, `prefers-contrast`: Gecko DERIVES the latter from the
+    # contrast ratio of the effective colours and it has no override at all, but
+    # the first term of its if is precisely this flag.
     #
-    # Era rimasta indietro perche' Playwright mandava `Browser.setForcedColors`
-    # a ogni lancio e l'override cortocircuitava la lettura: la pref non serviva
-    # a niente e nessuno si accorgeva che mancasse. Tolto quel comando, senza
-    # questa riga la decisione non sarebbe tornata qui - sarebbe andata
-    # all'HOST, via LookAndFeel::GetInt(IntID::UseAccessibilityTheme).
+    # It had been left behind because Playwright sent `Browser.setForcedColors`
+    # on every launch and the override short-circuited the read: the pref was
+    # good for nothing and nobody noticed it was missing. With that command
+    # gone, without this line the decision would not have come back here - it
+    # would have gone to the HOST, via
+    # LookAndFeel::GetInt(IntID::UseAccessibilityTheme).
     prefs["ui.useAccessibilityTheme"]         = _a11y
 
 
@@ -1614,17 +1613,17 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     """Dark mode, plus the Windows colours palette when the theme is light."""
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
-    # La stessa cosa detta all'altro lettore. `ui.systemUsesDarkTheme` la
-    # legge LookAndFeel; `prefers-color-scheme` no, perche' nsPresContext
-    # guarda prima l'override del BrowsingContext e poi questa pref.
-    # 0 = Dark, 1 = Light (StaticPrefList.yaml:10646-10648); il default e' 2,
-    # che vuol dire "il sistema", cioe' l'host.
+    # The same thing said to the other reader. `ui.systemUsesDarkTheme` is read
+    # by LookAndFeel; `prefers-color-scheme` is not, because nsPresContext looks
+    # at the BrowsingContext override first and at this pref second.
+    # 0 = Dark, 1 = Light (StaticPrefList.yaml:10646-10648); the default is 2,
+    # which means "the system", that is, the host.
     #
-    # Dichiarata il 2026-08-24, quando `Browser.setColorScheme` e' stato tolto
-    # dal client. Va in quest'ordine: prima la dichiarazione, poi la rimozione
-    # del comando, altrimenti la decisione non torna qui - va alla macchina.
-    # Misurato prima: col comando attivo questa pref era codice morto, messa a
-    # 0 il browser continuava a rispondere light.
+    # Declared 2026-08-24, when `Browser.setColorScheme` was taken out of the
+    # client. It goes in this order: the declaration first, then the removal of
+    # the command, or the decision does not come back here - it goes to the
+    # machine. Measured beforehand: with the command active this pref was dead
+    # code, set to 0 the browser kept answering light.
     prefs["layout.css.prefers-color-scheme.content-override"] = (
         0 if profile.dark_theme else 1)
     # ── Three LookAndFeel values that still read the HOST ────────────────────
@@ -1907,23 +1906,23 @@ def humanize_max_seconds(humanize: Any) -> float:
     return value if value > 0 else HUMANIZE_MAX_SECONDS
 
 
-#: Millisecondi fra due `mousemove` consecutivi, MEDIA di una gaussiana (il
-#: passo fisso era di per se' un tell, e il motore lo sfuma gia').
+#: Milliseconds between two consecutive `mousemove`s, the MEAN of a gaussian (a
+#: fixed step was itself a tell, and the engine already blurs it).
 #:
-#: Il valore non e' scelto a gusto: e' quello che il generatore Python del
-#: wrapper - il percorso PREDEFINITO, quindi il riferimento - produce davvero.
-#: Misurato il 2026-08-24 sulla stessa mossa, leggendo i `dt` dalla pagina:
-#: media 31,9 ms, mediana 31,5, minimo 16, e solo il 5% sotto i 16,7 ms.
+#: The value is not a matter of taste: it is what the wrapper's Python generator
+#: - the DEFAULT path, and therefore the reference - actually produces. Measured
+#: 2026-08-24 on the same move, reading the `dt`s from the page: mean 31.9 ms,
+#: median 31.5, minimum 16, and only 5% below 16.7 ms.
 #:
-#: Il motore del binario, che e' il RIPIEGO quando il generatore Python manca,
-#: girava invece sul default compilato di 10 ms e dava media 14,2 ms con minimo
-#: 2 ms: **79 dt su 115 piu' fitti di quanto un 60 Hz reale possa consegnare**,
-#: perche' Firefox unisce i mousemove al ritmo di refresh. Due percorsi per la
-#: stessa cosa che si comportavano in modo diverso, e il piu' veloce era quello
-#: che nessun hardware puo' produrre.
+#: The binary's own engine, which is the FALLBACK when the Python generator is
+#: missing, ran instead on the compiled default of 10 ms and gave a mean of
+#: 14.2 ms with a minimum of 2 ms: **79 dt out of 115 tighter than a real 60 Hz
+#: can deliver**, because Firefox coalesces mousemoves at the refresh rate. Two
+#: paths for the same thing behaving differently, and the faster one was the one
+#: no hardware can produce.
 #:
-#: INTERO per forza: Juggler la legge con `getIntPref`, e una pref del tipo
-#: sbagliato arriva col nome giusto e non viene letta.
+#: An INTEGER of necessity: Juggler reads it with `getIntPref`, and a pref of the
+#: wrong type arrives under the right name and is never read.
 HUMANIZE_STEP_MS = 32
 
 
@@ -1939,9 +1938,9 @@ def humanize_prefs(humanize: Any) -> Dict[str, Any]:
     return {
         "stealthfox.humanize": True,
         "stealthfox.humanize.maxTime": str(humanize_max_seconds(humanize)),
-        # Dichiarata qui e non lasciata al default compilato nel motore: era
-        # l'unica dei tre fratelli `stealthfox.humanize*` che il core non
-        # nominava, quindi la decideva il binario da solo.
+        # Declared here rather than left to the engine's compiled default: it
+        # was the only one of the three `stealthfox.humanize*` siblings the core
+        # did not name, so the binary decided it on its own.
         "stealthfox.humanize.stepMs": HUMANIZE_STEP_MS,
     }
 
@@ -2023,10 +2022,10 @@ def compose_session_prefs(
         extra_prefs=extra_prefs,
         virtual_display=virtual_display,
     )
-    # ⛔ NESSUNA pref di instradamento esce da qui, per nessuno schema: la
-    # strada e' il comando del motore, e chi non puo' mandarlo non riceve un
-    # proxy. `delegates_auth` era l'interruttore della terza strada ed e'
-    # sparito con lei - vedi il docstring di `_proxy`.
+    # ⛔ NO routing pref leaves here, for any scheme: the road is the engine's
+    # command, and whoever cannot send it gets no proxy. `delegates_auth` was
+    # the switch of the third road and went away with it - see the `_proxy`
+    # docstring.
     playwright_proxy = configure_proxy(proxy, prefs) if proxy else None
 
     # ⛔ UNCONDITIONAL, and the reason is REALNESS - not the launch bug it also

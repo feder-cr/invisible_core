@@ -111,7 +111,8 @@ _INDEP = _load("priors_independent.json")
 # cores are OS-level, ~independent of GPU given the OS (browserforge confirms), so this is a
 # root marginal - NOT conditioned on gpu_class/intra_tier. Fixes the old CPT over-representing
 # 6 cores (~28% vs real ~2%). NB: screen size + dpr are intentionally LEFT on their existing
-# nodes (user 2026-06-18: "non modificare dpr e le size degli screen, rompono sempre").
+# nodes (owner's instruction, 2026-06-18: do not touch dpr or the screen sizes,
+# they always break).
 _CORES_MARGINAL = [
     {"value": int(e["value"]), "prob": e["prob"]}
     for e in _load("win_hw_marginals.json")["cores"]

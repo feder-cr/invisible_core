@@ -497,15 +497,15 @@ def test_the_font_manifest_travels_with_the_profile():
     from invisible_core._fpforge import generate_profile
     manifest = generate_profile(42).font.manifest
     assert manifest.count("\nF|") >= 60, "famiglie assenti dal manifest"
-    assert manifest.count("\nA|") >= 40, "tabella alias assente"
-    assert manifest.count("\nS|") >= 100, "tabella fallback per script assente"
-    #: ⛔ La riga `L|` NON si asserisce piu', ed e' stata tolta dal
-    #: manifest il 2026-08-17. Era dati morti protetti da un test: il
-    #: parser del motore ha rimosso quel ramo quando la scala di copertura
-    #: e' passata a `zoom.stealth.canvas.alpha_ladder`, e il manifest
-    #: IMPACCHETTATO non la conteneva gia' - quindi ogni lancio nudo girava
-    #: gia' senza. Tenerla qui rendeva le due copie diverse per una riga
-    #: sola, cioe' impediva il confronto secco che ora le sorveglia
+    assert manifest.count("\nA|") >= 40, "the alias table is missing"
+    assert manifest.count("\nS|") >= 100, "the per-script fallback table is missing"
+    #: ⛔ The `L|` row is NOT asserted any more, and it was taken out of the
+    #: manifest on 2026-08-17. It was dead data protected by a test: the
+    #: engine's parser dropped that branch when the coverage ladder moved to
+    #: `zoom.stealth.canvas.alpha_ladder`, and the PACKAGED manifest did not
+    #: carry it already - so every bare launch was already running without it.
+    #: Keeping it here made the two copies differ by one single row, which is
+    #: to say it prevented the flat comparison that now watches them
     #: (`test_the_two_manifest_copies_are_byte_identical`).
     prefs = _prefs()
     assert prefs["zoom.stealth.fonts.manifest"] == manifest
@@ -527,8 +527,8 @@ def test_the_manifest_is_ascii_and_carries_no_control_bytes():
         assert chr(code) not in FONT_MANIFEST, (
             f"byte di controllo 0x{code:02X} nel manifest")
     assert "HKLM\\" in FONT_MANIFEST, (
-        "i backslash del commento sul registro sono stati mangiati: il letterale "
-        "non e' piu' raw")
+        "the backslashes in the registry comment were eaten: the literal is "
+        "no longer raw")
     assert FONT_MANIFEST.endswith("\n")
 
 
@@ -575,120 +575,120 @@ def replace_screen_depth(profile, depth):
     return dataclasses.replace(profile, screen=screen)
 
 
-# ── il manifest esiste in DUE copie, e devono essere la stessa ──────────────
+# ── the manifest exists in TWO copies, and they must be the same ──────────────
 
 def test_the_two_manifest_copies_are_byte_identical():
-    """`FONT_MANIFEST` qui e `browser/fonts/bundle-fonts.list` nell'albero
-    Firefox sono lo stesso documento in due repository, e nessuno li confrontava.
+    """`FONT_MANIFEST` here and `browser/fonts/bundle-fonts.list` in the Firefox
+    tree are the same document in two repositories, and nobody compared them.
 
-    Perche' due copie esistono: il motore legge il file IMPACCHETTATO quando e'
-    lanciato senza invisible_core (il pavimento deliberato), e legge questa
-    costante attraverso `zoom.stealth.fonts.manifest` quando il core lo lancia.
-    Due lettori, due file, e fino al 2026-08-17 nessun controllo.
+    Why two copies exist: the engine reads the PACKAGED file when it is launched
+    without invisible_core (the deliberate floor), and reads this constant
+    through `zoom.stealth.fonts.manifest` when the core launches it. Two
+    readers, two files, and until 2026-08-17 no check at all.
 
-    Quanto vicino sia andata: lo stesso giorno le due copie sono state diverse
-    tre volte in poche ore - una volta per l'ORDINE delle famiglie, perche'
-    l'inserimento era stato fatto a mano invece che rigenerando, e due volte
-    perche' una modifica al generatore era arrivata a una sola delle due. Nessuna
-    di quelle tre e' stata trovata da un test: le ho viste confrontando a mano.
+    How close it came: on that same day the two copies differed three times in a
+    few hours - once over the ORDER of the families, because the insertion had
+    been done by hand instead of regenerating, and twice because a change to the
+    generator had reached only one of them. None of those three was found by a
+    test: I saw them comparing by hand.
 
-    SALTA quando l'albero Firefox non c'e', perche' questo pacchetto si installa
-    anche da solo. Un salto dichiarato non e' un verde.
+    SKIPS when the Firefox tree is absent, because this package installs on its
+    own too. A declared skip is not a green.
     """
     import os
     import pathlib
     from invisible_core._fpforge.profile import FONT_MANIFEST
 
     src = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", "C:/ff/source"))
-    lista = src / "browser" / "fonts" / "bundle-fonts.list"
-    if not lista.is_file():
-        pytest.skip(f"nessun albero Firefox in {src}: la seconda copia non c'e'")
+    manifest_file = src / "browser" / "fonts" / "bundle-fonts.list"
+    if not manifest_file.is_file():
+        pytest.skip(f"no Firefox tree at {src}: the second copy is not here")
 
-    altra = lista.read_text(encoding="utf-8")
-    if FONT_MANIFEST == altra:
+    other = manifest_file.read_text(encoding="utf-8")
+    if FONT_MANIFEST == other:
         return
 
     a = FONT_MANIFEST.splitlines()
-    b = altra.splitlines()
-    solo_qui = [r for r in a if r not in b][:5]
-    solo_la = [r for r in b if r not in a][:5]
-    ordine = (sorted(a) == sorted(b))
+    b = other.splitlines()
+    only_here = [r for r in a if r not in b][:5]
+    only_there = [r for r in b if r not in a][:5]
+    order = (sorted(a) == sorted(b))
     raise AssertionError(
-        "le due copie del manifest non coincidono.\n"
-        f"  righe qui: {len(a)}, nell'albero: {len(b)}\n"
-        f"  stesso INSIEME di righe ma ordine diverso: {ordine}\n"
-        f"  solo nella costante: {solo_qui}\n"
-        f"  solo nel file: {solo_la}\n"
-        "Rigenera con scripts/gen_bundle_font_manifest.py e ricostruisci la "
-        "costante DAL FILE, invece di modificarla a mano: l'ordine e' cio' che "
-        "si rompe per primo.")
+        "the two copies of the manifest do not match.\n"
+        f"  rows here: {len(a)}, in the tree: {len(b)}\n"
+        f"  same SET of rows but a different order: {order}\n"
+        f"  only in the constant: {only_here}\n"
+        f"  only in the file: {only_there}\n"
+        "Regenerate with scripts/gen_bundle_font_manifest.py and rebuild the "
+        "constant FROM THE FILE, instead of editing it by hand: the order is "
+        "what breaks first.")
 MODE_PREF = "gfx.font_rendering.cleartype_params.rendering_mode"
 
 
 def test_the_cleartype_rendering_mode_stays_DEFAULT():
-    """0 = DWRITE_RENDERING_MODE_DEFAULT, pinnata perche' un cambio sia una scelta.
+    """0 = DWRITE_RENDERING_MODE_DEFAULT, pinned so a change is a choice.
 
-    ⛔ Questo valore e' stato 5 (NATURAL_SYMMETRIC) fino al 2026-08-17, e nessun
-    test lo fissava: la correzione ha cambiato la rasterizzazione del testo di
-    OGNI profilo e la suite intera e' passata in silenzio, 906 verdi. Un valore
-    che sposta il fingerprint di tutti e che nessuno asserisce e' un valore che
-    qualcuno rimettera' a posto "per pulizia".
+    ⛔ This value was 5 (NATURAL_SYMMETRIC) until 2026-08-17, and no test held
+    it: the correction changed the text rasterisation of EVERY profile and the
+    whole suite went through in silence, 906 green. A value that moves
+    everybody's fingerprint and that nobody asserts is a value somebody will put
+    back "for tidiness".
 
-    **Perche' 0 e non un altro dei sei.** Misurato contro un retail 151.0 firmato
-    su dieci disegni con lo screenshot privilegiato: il retail varia 9-17 livelli
-    di grigio col CORPO del testo, la modalita' 5 dava 16-19 a qualunque corpo e
-    ZERO coincidenze su dieci, la 0 ne da' sei e azzecca tutti i corpi piccoli.
-    Sull'insieme dei grigi, che conta piu' del conteggio: il retail ne usa 20, con
-    la 0 ne condividiamo 17 con soli 2 estranei, con la 5 ne condividevamo 16 con
-    6 estranei.
+    **Why 0 and not one of the other five.** Measured against a signed retail
+    151.0 over ten drawings with the privileged screenshot: retail varies 9-17
+    grey levels with the text SIZE, mode 5 gave 16-19 at any size and ZERO
+    matches out of ten, mode 0 gives six and gets every small size right. On the
+    SET of greys, which counts for more than the count: retail uses 20, with 0 we
+    share 17 with only 2 strangers, with 5 we shared 16 with 6 strangers.
 
-    **E 0 non e' "chiedere alla macchina".** DEFAULT dice a DirectWrite di
-    scegliere dal corpo e dalla tabella `gasp` del font: il corpo lo decide la
-    pagina, il font e' il nostro. Nessun valore entra dall'host, quindi la regola
-    7-quater regge. Le altre cinque sono costanti che sopprimono quella scelta.
+    **And 0 is not "asking the machine".** DEFAULT tells DirectWrite to choose
+    from the size and the font's `gasp` table: the size is decided by the page,
+    the font is ours. No value enters from the host, so rule 7-quater holds. The
+    other five are constants that suppress that choice.
 
-    Il tavolo completo dello sweep sta in `70-known-bugs.md` [B152].
+    The full sweep table is in `70-known-bugs.md` [B152].
     """
-    modi = set()
-    for seme in (0xB005, 0xC0FFEE, 42, 970411, 1, 0xFFFF):
-        prefs = translate_profile_to_prefs(generate_profile(seme))
+    modes = set()
+    for seed in (0xB005, 0xC0FFEE, 42, 970411, 1, 0xFFFF):
+        prefs = translate_profile_to_prefs(generate_profile(seed))
         assert MODE_PREF in prefs, (
-            "la modalita' di rendering ClearType non e' piu' emessa. Senza di lei "
-            "DirectWrite legge le impostazioni della MACCHINA, che e' esattamente "
-            "la dipendenza dall'host che questa dichiarazione chiude")
-        modi.add(prefs[MODE_PREF])
-    assert modi == {0}, (
-        f"la modalita' di rendering ClearType emessa e' {sorted(modi)}, non 0. "
+            "the ClearType rendering mode is no longer emitted. Without it "
+            "DirectWrite reads the MACHINE's settings, which is exactly the "
+            "dependency on the host this declaration closes")
+        modes.add(prefs[MODE_PREF])
+    assert modes == {0}, (
+        f"la modalita' di rendering ClearType emessa e' {sorted(modes)}, non 0. "
         f"0 e' DWRITE_RENDERING_MODE_DEFAULT, l'unico valore che lascia a "
         f"DirectWrite la scelta per CORPO del testo, che e' cio' che produce la "
-        f"variazione 9-17 di un Firefox vero. Un valore fisso la sopprime: la 5 "
-        f"misurava 0 coincidenze su 10 contro il retail. Se il cambio e' voluto, "
-        f"rimisura contro un retail della major che dichiariamo e riscrivi questo "
-        f"test con i numeri nuovi.")
+        f"9-17 variation of a real Firefox. A fixed value suppresses it: 5 "
+        f"measured 0 matches out of 10 against retail. If the change is wanted, "
+        f"re-measure against a retail of the major we declare and rewrite this "
+        f"test with the new numbers.")
 
 
 def test_the_coverage_ladder_is_still_declared_and_has_its_endpoints():
-    """La scala resta, e il 2026-08-17 ha misurato PERCHE' non va toccata.
+    """The ladder stays, and 2026-08-17 measured WHY it must not be touched.
 
-    Spegnerla migliorava il conteggio dei livelli - 9 coincidenze su 10 contro le
-    6 - e rovinava i valori: 17 grigi su 20 che un Firefox vero non produce mai,
-    contro 2. Ottimizzare il conteggio avrebbe distrutto la cosa che il conteggio
-    misura, ed e' la ragione per cui questo test esiste accanto a quello sopra.
+    Turning it off improved the level COUNT - 9 matches out of 10 against 6 - and
+    ruined the values: 17 greys out of 20 that a real Firefox never produces,
+    against 2. Optimising the count would have destroyed the thing the count
+    measures, and that is why this test sits beside the one above.
 
-    Gli estremi non si toccano: 0 e 255 sono trasparente pieno e opaco pieno, e
-    spostarli sposterebbe il fondo e l'inchiostro invece dei bordi.
+    The endpoints are untouchable: 0 and 255 are fully transparent and fully
+    opaque, and moving them would move the ground and the ink instead of the
+    edges.
     """
-    for seme in (0xB005, 0xC0FFEE, 42):
-        prefs = translate_profile_to_prefs(generate_profile(seme))
-        scala = prefs.get("zoom.stealth.text.coverage_ladder")
-        assert scala, (
-            "la scala di copertura non e' piu' dichiarata. Su Linux FreeType "
-            "produce 193-256 livelli dove DirectWrite ne fa 9-19: senza la scala "
-            "il conteggio dei livelli diventa un tell cross-OS che si legge "
-            "contando, senza bisogno di nessun hash")
-        v = [int(x) for x in scala.split(",")]
+    for seed in (0xB005, 0xC0FFEE, 42):
+        prefs = translate_profile_to_prefs(generate_profile(seed))
+        ladder = prefs.get("zoom.stealth.text.coverage_ladder")
+        assert ladder, (
+            "the coverage ladder is no longer declared. On Linux FreeType "
+            "produces 193-256 levels where DirectWrite makes 9-19: without the "
+            "ladder the level count becomes a cross-OS tell you read by "
+            "counting, with no hash needed at all")
+        v = [int(x) for x in ladder.split(",")]
         assert v[0] == 0 and v[-1] == 255, (
-            f"gli estremi della scala sono {v[0]} e {v[-1]}, non 0 e 255. "
-            f"Spostarli sposta il fondo e l'inchiostro, non i bordi")
-        assert v == sorted(v), f"la scala non e' monotona: {v}"
+            f"the ladder's endpoints are {v[0]} and {v[-1]}, not 0 and 255. "
+            f"Moving them moves the ground and the ink, not the edges")
+        assert v == sorted(v), f"the ladder is not monotonic: {v}"
         assert len(set(v)) == len(v), f"la scala ha pioli ripetuti: {v}"

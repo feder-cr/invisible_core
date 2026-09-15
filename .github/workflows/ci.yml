@@ -84,26 +84,25 @@ jobs:
           print(f"{passed} tests ran")
           PY
 
-  # UN SOLO CONTESTO PER LA BRANCH PROTECTION, e questa e' la ragione per cui
-  # esiste. Prima la protezione elencava `tests (windows-latest)` e
-  # `tests (ubuntu-latest)`: nomi veri quando la matrice aveva il solo asse
-  # del sistema operativo, e mai piu' emessi da quando ha guadagnato l'asse
-  # della versione di Python. Misurato 2026-08-13 sul commit c5d7179 - GitHub
-  # riceveva otto contesti `tests (<os>, <ver>)` e ne aspettava due che nessun
-  # job produce piu'. Ogni push stampava "2 of 2 required status checks are
-  # expected" e passava lo stesso, perche' enforce_admins era false: una
-  # protezione decorativa. E' la stessa forma del difetto che questo progetto
-  # registra da mesi, "un job che non gira e' indistinguibile da un job che
-  # passa", applicata alla protezione invece che al workflow.
+  # ONE CONTEXT FOR THE BRANCH PROTECTION, and that is the reason this job
+  # exists. The protection used to list `tests (windows-latest)` and
+  # `tests (ubuntu-latest)`: real names when the matrix had only the operating
+  # system axis, and never emitted again once it gained the Python version axis.
+  # Measured 2026-08-13 on commit c5d7179 - GitHub received eight
+  # `tests (<os>, <ver>)` contexts and waited for two no job produces any more.
+  # Every push printed "2 of 2 required status checks are expected" and went
+  # through regardless, because enforce_admins was false: a decorative
+  # protection. It is the same shape as the defect this project has been
+  # recording for months, "a job that does not run is indistinguishable from a
+  # job that passes", applied to the protection instead of to the workflow.
   #
-  # Elencare gli otto nomi veri avrebbe riparato oggi e rotto al prossimo
-  # cambio di matrice, nello stesso identico modo. Questo job dipende dalla
-  # matrice INTERA, quindi il suo nome non cambia mai: e' l'unico contesto da
-  # richiedere.
+  # Listing the eight real names would have repaired it today and broken at the
+  # next matrix change, in exactly the same way. This job depends on the WHOLE
+  # matrix, so its name never changes: it is the only context to require.
   #
-  # `if: always()` perche' senza, un `needs` fallito SALTA questo job invece di
-  # farlo fallire - e un contesto saltato non e' un contesto rosso, e' un
-  # contesto che non arriva. Sarebbe lo stesso buco, un piano piu' in alto.
+  # `if: always()` because without it a failed `needs` SKIPS this job instead of
+  # failing it - and a skipped context is not a red context, it is a context
+  # that never arrives. That would be the same hole, one floor up.
   gate:
     needs: [tests]
     if: always()

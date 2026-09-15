@@ -159,137 +159,133 @@ def configure_proxy(
     if parse_proxy(proxy) is None:
         return None
 
-    # ⛔ QUI E' STATA PROVATA `network.dns.disableIPv6 = True` E TOLTA: E' INERTE
-    # DIETRO UN PROXY, e una patch che non sposta nessuna misura non e' una
-    # patch.
+    # ⛔ `network.dns.disableIPv6 = True` WAS TRIED HERE AND REMOVED: IT IS INERT
+    # BEHIND A PROXY, and a patch that moves no measurement is not a patch.
     #
-    # L'idea era rendere il profilo IPv4-only per intero: i candidati WebRTC
-    # IPv6 li scartiamo gia' dietro proxy (l'srflx IPv6 non e' offuscato
-    # dall'mDNS e porterebbe l'indirizzo globale VERO), ma l'HTTP poteva ancora
-    # uscire in IPv6 - misurato il 2026-08-25 su un peer residenziale
-    # dual-stack: dichiaravamo `73.209.132.45` mentre la stessa pagina
-    # raggiungeva un servizio di echo su `2603:300a:92e:8600:...`.
+    # The idea was to make the profile IPv4-only throughout: IPv6 WebRTC
+    # candidates are already dropped behind a proxy (an IPv6 srflx is not
+    # obscured by mDNS and would carry the REAL global address), but HTTP could
+    # still leave over IPv6 - measured 2026-08-25 on a dual-stack residential
+    # peer: we declared `73.209.132.45` while the same page reached an echo
+    # service on `2603:300a:92e:8600:...`.
     #
-    # La pref pero' non cambia niente, e il controfattuale lo dimostra: applicata
-    # e RILETTA dal profilo del browser (`network.dns.disableIPv6 true`), l'echo
-    # continuava a uscire sullo stesso IPv6. La ragione e' `socks_remote_dns`:
-    # Firefox consegna al proxy il NOME, non un indirizzo, quindi e' il proxy a
-    # risolvere e a scegliere la famiglia. Il resolver di Firefox non viene
-    # nemmeno interpellato, e lo stesso vale per un proxy HTTP, dove il nome
-    # viaggia dentro la CONNECT.
+    # The pref changes nothing, and the counterfactual proves it: applied and
+    # READ BACK from the browser's profile (`network.dns.disableIPv6 true`), the
+    # echo still came out on the same IPv6. The reason is `socks_remote_dns`:
+    # Firefox hands the proxy the NAME, not an address, so it is the proxy that
+    # resolves and picks the family. Firefox's resolver is never consulted at
+    # all, and the same holds for an HTTP proxy, where the name travels inside
+    # the CONNECT.
     #
-    # Conseguenza da sapere: **la famiglia di indirizzi dietro un proxy non la
-    # decidiamo noi.** Se il peer ha IPv6 e il sito e' dual-stack, usciamo in
-    # IPv6 mentre WebRTC annuncia un IPv4. Chiuderlo davvero vuol dire
-    # dichiarare ANCHE un srflx IPv6 con l'uscita IPv6 del proxy (scopribile:
-    # `api6.ipify.org` attraverso il proxy risponde), non spegnere IPv6 da
-    # questo lato.
+    # Worth knowing: **the address family behind a proxy is not ours to decide.**
+    # If the peer has IPv6 and the site is dual-stack, we leave over IPv6 while
+    # WebRTC announces an IPv4. Actually closing that means ALSO declaring an
+    # IPv6 srflx with the proxy's IPv6 exit (discoverable: `api6.ipify.org`
+    # answers through the proxy), not switching IPv6 off from this side.
 
-    risultato = dict(proxy)
+    result = dict(proxy)
 
-    # ⛔ QUANDO IL PROXY INCIAMPA, IL RIPIEGO DI FIREFOX E' USCIRE IN CHIARO.
+    # ⛔ WHEN THE PROXY STUMBLES, FIREFOX'S FALLBACK IS TO GO OUT IN THE CLEAR.
     #
-    # `network.proxy.allow_bypass` vale `true` di default - letto dall'header
-    # GENERATO della nostra build, `dist/include/mozilla/StaticPrefList_network.h`,
-    # non dallo yaml - e un canale che chiede `bypassProxy` salta
-    # `ResolveProxy()` del tutto (`netwerk/protocol/http/nsHttpChannel.cpp`, la
-    # guardia `!BypassProxy()`). Quel canale poi risolve il nome col resolver
-    # dell'utente, perche' senza `mProxyInfo` il DNS viene FORZATO con
-    # `RESOLVE_IGNORE_SOCKS_DNS` (`DnsAndConnectSocket.cpp`; il commento
-    # upstream lo dice: "force resolution despite global proxy-DNS
-    # configuration"). Non e' solo DNS: e' una connessione DIRETTA, con l'IP
-    # vero, e parte proprio nell'istante in cui il proxy sta gia' fallendo.
+    # `network.proxy.allow_bypass` is `true` by default - read from our build's
+    # GENERATED header, `dist/include/mozilla/StaticPrefList_network.h`, not from
+    # the yaml - and a channel asking for `bypassProxy` skips `ResolveProxy()`
+    # entirely (`netwerk/protocol/http/nsHttpChannel.cpp`, the `!BypassProxy()`
+    # guard). That channel then resolves the name with the user's resolver,
+    # because without `mProxyInfo` the DNS is FORCED with
+    # `RESOLVE_IGNORE_SOCKS_DNS` (`DnsAndConnectSocket.cpp`; the upstream comment
+    # says it: "force resolution despite global proxy-DNS configuration"). It is
+    # not only DNS: it is a DIRECT connection, with the real IP, and it starts at
+    # the very moment the proxy is already failing.
     #
-    # Chi la usa: `services/settings/Utils.sys.mjs` (`fallbackOrReject`, su
-    # onerror/ontimeout/onabort) e `TelemetrySend.sys.mjs` (`retryRequest`).
-    # Remote Settings gira a ogni sessione, quindi l'occasione non e' rara.
+    # Who uses it: `services/settings/Utils.sys.mjs` (`fallbackOrReject`, on
+    # onerror/ontimeout/onabort) and `TelemetrySend.sys.mjs` (`retryRequest`).
+    # Remote Settings runs every session, so the occasion is not rare.
     #
-    # MISURATO il 2026-08-25 con un SOCKS5 locale che rifiuta apposta i due
-    # host e registra ogni CONNECT - e il registro E' il controllo, perche' 98
-    # CONNECT tutti per NOME dimostrano che la risoluzione remota funzionava:
+    # MEASURED 2026-08-25 with a local SOCKS5 that refuses those two hosts on
+    # purpose and logs every CONNECT - and the log IS the control, because 98
+    # CONNECTs all by NAME prove remote resolution was working:
     #
-    #   senza questa pref  ->  43 rifiuti, e `firefox.settings.services.mozilla.com`
-    #                          RISOLTO 13 volte sul resolver di casa
-    #   con questa pref    ->  45 rifiuti, e ZERO risoluzioni locali; restano
-    #                          i soli `127.0.0.1`, `local`, `localhost`, cioe'
-    #                          lo stesso insieme di un SOCKS5 che non fallisce
+    #   without this pref ->  43 refusals, and `firefox.settings.services.mozilla.com`
+    #                         RESOLVED 13 times on the home resolver
+    #   with this pref    ->  45 refusals, and ZERO local resolutions; only
+    #                         `127.0.0.1`, `local` and `localhost` remain, which
+    #                         is the same set as a SOCKS5 that does not fail
     #
-    # In entrambi i bracci la navigazione resta ok e il relay rilancia
-    # normalmente detectportal, push.services, normandy e il resto: la pref
-    # toglie il RIPIEGO, non il traffico.
+    # In both arms browsing stays fine and the relay forwards detectportal,
+    # push.services, normandy and the rest as usual: the pref removes the
+    # FALLBACK, not the traffic.
     #
-    # ⛔ VALE PER OGNI SCHEMA, HTTP COMPRESO, e sta DOPO il bivio apposta: le
-    # due validazioni (la porta, le credenziali che non si possono consegnare)
-    # devono poter sollevare PRIMA, lasciando il dict come l'hanno trovato. La
-    # prima stesura la metteva prima e sporcava le prefs su un endpoint
-    # malformato: due test esistenti sono diventati rossi e avevano ragione
-    # loro.
+    # ⛔ IT HOLDS FOR EVERY SCHEME, HTTP INCLUDED, and it sits AFTER the fork on
+    # purpose: the two validations (the port, and credentials that cannot be
+    # delivered) must be able to raise FIRST, leaving the dict as they found it.
+    # The first draft put it before and dirtied the prefs on a malformed
+    # endpoint: two existing tests went red and they were right.
     #
-    # Sul ramo HTTP questo NON e' una pref di instradamento e non tocca
-    # l'autenticazione: il contratto pinnato da
-    # `test_il_percorso_che_delega_NON_cambia_comportamento` diceva "chi delega
-    # non scrive prefs" per proteggere ROUTING e 407, e adesso lo dice con
-    # quelle parole invece che con `prefs == {}`.
+    # On the HTTP branch this is NOT a routing pref and does not touch
+    # authentication: the contract pinned by
+    # `test_the_delegating_path_does_NOT_change_behaviour` said "whoever
+    # delegates writes no prefs" to protect ROUTING and 407, and it now says that
+    # in those words instead of with `prefs == {}`.
     prefs["network.proxy.allow_bypass"] = False
 
-    # ⛔ E LA SECONDA META', PERCHE' LA PRIMA NON BASTA SU HTTP.
+    # ⛔ AND THE SECOND HALF, BECAUSE THE FIRST IS NOT ENOUGH ON HTTP.
     #
-    # `allow_bypass` chiude i CANALI che ripiegano in diretta. Ma tre superfici
-    # non sono canali e chiamano `AsyncResolveNative` senza passare da nessun
-    # filtro: `NetworkConnectivityService`, le sonde dell'euristica DoH, e il
-    # resolver ICE. Il cancello del motore
-    # (`netwerk/dns/DNSServiceBase.cpp`, `DNSForbiddenByActiveProxy`) le
-    # fermerebbe, ma sa riconoscere solo un proxy scritto nelle
-    # `network.proxy.*` - e sul ramo HTTP non ne scriviamo nessuna, perche'
-    # instrada Playwright per canale. Quindi `network.proxy.type` resta 5 e il
-    # cancello non si arma.
+    # `allow_bypass` closes the CHANNELS that fall back to direct. But three
+    # surfaces are not channels and call `AsyncResolveNative` without passing any
+    # filter: `NetworkConnectivityService`, the DoH heuristic's probes, and the
+    # ICE resolver. The engine's own gate
+    # (`netwerk/dns/DNSServiceBase.cpp`, `DNSForbiddenByActiveProxy`) would stop
+    # them, but it can only recognise a proxy written into the `network.proxy.*`
+    # prefs - and on the HTTP branch we write none, because Playwright routes
+    # per channel. So `network.proxy.type` stays 5 and the gate never arms.
     #
-    # Il motore non puo' dedurlo: glielo diciamo noi. E' la regola 1 - il core
-    # dichiara, il motore obbedisce - applicata al DNS.
+    # The engine cannot deduce it: we tell it. That is rule 1 - the core
+    # declares, the engine obeys - applied to DNS.
     #
-    # MISURATO il 2026-08-25 dietro un proxy HTTP, due giri identici, con la
-    # sola `allow_bypass` gia' attiva: restavano `example.org` 28,
-    # `ipv4only.arpa` 12, `cloudflare-dns.com` 6 e - la peggiore -
-    # `stunprobe.invalid` 6, che e' un nome scelto DALLA PAGINA via
-    # `iceServers`. Dietro SOCKS gli stessi nomi facevano gia' 0.
+    # MEASURED 2026-08-25 behind an HTTP proxy, two identical rounds, with only
+    # `allow_bypass` already active: `example.org` 28 remained, `ipv4only.arpa`
+    # 12, `cloudflare-dns.com` 6 and - the worst - `stunprobe.invalid` 6, which
+    # is a name chosen BY THE PAGE through `iceServers`. Behind SOCKS the same
+    # names were already at 0.
     #
-    # L'endpoint del proxy continua a risolversi: sia il livello SOCKS
-    # (`nsSOCKSIOLayer`) sia `DnsAndConnectSocket` chiedono la loro risoluzione
-    # con `RESOLVE_IGNORE_SOCKS_DNS`, che il cancello esenta per primo. Non e'
-    # una deroga che aggiungiamo noi: e' quella che gia' regge il ramo SOCKS.
+    # The proxy's own endpoint still resolves: both the SOCKS layer
+    # (`nsSOCKSIOLayer`) and `DnsAndConnectSocket` ask for their resolution with
+    # `RESOLVE_IGNORE_SOCKS_DNS`, which the gate exempts first. That is not an
+    # exception we add: it is the one already holding up the SOCKS branch.
     prefs["zoom.stealth.dns.no_local_resolution"] = True
 
-    # ⛔ E L'UDP DI ICE ESCE LO STESSO, se il server e' scritto come
-    # INDIRIZZO NUMERICO invece che come nome. Il cancello DNS qui sopra non
-    # lo puo' fermare, perche' un letterale non passa dal resolver.
+    # ⛔ AND ICE's UDP LEAVES ANYWAY, if the server is written as a NUMERIC
+    # ADDRESS rather than a name. The DNS gate above cannot stop it, because a
+    # literal never reaches the resolver.
     #
-    # Misurato il 2026-08-26 su tre fornitori e due schemi: con uno STUN
-    # numerico il motore riceve il MAPPED-ADDRESS con l'indirizzo VERO della
-    # macchina, mentre la pagina vede l'uscita del proxy perche' il candidato
-    # reale viene riscritto. Una fuga che nessun controllo lato pagina puo'
-    # vedere, e che vede solo chi gestisce lo STUN.
+    # Measured 2026-08-26 across three providers and two schemes: with a numeric
+    # STUN the engine receives the MAPPED-ADDRESS carrying the machine's REAL
+    # address, while the page sees the proxy's exit because the real candidate is
+    # rewritten. A leak no page-side check can see, and that only whoever runs
+    # the STUN does.
     #
-    # Le due prefs stanno qui insieme apposta: dicono al motore la stessa
-    # cosa da due lati - dietro un proxy nulla esce per una strada che il
-    # proxy non copre - e una decisione sola le emette entrambe.
+    # The two prefs sit here together on purpose: they tell the engine the same
+    # thing from two sides - behind a proxy nothing leaves by a road the proxy
+    # does not cover - and one decision emits both.
     prefs["zoom.stealth.webrtc.no_direct_udp"] = True
-    return risultato
+    return result
 
 
-#: ⛔ NO, e questa costante esiste perche' la risposta non e' ovvia e una
-#: decisione ne dipende. Il motore ha il codice per farlo
-#: (`netwerk/socket/nsSOCKSUDPIOLayer.{h,cpp}`, agganciato in `nsUDPSocket.cpp`)
-#: ma e' dietro `network.proxy.socks_remote_udp`, che non impostiamo. Senza,
-#: **l'UDP scavalca il proxy** e uno STUN raggiunto per quella via risponde con
-#: l'indirizzo VERO della macchina.
+#: ⛔ NO, and this constant exists because the answer is not obvious and a
+#: decision depends on it. The engine has the code for it
+#: (`netwerk/socket/nsSOCKSUDPIOLayer.{h,cpp}`, hooked up in `nsUDPSocket.cpp`)
+#: but it sits behind `network.proxy.socks_remote_udp`, which we do not set.
+#: Without it, **UDP goes around the proxy**, and a STUN reached that way answers
+#: with the machine's REAL address.
 #:
-#: Chi la legge: `_geo._srflx_soppresso`. Smettere di dichiarare un srflx ha
-#: senso solo se quello VERO nascera' con l'indirizzo giusto, e con l'UDP che
-#: scavalca il proxy nascerebbe con l'indirizzo di casa. Cioe' la condizione
-#: "l'uscita porta UDP coerente" NON basta: serve anche che il browser quell'UDP
-#: lo mandi di la'.
+#: Who reads it: `_geo._srflx_suppressed`. Giving up on declaring an srflx only
+#: makes sense if the REAL one will be born with the right address, and with UDP
+#: going around the proxy it would be born with the home address. In other words
+#: the condition "the exit carries coherent UDP" is NOT enough: the browser also
+#: has to send that UDP over there.
 #:
-#: Il giorno in cui si accende la pref, questa costante si sposta con lei - e
-#: sono lo stesso fatto scritto in un posto solo.
-INSTRADIAMO_UDP_NEL_SOCKS = False
+#: The day the pref is switched on, this constant moves with it - and they are
+#: one fact written in one place.
+UDP_GOES_THROUGH_SOCKS = False
 

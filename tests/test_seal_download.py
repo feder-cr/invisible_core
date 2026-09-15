@@ -78,11 +78,11 @@ APP_INI = ("[App]\nVendor=Mozilla\nName=Firefox\nVersion={v}\nBuildID={b}\n\n"
            "[Gecko]\nMinVersion={v}\nMaxVersion={v}\n")
 PLAT_INI = "[Build]\nBuildID={b}\nMilestone={v}\n"
 
-# macOS non e' piu' un target di download: dal 2026-08-26 `ensure_binary` rifiuta
-# su darwin PRIMA di guardare il seal (che per le release vecchie contiene ancora
-# gli asset mac - restano leggibili come storia, ma non si scaricano piu'). La
-# gamba darwin e' quindi uscita da questa lista; il rifiuto ha un test suo,
-# `test_ensure_binary_rifiuta_macos`, piu' sotto.
+# macOS is no longer a download target: since 2026-08-26 `ensure_binary` refuses
+# on darwin BEFORE it looks at the seal (which for older releases still carries
+# the mac assets - they stay readable as history, but nothing downloads them any
+# more). The darwin leg has left this list; the refusal has a case of its own,
+# `test_ensure_binary_refuses_macos`, further down.
 PLATFORMS = [
     pytest.param("win32", id="win32-zip"),
     pytest.param("linux", id="linux-targz-loose-juggler"),
@@ -685,18 +685,19 @@ def test_the_download_path_never_installs_anything():
 
 
 @pytest.mark.unit
-def test_ensure_binary_rifiuta_macos(cache, tmp_path, monkeypatch):
-    """Su un Mac ``ensure_binary`` si ferma al confine, non tenta un download.
+def test_ensure_binary_refuses_macos(cache, tmp_path, monkeypatch):
+    """On a Mac ``ensure_binary`` stops at the boundary; it attempts no download.
 
-    macOS non e' piu' un target dal 2026-08-26. Il rifiuto arriva PRIMA di
-    guardare il seal, con un messaggio che nomina il perche' (nessun binario mac
-    pubblicato) invece di lasciare un fallimento oscuro piu' a valle. Il seal
-    passato e' non-locale e valido (una gamba linux/win reale), per superare il
-    controllo ``is_local`` e arrivare al ramo di piattaforma: e' quel ramo a
-    rifiutare, non l'assenza di un asset.
+    macOS has not been a target since 2026-08-26. The refusal comes BEFORE the
+    seal is looked at, with a message naming the reason - no mac binary is
+    published - rather than leaving an obscure failure further downstream. The
+    seal handed in is non-local and valid (a real linux/win leg) so it clears the
+    ``is_local`` check and reaches the platform branch: it is that branch which
+    refuses, not a missing asset.
     """
     plat = "win32" if sys.platform == "win32" else "linux"
     seal, _name, _bytes, _bid = publish(tmp_path, plat)
     monkeypatch.setattr(sys, "platform", "darwin")
-    with pytest.raises(NotImplementedError, match="macOS non e' piu' una piattaforma"):
+    with pytest.raises(NotImplementedError,
+                       match="macOS is no longer a supported platform"):
         ensure_binary(seal=seal)

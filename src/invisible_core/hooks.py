@@ -39,6 +39,7 @@ WHAT EACH REPOSITORY DECLARES, in its own pyproject under
 
     pytest       = true|false     run the suite before pushing
     pin          = true|false     compare the invisible-core pin (consumers)
+    english      = true|false     refuse Italian prose in a public repository
     release_tags = ["v"]          tag prefixes that mean "this is a release"
 
 The block is REQUIRED. A missing one is a refusal rather than a default,
@@ -100,7 +101,14 @@ _NAME_CHECKER = "check_forbidden_names.py"
 #: repo, which is why it is looked up in the workbench and skipped when absent.
 _DISCLOSURE_CHECKER = "check_internal_disclosure.py"
 
-_DEFAULTS: Dict[str, object] = {"pytest": True, "pin": True, "release_tags": ["v"]}
+#: ⛔ `english` DEFAULTS TO TRUE, and that direction is the whole lesson. The
+#: check used to be a script COPIED into each repository that wanted it, so a
+#: repository got it only if somebody remembered - and `invisible_core`, the
+#: package both consumers pin, is the one nobody remembered. It went a year
+#: unchecked and carried Italian into two messages a user reads. A gate that
+#: arrives only on request is a gate the next repository will not have.
+_DEFAULTS: Dict[str, object] = {"pytest": True, "pin": True, "english": True,
+                                "release_tags": ["v"]}
 
 
 class HookConfigError(Exception):
@@ -133,7 +141,8 @@ def hook_config(root: Path) -> Dict[str, object]:
         raise HookConfigError(
             f"{pyproject} has no [tool.invisible.hooks] block, so this hook "
             f"does not know which gates this repository wants. Declare it - "
-            f"pytest / pin / release_tags - rather than letting a default "
+            f"pytest / pin / english / release_tags - rather than letting a "
+            f"default "
             f"decide, because the wrong default silently skips a gate and a "
             f"skipped gate reads exactly like a passed one.")
 
@@ -196,9 +205,9 @@ def release_tag_in(push_refs: str, prefixes: Sequence[str] = ("v",)) -> str:
     return ""
 
 
-#: L'albero vuoto di git. Non e' una costante nostra: e' lo SHA-1 dell'oggetto
-#: albero senza voci, identico in ogni repository esistente, ed e' la base che
-#: git stesso usa quando "prima non c'era niente".
+#: Git's empty tree. Not a constant of ours: it is the SHA-1 of the tree object
+#: with no entries, identical in every repository that exists, and it is the base
+#: git itself uses for "there was nothing before this".
 _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
@@ -215,7 +224,7 @@ def _revision_exists(rev: str, repo: Optional[Path]) -> bool:
 
 
 def _commits_not_on_a_remote(local_sha: str, repo: Optional[Path]) -> list:
-    """I commit raggiunti da `local_sha` che nessun remoto ha ancora."""
+    """The commits reachable from `local_sha` that no remote has yet."""
     if repo is None:
         return []
     try:
@@ -232,25 +241,24 @@ def _commits_not_on_a_remote(local_sha: str, repo: Optional[Path]) -> list:
 def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
     """UN intervallo di revisioni valido per `git diff` e `git rev-list`, o "".
 
-    Il valore di ritorno e' sempre UN SOLO token, e questo e' il punto.
+    The return value is always ONE token, and that is the point.
 
-    Prima restituiva `f"{local_sha} --not --remotes"` quando il remoto non
-    aveva mai visto il ref: tre token in una stringa sola. Chi la riceveva
-    doveva indovinare se spezzarla, e i due consumatori indovinavano diverso -
-    il name scanner sopravviveva, il gate della disclosure la passava a
-    `git diff` come singola revisione e otteneva `fatal: bad revision`. Il hook
-    allora RIFIUTAVA il push, correttamente ma per un errore proprio: misurato
-    2026-08-11 spingendo il tag v18.14.0, con la conseguenza che una release
-    non poteva partire.
+    It used to return `f"{local_sha} --not --remotes"` when the remote had never
+    seen the ref: three tokens in a single string. Whoever received it had to
+    guess whether to split it, and the two consumers guessed differently - the
+    name scanner survived, while the disclosure gate handed it to `git diff` as a
+    single revision and got `fatal: bad revision`. The hook then REFUSED the
+    push, correctly but for a fault of its own: measured 2026-08-11 pushing the
+    tag v18.14.0, and the consequence was that a release could not start.
 
-    Il caso che lo scatenava e' quello di sempre per un tag: il ref e' nuovo sul
-    remoto (sha remoto tutto zeri) ma i COMMIT sono gia' pubblicati. La risposta
-    giusta li' non e' un intervallo strano, e' "non c'e' niente di nuovo da
-    leggere", e si dice con "".
+    The case that triggered it is the ordinary one for a tag: the ref is new on
+    the remote (remote sha all zeroes) while the COMMITS are already published.
+    The right answer there is not a strange range, it is "there is nothing new to
+    read", and that is said with "".
 
-    `repo` serve a chiederlo a git invece di dedurlo. Senza, la funzione resta
-    quella di prima per il caso normale e non inventa: un intervallo che non
-    puo' verificare non lo restituisce.
+    `repo` is there so this can ask git instead of deducing. Without it the
+    function behaves as it did for the ordinary case and invents nothing: a range
+    it cannot verify is a range it does not return.
     """
     for local_sha, _remote_ref, remote_sha in _ref_lines(push_refs):
         if remote_sha and set(remote_sha) == {"0"}:
@@ -260,11 +268,11 @@ def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
             piu_vecchio = nuovi[-1]
             if _revision_exists(f"{piu_vecchio}^", repo):
                 return f"{piu_vecchio}^..{local_sha}"
-            # Il piu' vecchio e' la RADICE, quindi non ha un genitore. La base
-            # giusta e' l'albero vuoto - l'hash canonico di git, uguale in ogni
-            # repository - che rende "tutto e' nuovo" un intervallo normale
-            # invece di un caso speciale. Trovato dal test: senza questo ramo
-            # git risponde "ambiguous argument <sha>^".
+            # The oldest one is the ROOT, so it has no parent. The right base is
+            # the empty tree - git's canonical hash, the same in every repository
+            # - which turns "everything is new" into an ordinary range instead of
+            # a special case. Found by the test: without this branch git answers
+            # "ambiguous argument <sha>^".
             return f"{_EMPTY_TREE}..{local_sha}"
         return f"{remote_sha}..{local_sha}"
     return ""
@@ -491,6 +499,59 @@ def main(
             if rc:
                 return rc
             ran.append("internals")
+
+    # --- the language ------------------------------------------------
+    # ⛔ THIS ONE DOES NOT LIVE IN THE WORKBENCH, AND THAT IS THE POINT. Every
+    # gate above is an external script found by walking up from the repo, so
+    # from a git WORKTREE - which rule 17 says is where all the work happens -
+    # the hook cannot find it and prints `SKIPPED: name scan, disclosure scan`
+    # in a line that reads like a normal one. This check ships inside the
+    # package both repos already depend on, so it is present wherever the core
+    # is, worktree or clone or runner, and it has nothing to skip.
+    #
+    # It also answers about the repository being PUSHED rather than about the
+    # one it lives in: the tree is an argument. The script version could only
+    # judge its own repo while looking like it judged whichever you pointed it
+    # at, and printed a clean bill for the wrong tree on 2026-09-15.
+    setting = env.get("INVISIBLE_ENGLISH_CHECK")
+    if not cfg["english"]:
+        skipped.append("language")
+    elif setting == "skip":
+        _say("WARNING: INVISIBLE_ENGLISH_CHECK=skip. Nothing checked this push "
+             "for Italian prose in a public repository.")
+        skipped.append("language")
+    else:
+        # ⛔ IN-PROCESS, NOT A CHILD `python -m`. The first version spawned
+        # `py -m invisible_core.english`, and from a git worktree that child
+        # imported the interpreter's editable install - another checkout, one
+        # without the module - so it died on ImportError, and this block read
+        # the non-zero exit as "the files above are not in English" with no
+        # files above. Two defects in one line: a check that could miss its
+        # own package, and a refusal naming a cause it had not seen. The gate
+        # is a sibling module of THIS policy; calling it here means whichever
+        # tree the policy runs from, the gate runs from the same one.
+        from . import english
+
+        try:
+            rc = english.main(["--root", str(root)])
+        except SystemExit as stop:          # no git here, or a bad --root
+            _say("", err=True)
+            _say(f"REFUSED - the language gate could not run: {stop}", err=True)
+            return 1
+        except RuntimeError as exc:         # `git ls-files` refused
+            _say("", err=True)
+            _say(f"REFUSED - the language gate could not list the tree: {exc}",
+                 err=True)
+            return 1
+        if rc:
+            _say("", err=True)
+            _say("REFUSED - see the gate's own verdict above. The public "
+                 "repositories are English-only, names included; the workbench "
+                 "is not, and is not pushed.", err=True)
+            _say("Set INVISIBLE_ENGLISH_CHECK=skip to state on the record that "
+                 "this push goes out unchecked.", err=True)
+            return 1
+        ran.append("language")
 
     # --- the publish gate, on release tags only ------------------------
     # Only release tags: the gate builds the project twice, and a hook that

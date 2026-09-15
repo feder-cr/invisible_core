@@ -84,53 +84,52 @@ def test_accept_language_with_region():
 
 @pytest.mark.unit
 def test_accept_language_no_region():
-    """AL2. Una lingua senza regione NON resta un tag solo.
+    """AL2. A language without a region does NOT stay a single tag.
 
-    ⛔ Questo test asseriva `_accept_language("fr") == "fr"` e codificava il
-    difetto corretto il 2026-08-19, non il comportamento di Firefox. Il valore
-    atteso qui sotto e' DERIVATO dalla tabella del motore, non da cio' che il
-    nostro codice restituisce - altrimenti il test non asserirebbe niente:
+    ⛔ This test used to assert `_accept_language("fr") == "fr"` and encoded
+    the defect corrected on 2026-08-19, not Firefox's behaviour. The expected
+    value below is DERIVED from the engine's table, not from what our code
+    returns - otherwise the test would assert nothing:
 
         intl/locale/rust/locale_service_glue/src/lib.rs
-          "fr" => "fr, fr-FR",          <- la riga della tabella
-          add_en_us resta true          <- quindi in coda va ", en-US, en"
+          "fr" => "fr, fr-FR",          <- the table's row
+          add_en_us stays true          <- so ", en-US, en" goes on the end
 
-    Nota che il primo tag e' la lingua NUDA e non `fr-FR`: e' la tabella a
-    volerlo, ed e' la ragione per cui una regione richiesta puo' non comparire
-    per prima.
+    Note the first tag is the BARE language and not `fr-FR`: the table wants it
+    that way, and it is the reason a requested region may not come first.
     """
     assert _accept_language("fr") == "fr, fr-FR, en-US, en"
 
 
 @pytest.mark.unit
 def test_accept_language_no_region_when_the_table_has_no_row():
-    """AL2-bis. Il ramo `_` della tabella, che e' quello di quasi tutte le lingue.
+    """AL2-bis. The table's `_` branch, where almost every language ends up.
 
-    Senza riga dedicata e senza regione, il motore restituisce la lingua e basta
-    (`lang.as_str()`), e poi aggiunge en-US. `ja` e' la riga di tabella che vale
-    esattamente "ja", quindi prova entrambe le strade allo stesso esito.
+    With no dedicated row and no region, the engine returns the language alone
+    (`lang.as_str()`), and then appends en-US. `ja` is the table row that is
+    exactly "ja", so it exercises both roads to the same outcome.
     """
     assert _accept_language("ja") == "ja, en-US, en"
 
 
 @pytest.mark.unit
 def test_accept_language_underscore_normalized():
-    """AL3. Underscore normalizzato, e la coda en-US che mancava.
+    """AL3. The underscore normalised, and the en-US tail that was missing.
 
-    `pt` non ha riga in tabella, quindi cade nel ramo `_` con regione presente:
-    `format!("{lang}-{region}, {lang}")` -> "pt-BR, pt", piu' ", en-US, en".
+    `pt` has no table row, so it falls into the `_` branch with a region present:
+    `format!("{lang}-{region}, {lang}")` -> "pt-BR, pt", plus ", en-US, en".
     """
     assert _accept_language("pt_BR") == "pt-BR, pt, en-US, en"
 
 
 @pytest.mark.unit
 def test_accept_language_english_does_not_append_itself():
-    """AL3-bis. Il ramo che NON aggiunge en-US, e che nasconde gli altri sbagli.
+    """AL3-bis. The branch that does NOT append en-US, and hides other errors.
 
-    Per `en` il motore mette `add_en_us = false`. E' l'unico locale su cui la
-    forma vecchia a due voci coincideva con quella giusta, ed e' per questo che
-    un controllo fatto solo su en-US ha lasciato passare il difetto per mesi.
-    Le altre due righe provano i due rami regionali espliciti.
+    For `en` the engine sets `add_en_us = false`. It is the only locale where the
+    old two-entry form coincided with the right one, and that is why a check made
+    on en-US alone let the defect through for months. The other two lines
+    exercise the two explicit regional branches.
     """
     assert _accept_language("en-US") == "en-US, en"
     assert _accept_language("en-GB") == "en-GB, en"
@@ -154,16 +153,17 @@ def test_accept_language_header_uses_the_q_values_firefox_actually_sends():
     `header.startswith(locale)` would have passed on the wrong value, which is
     how the wrong value survived to begin with.
     """
-    # I valori sono DERIVATI da netwerk/base/rust-helper/src/lib.rs
-    # (rust_prepare_accept_languages): il primo token non porta q, il token n
-    # porta q = max(10 - n, 1)/10, cioe' 0.9, 0.8, 0.7 ... e mai sotto 0.1.
-    # La lista di partenza e' quella della tabella dei locali, quindi le code
-    # ", en-US, en" compaiono anche qui.
+    # The values are DERIVED from netwerk/base/rust-helper/src/lib.rs
+    # (rust_prepare_accept_languages): the first token carries no q, token n
+    # carries q = max(10 - n, 1)/10, that is 0.9, 0.8, 0.7 ... and never below
+    # 0.1. The starting list is the locale table's, so the ", en-US, en" tails
+    # show up here too.
     assert _accept_language_header("en-US") == "en-US,en;q=0.9"
     assert _accept_language_header("pt_BR") == "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-    # ⛔ Questa riga diceva `== "fr"` con il commento "senza regione un tag solo,
-    # e un tag solo non porta q". Era falsa due volte: la tabella da' a "fr" DUE
-    # voci piu' la coda inglese, quindi i token sono quattro e tre portano q.
+    # ⛔ This line used to say `== "fr"` with the comment "no region means
+    # one tag, and one tag carries no q". It was false twice over: the table
+    # gives "fr" TWO entries plus the English tail, so there are four tokens and
+    # three of them carry q.
     assert _accept_language_header("fr") == "fr,fr-FR;q=0.9,en-US;q=0.8,en;q=0.7"
     assert _accept_language_header("it-IT") == "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
     assert ";q=0.5" not in _accept_language_header("it-IT")
@@ -379,12 +379,12 @@ def test_locale_en_us_accept_languages():
 
 @pytest.mark.unit
 def test_locale_underscore_form_normalized():
-    """LC2. L'underscore diventa trattino, e la lista porta la coda inglese.
+    """LC2. The underscore becomes a hyphen, and the list carries the English tail.
 
-    `de` non ha riga nella tabella del motore, quindi cade nel ramo `_` con la
-    regione: "de-DE, de", piu' ", en-US, en" perche' add_en_us resta true.
-    Le due prefs di locale restano il TAG richiesto, non la lista: sono due
-    cose diverse e vanno asserite separatamente.
+    `de` has no row in the engine's table, so it falls into the `_` branch with
+    the region: "de-DE, de", plus ", en-US, en" because add_en_us stays true.
+    The two locale prefs stay the requested TAG, not the list: they are two
+    different things and are asserted separately.
     """
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, locale="de_DE")
@@ -627,18 +627,17 @@ def test_the_apis_a_real_firefox_has_are_not_switched_off():
     prefs = translate_profile_to_prefs(generate_profile(42))
     assert prefs["geo.enabled"] is True
     assert prefs["dom.push.enabled"] is True
-    # ⛔ E `dom.push.connection.enabled` NON e' piu' dichiarata affatto. Questa
-    # riga la pretendeva a False, con il commento "l'obiettivo di rete da cui
-    # veniva il False e' tenuto da queste due": era vero fino al 2026-08-19,
-    # quando il proprietario ha deciso che le prefs che sopprimevano traffico
-    # fatto dal retail si TOLGONO invece di impostarle al valore del retail -
-    # togliere eredita il default di Gecko, che e' per definizione quello del
-    # retail, mentre impostare lascia un valore nostro che diverge il giorno in
-    # cui upstream cambia idea.
+    # ⛔ And `dom.push.connection.enabled` is NOT declared at all any more.
+    # This line demanded it be False, with the comment "the network goal the
+    # False came from is held by these two": that was true until 2026-08-19,
+    # when the owner decided that prefs suppressing traffic retail makes are
+    # REMOVED rather than set to retail's value - removing inherits Gecko's
+    # default, which is by definition retail's, while setting leaves a value of
+    # ours that diverges the day upstream changes its mind.
     #
-    # Asserita come ASSENZA, nella stessa forma della riga su
-    # permissions.default.geo qui sotto, cosi' che rimetterla richieda di
-    # cancellare un test che spiega perche' non c'e'.
+    # Asserted as an ABSENCE, in the same shape as the permissions.default.geo
+    # line below, so that putting it back requires deleting a test that explains
+    # why it is not there.
     assert "dom.push.connection.enabled" not in prefs
     # And NOT permissions.default.geo. It was set to 2 (deny) to keep the
     # network quiet, and `navigator.permissions.query({name:"geolocation"})`

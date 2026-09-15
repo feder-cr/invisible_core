@@ -33,15 +33,15 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
     plan = build_launch_plan(42, profile_dir=pdir, timezone="auto", locale="auto")
 
     assert plan.binary == "/fake/firefox"
-    # ⛔ SENZA URL IN CODA, ed e' la classe che conta, non la stringa: un URL
-    # sulla riga di comando ha la precedenza sulla pagina d'avvio, quindi il
-    # default "about:blank" che stava qui sopprimeva about:home a prescindere
-    # dalle prefs. Tolto il 2026-08-20 col revert del newtab.
+    # ⛔ NO URL AT THE END, and it is the class that matters, not the string: a
+    # URL on the command line takes precedence over the startup page, so the
+    # "about:blank" default that used to sit here suppressed about:home
+    # regardless of the prefs. Removed 2026-08-20 with the newtab revert.
     assert plan.argv == ["/fake/firefox", "-no-remote", "-profile", str(pdir)]
-    # E chi ne vuole uno lo passa: il parametro e' ancora li'.
-    esplicito = build_launch_plan(42, profile_dir=pdir, timezone="auto",
-                                  locale="auto", url="https://example.invalid/")
-    assert esplicito.argv[-1] == "https://example.invalid/"
+    # And whoever wants one passes it: the parameter is still there.
+    explicit = build_launch_plan(42, profile_dir=pdir, timezone="auto",
+                                 locale="auto", url="https://example.invalid/")
+    assert explicit.argv[-1] == "https://example.invalid/"
     text = (pdir / "user.js").read_text(encoding="utf-8")
     assert 'user_pref("zoom.stealth.screen.dpr", "1.25");' in text            # float -> string
     assert 'user_pref("toolkit.startup.max_resumed_crashes", -1);' in text    # no Safe Mode prompt
@@ -73,7 +73,7 @@ def test_build_launch_env_no_font_env_but_webrtc():
     # so build_launch_env must NOT set any STEALTHFOX_FONTLIST/SYSTEMUI env - even
     # when legacy font prefs are passed. WebRTC egress + TZ are still wired.
     prefs = {"zoom.stealth.font.fontlist": "Arial,Calibri", "zoom.stealth.font.system_ui": "Segoe UI"}
-    env = build_launch_env(prefs, timezone="America/New_York", srflx_dichiarato="198.51.100.4", base_env={})
+    env = build_launch_env(prefs, timezone="America/New_York", srflx_declared="198.51.100.4", base_env={})
     assert "STEALTHFOX_FONTLIST" not in env
     assert "STEALTHFOX_SYSTEMUI" not in env
     assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.4"
@@ -88,5 +88,5 @@ def test_build_launch_env_no_proxy_no_webrtc_no_tz():
 
 
 def test_build_launch_env_caller_webrtc_wins():
-    env = build_launch_env({}, srflx_dichiarato="203.0.113.9", base_env={"STEALTHFOX_WEBRTC_PUBLIC_IP": "198.51.100.1"})
+    env = build_launch_env({}, srflx_declared="203.0.113.9", base_env={"STEALTHFOX_WEBRTC_PUBLIC_IP": "198.51.100.1"})
     assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.1"

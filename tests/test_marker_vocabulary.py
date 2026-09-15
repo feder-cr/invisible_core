@@ -31,6 +31,7 @@ installed copy has no siblings and no opinion about them.
 from __future__ import annotations
 
 import ast
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -53,22 +54,124 @@ pytestmark = pytest.mark.unit
 #: SURVIVING repos had stopped running entirely. A green suite that compares
 #: nothing is the exact failure this file was written to end.
 _REPOS = ["invisible_core", "invisible_playwright"]
-_RELEASE = Path(__file__).resolve().parents[2]
 
 
-def _e_vendorizzato(rel: str) -> bool:
-    """Il file appartiene al fork Playwright vendorizzato (``_pw`` o ``_driver``)?
+def _release_dir() -> Path:
+    """The folder holding the sibling repos, found even from a git worktree.
 
-    Da quando il fork e' in git (2026-08-26, voce 23 di 72-next-steps.md), questi
-    controlli lo scansionano insieme al nostro codice. Ma il fork non e' nostro:
-    il suo ``_pw/_impl/_transport.py`` usa sequenze ANSI ``\\x1b[...`` per colorare
-    l'output di terminale, byte pulite ma il cui VALORE contiene 0x1B. Questo gate
-    esiste per cogliere la NOSTRA corruzione da heredoc, non per fare il linter del
-    codice di Microsoft: il fork si esclude, come ``tests/playwright-upstream`` e'
-    gia' escluso dall'sdist per la stessa ragione (non e' roba nostra).
+    ⛔ THIS WAS `Path(__file__).resolve().parents[2]`, AND IT TURNED 18 OF THE 19
+    CHECKS IN THIS FILE OFF WHEREVER THE WORK ACTUALLY HAPPENS. The project's own
+    rule 17 says every change is made on a branch in a worktree of one's own, and
+    a worktree does not live under `release/`: so from a worktree these checks all
+    reported "not the workbench - the sibling repos are not here" and the file
+    passed having compared nothing. Measured 2026-09-15 in a worktree of this
+    repo: 1 passed, 18 skipped.
+
+    That is the same shape as the index gate, which this project already fixed
+    the same way: the answer is not a declared skip, it is asking GIT where the
+    main checkout is. `--git-common-dir` points at the shared repository's `.git`
+    even from a worktree, so its grandparent is `release/`.
+
+    This repo's OWN tests still come from `__file__`, never from here - see
+    `_test_trees()`. Resolving the siblings must not quietly swap the tree under
+    test for the shared checkout, which sits on whatever commit somebody else left
+    it on: that is the wrong-judge failure this project keeps paying for, and it
+    would be worse than skipping, because it would be green about the wrong tree.
     """
-    parti = rel.replace("\\", "/").split("/")
-    return "_pw" in parti or "_driver" in parti
+    here = Path(__file__).resolve()
+    try:
+        out = subprocess.run(["git", "rev-parse", "--git-common-dir"],
+                             cwd=here.parent, capture_output=True, text=True)
+        if out.returncode == 0 and out.stdout.strip():
+            common = Path(out.stdout.strip())
+            if not common.is_absolute():
+                common = (here.parent / common).resolve()
+            # <release>/<repo>/.git -> <release>
+            candidate = common.parent.parent
+            if (candidate / "invisible_core").is_dir():
+                return candidate
+    except OSError:
+        pass
+    return here.parents[2]
+
+
+_RELEASE = _release_dir()
+
+#: This repo as the checkout the tests are RUNNING from, which in a worktree is
+#: not `_RELEASE / "invisible_core"`. Everything that judges THIS tree uses it.
+_SELF = Path(__file__).resolve().parents[1]
+
+#: What a test name looks like, declared ONCE and read by the four scans below.
+#:
+#: ⛔ IT USED TO BE `test_[a-z0-9_]+`, WRITTEN OUT FOUR TIMES, AND THAT MADE THE
+#: TWO DOC GATES BLIND TO 5% OF THE SUITE. This project screams in test names on
+#: purpose - `test_..._REFUSES_...`, `test_GLI_STATI_...` - and a capital letter
+#: took the name out of the gate's sight on BOTH sides at once: a doc could cite
+#: it and no tree could be searched for it.
+#:
+#: Measured 2026-09-15 across the four suites: 168 of 3693 names carry a capital.
+#: The three citations that surfaced the moment the class was widened -
+#: `test_a_core_version_that_is_not_XYZ_is_refused`,
+#: `test_il_percorso_che_delega_NON_cambia_comportamento`,
+#: `test_GLI_STATI_DI_UNA_NAVIGAZIONE_NON_VALGONO_PER_UN_ALTRA` - exist in no
+#: tree at all, so the docs had been sending readers to an empty grep for as
+#: long as the names carried a capital.
+#:
+#: And the narrow class did worse than skip: against `def test_A_b`, `[a-z0-9_]+`
+#: matches the PREFIX `test_` and records that fragment as a defined name, so
+#: the `defined` set was polluted rather than merely short.
+_TEST_NAME = r"test_[A-Za-z0-9_]+"
+
+
+def _test_trees():
+    """Every tree on this machine that DEFINES a test the docs may cite.
+
+    ⛔ THIS WAS WRITTEN THREE TIMES, AND THE THREE COPIES HAD DRIFTED APART. The
+    two doc gates below both answer "does this cited name exist", and they were
+    reading different worlds: one derived the sibling repos and added the Firefox
+    source's `scripts/`, the other still carried a hand-written pair of repo
+    names. So the same citation could be a phantom for one gate and fine for the
+    other, and only the stricter of the two could ever say so.
+
+    That hand-written list is the one whose staleness is already recorded a few
+    lines down - it did not know AIHawk existed and reported 9 true citations as
+    phantoms. Deriving it once is what stops the fourth repo from repeating it.
+
+    Returns (trees, source_present). The caller decides what a missing Firefox
+    source means for IT: the phantom gate has to skip, because a name it cannot
+    resolve would be reported as missing, while a gate asking "is the file named
+    nearby" is simply quieter without it.
+    """
+    # ⛔ THIS CHECKOUT FIRST, and the shared one for this repo is skipped. Running
+    # from a worktree, `_RELEASE / "invisible_core"` is somebody else's tree on
+    # somebody else's commit; reading it would make these gates green about code
+    # that is not the code under test.
+    trees = [_SELF / "tests"]
+    trees += [d / "tests" for d in sorted(_RELEASE.iterdir())
+              if (d / "tests").is_dir() and d.name != _SELF.name]
+    # The workbench itself: its suite, and its `scripts/`, which holds tests
+    # beside the scripts they cover (`scripts/test_sync_core_pin.py`).
+    trees.append(_RELEASE.parent / "tests")
+    trees.append(_RELEASE.parent / "scripts")
+    sorgente = [p for p in _FIREFOX_SOURCE_CANDIDATES if (p / "scripts").is_dir()]
+    if sorgente:
+        trees.append(sorgente[0] / "scripts")
+    return [t for t in trees if t.is_dir()], bool(sorgente)
+
+
+def _is_vendored(rel: str) -> bool:
+    """Does the file belong to the vendored Playwright fork (``_pw``/``_driver``)?
+
+    Since the fork went into git (2026-08-26, entry 23 of 72-next-steps.md),
+    these checks scan it alongside our own code. But the fork is not ours: its
+    ``_pw/_impl/_transport.py`` uses ANSI sequences ``\\x1b[...`` to colour
+    terminal output, clean bytes whose VALUE nevertheless contains 0x1B. This
+    gate exists to catch OUR heredoc corruption, not to lint Microsoft's code:
+    the fork is excluded, the way ``tests/playwright-upstream`` is already
+    excluded from the sdist for the same reason (it is not our stuff).
+    """
+    parts = rel.replace("\\", "/").split("/")
+    return "_pw" in parts or "_driver" in parts
 
 # Where the patched Firefox source lives, per `10-repo-layout.md`. Two entries
 # because the two build trees are SEPARATE clones, Windows and WSL. Only used
@@ -576,7 +679,7 @@ def test_no_tracked_text_file_carries_an_invisible_control_character():
         names = [n for n in listing.stdout.splitlines() if n.strip()]
         assert names, f"{repo}: git tracks no files, so this check saw nothing"
         for rel in names:
-            if _e_vendorizzato(rel):
+            if _is_vendored(rel):
                 continue
             path = root / rel
             if path.suffix.lower() not in _TEXT_SUFFIXES or not path.is_file():
@@ -645,7 +748,7 @@ def test_no_string_LITERAL_evaluates_to_a_control_character():
         names = [n for n in listing.stdout.splitlines() if n.strip()]
         assert names, f"{repo}: git tracks no Python files; this check saw nothing"
         for rel in names:
-            if _e_vendorizzato(rel):
+            if _is_vendored(rel):
                 continue
             path = root / rel
             if not path.is_file():
@@ -918,7 +1021,7 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
         pytest.skip("not the workbench - the architecture docs are not here")
 
     defined = set()
-    alberi = []
+    trees = []
     for repo in _DEFAULT_SUITE_WORKFLOW:
         if not (_RELEASE / repo / "tests").is_dir():
             pytest.skip("not the workbench - the sibling repos are not here")
@@ -932,32 +1035,31 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
     # so it gets the same answer rather than a third hardcoded entry that would
     # go stale on the fourth repo. `_DEFAULT_SUITE_WORKFLOW` still decides
     # whether this is the workbench at all; it no longer decides what is read.
-    alberi.extend(sorted(d / "tests" for d in _RELEASE.iterdir()
-                         if (d / "tests").is_dir()))
-    alberi.append(_RELEASE.parent / "tests")
-    # `20-our-patches.md` cites the SOURCE repo's own validators by name, and
-    # they live outside every tree above. Scanning only `release/*/tests` made
-    # this gate RED on a citation that was perfectly true - measured 2026-08-12
-    # on `test_manifest_family_set_equals_the_68`, which does exist, in
-    # `scripts/` of the Firefox source. A gate that is red for a false positive
-    # is worse than a stale doc: it teaches the next reader to ignore it.
-    sorgente = [p for p in _FIREFOX_SOURCE_CANDIDATES if (p / "scripts").is_dir()]
-    if not sorgente:
+    # ⛔ THE TREES COME FROM `_test_trees()`, and two of the entries in it are
+    # there because this gate went red on citations that were TRUE. The Firefox
+    # source's `scripts/` was added 2026-08-12 for
+    # `test_manifest_family_set_equals_the_68`; the workbench's own `scripts/`
+    # on 2026-09-15 for `test_a_core_version_that_is_not_XYZ_is_refused`, which
+    # had been invisible only because the name class was narrower than the names.
+    # A gate that is red for a false positive is worse than a stale doc: it
+    # teaches the next reader to ignore it.
+    more, source_present = _test_trees()
+    trees.extend(more)
+    if not source_present:
         pytest.skip("the Firefox source tree is not on this machine, so the "
                     "names the docs cite from it cannot be judged")
-    alberi.append(sorgente[0] / "scripts")
 
-    for albero in alberi:
-        if not albero.is_dir():
+    for tree in trees:
+        if not tree.is_dir():
             continue
-        for path in albero.rglob("test_*.py"):
-            defined.update(re.findall(r"(?m)^\s*(?:async )?def (test_[a-z0-9_]+)",
+        for path in tree.rglob("test_*.py"):
+            defined.update(re.findall(r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")",
                                       path.read_text(encoding="utf-8", errors="replace")))
             defined.add(path.stem)          # docs cite files by name too
 
     phantom = {}
     for doc in sorted(docs.glob("*.md")):
-        cited = set(re.findall(r"`(test_[a-z0-9_]+)`",
+        cited = set(re.findall(r"`(" + _TEST_NAME + r")`",
                                doc.read_text(encoding="utf-8")))
         gone = sorted(cited - defined)
         if gone:
@@ -979,8 +1081,9 @@ def test_every_open_bug_says_how_to_re_check_it():
     them said OPEN over a body that already carried the A/B closing it (6
     sessions dead in 10 with the defect, 0 in 10 with the fix, Fisher p about
     0.005), and the owner had to point it out. Two more headings said OPEN over
-    a body that was half closed - "Chiuso subito: `_summarize` now refuses with
-    exit 3", "RESOLVED the slowness half, and it was not ours".
+    a body that was half closed - "closed at once: `_summarize` now refuses with
+    exit 3", "RESOLVED the slowness half, and it was not ours". (Those bodies
+    are workbench notes and the first one is quoted here in translation.)
 
     The audit that followed opened all nineteen and found exactly ONE stale in
     substance. So the entries were maintained; what was missing is that their
@@ -1055,42 +1158,44 @@ def test_a_doc_that_names_a_test_function_names_the_file_holding_it():
     if not docs.is_dir():
         pytest.skip("not the workbench - the architecture docs are not here")
 
-    alberi = [_RELEASE / repo / "tests" for repo in _DEFAULT_SUITE_WORKFLOW]
-    alberi.append(workbench / "tests")
-    definita = {}
+    # ⛔ THE SAME TREES AS THE PHANTOM GATE, from one helper. This list used to
+    # be the hand-written pair whose staleness is recorded up there, so the two
+    # gates asking the same question read two different worlds.
+    trees, _ = _test_trees()
+    defined = {}
     stem = set()
-    for albero in alberi:
-        if not albero.is_dir():
+    for tree in trees:
+        if not tree.is_dir():
             continue
-        for path in albero.rglob("test_*.py"):
+        for path in tree.rglob("test_*.py"):
             stem.add(path.stem)
-            for nome in re.findall(
-                    r"(?m)^\s*(?:async )?def (test_[a-z0-9_]+)",
+            for name in re.findall(
+                    r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")",
                     path.read_text(encoding="utf-8", errors="replace")):
-                definita.setdefault(nome, set()).add(path.name)
-    if not definita:
+                defined.setdefault(name, set()).add(path.name)
+    if not defined:
         pytest.skip("not the workbench - the sibling repos are not here")
 
-    orfane = {}
+    orphans = {}
     for doc in sorted(docs.glob("*.md")):
-        righe = doc.read_text(encoding="utf-8").split(chr(10))
-        tagli = [i for i, r in enumerate(righe) if re.match(r"^#{1,6} ", r)]
-        tagli.append(len(righe))
-        for i, riga in enumerate(righe):
-            for m in re.finditer(r"`(test_[a-z0-9_]+)`", riga):
-                nome = m.group(1)
-                if nome in stem or nome not in definita:
-                    continue          # e' un file, o non esiste: lo dice l'altro gate
-                a = max([t for t in tagli if t <= i], default=0)
-                b = min([t for t in tagli if t > i], default=len(righe))
-                sezione = chr(10).join(righe[a:b])
-                if not any(f in sezione for f in definita[nome]):
-                    orfane.setdefault(doc.name, []).append(
-                        nome + " -> " + "/".join(sorted(definita[nome])))
+        lines = doc.read_text(encoding="utf-8").split(chr(10))
+        cuts = [i for i, r in enumerate(lines) if re.match(r"^#{1,6} ", r)]
+        cuts.append(len(lines))
+        for i, line in enumerate(lines):
+            for m in re.finditer(r"`(" + _TEST_NAME + r")`", line):
+                name = m.group(1)
+                if name in stem or name not in defined:
+                    continue     # a file, or non-existent: the other gate says so
+                a = max([t for t in cuts if t <= i], default=0)
+                b = min([t for t in cuts if t > i], default=len(lines))
+                section = chr(10).join(lines[a:b])
+                if not any(f in section for f in defined[name]):
+                    orphans.setdefault(doc.name, []).append(
+                        name + " -> " + "/".join(sorted(defined[name])))
 
-    assert not orfane, (
+    assert not orphans, (
         "these docs name a test function without naming, anywhere in the same "
         "section, the file that holds it - so the only way to reach it is a "
         "grep, and a plausible sibling file is what gets guessed instead:"
         + "".join(chr(10) + "  " + f + ": " + ", ".join(sorted(set(v)))
-                  for f, v in sorted(orfane.items())))
+                  for f, v in sorted(orphans.items())))
