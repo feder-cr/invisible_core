@@ -920,10 +920,20 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
     defined = set()
     alberi = []
     for repo in _DEFAULT_SUITE_WORKFLOW:
-        tests = _RELEASE / repo / "tests"
-        if not tests.is_dir():
+        if not (_RELEASE / repo / "tests").is_dir():
             pytest.skip("not the workbench - the sibling repos are not here")
-        alberi.append(tests)
+    # EVERY sibling repo that has a suite, not a list of two written by hand.
+    #
+    # The list WAS written by hand, and it went stale the moment a third
+    # first-party repo appeared: AIHawk arrived with its own tests, the docs
+    # started citing them by name, and this gate reported those names as
+    # phantoms - 9 of them, permanently, on citations that were all true. That
+    # is the same false positive the `sorgente` block below was added to fix,
+    # so it gets the same answer rather than a third hardcoded entry that would
+    # go stale on the fourth repo. `_DEFAULT_SUITE_WORKFLOW` still decides
+    # whether this is the workbench at all; it no longer decides what is read.
+    alberi.extend(sorted(d / "tests" for d in _RELEASE.iterdir()
+                         if (d / "tests").is_dir()))
     alberi.append(_RELEASE.parent / "tests")
     # `20-our-patches.md` cites the SOURCE repo's own validators by name, and
     # they live outside every tree above. Scanning only `release/*/tests` made
