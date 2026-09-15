@@ -273,7 +273,7 @@ _PIN_GROUPS = {
     # description of a decision already taken and changed nothing else. The FIELD
     # stays on ScreenProfile, where it is an honest label; what went is the
     # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
-    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
+    "screen": {"width", "height", "dpr", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
                "color_depth"},
     "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
                  "voices", "fake_media_devices",
@@ -365,8 +365,6 @@ _PIN_TO_RAW = {
     "gpu.class_tier": "gpu_class",
     "screen.width": "screen_w",
     "screen.height": "screen_h",
-    "screen.avail_width": "screen_avail_w",
-    "screen.avail_height": "screen_avail_h",
     "screen.dpr": "dpr",
     "hardware.concurrency": "hw_concurrency",
     "hardware.storage_quota_mb": "storage_quota_mb",
@@ -671,10 +669,17 @@ def generate_profile(
         # else was sized against: measured 2026-08-09, screen.taskbar_px=72 on
         # a 1080 screen still reported avail_height 1032, which is 1080-48.
         # Two properties of one window disagreeing is exactly the shape a page
-        # reads for free. Re-derive it here - unless avail_height was itself
-        # pinned, in which case the caller said what they wanted and an
-        # override must not overwrite a more specific override.
-        if "screen.taskbar_px" in pin and "screen.avail_height" not in pin:
+        # reads for free, so it is re-derived here.
+        #
+        # UNCONDITIONAL since 2026-09-15. It used to carry "unless avail_height
+        # was itself pinned, in which case the caller said what they wanted" -
+        # a special case for a pin that no longer exists. `screen.avail_width`
+        # and `screen.avail_height` left the pin table that day: the engine
+        # derives the available rect from width, height and taskbar_px, and
+        # neither is emitted, so pinning one moved the label on the Profile and
+        # nothing a page can read. Measured: `pin={"screen.avail_width": 999,
+        # "screen.avail_height": 888}` changes ZERO emitted preferences.
+        if "screen.taskbar_px" in pin:
             raw["screen_avail_h"] = int(raw["screen_h"]) - int(raw["taskbar_px"])
 
     return Profile(

@@ -148,14 +148,20 @@ def test_a_pinned_taskbar_moves_availheight():
     assert p.screen.avail_height == p.screen.height - 72
 
 
-def test_a_pinned_availheight_outranks_the_derivation():
-    """An override must not overwrite a more specific override: if the
-    caller pinned availHeight as well, that is the value they asked for,
-    even though it no longer matches height minus the taskbar."""
-    p = generate_profile(42, pin={"screen.taskbar_px": 72,
-                                  "screen.avail_height": 900})
-    assert p.screen.avail_height == 900
+def test_the_taskbar_derivation_has_no_exception_left():
+    """The re-derivation used to carry "unless avail_height was itself pinned".
 
+    That special case existed to let a more specific override win over a
+    correction. `screen.avail_width` and `screen.avail_height` left the pin table
+    on 2026-09-15 - the engine derives the available rect from width, height and
+    taskbar_px, and neither is emitted, so pinning one moved a label and nothing
+    a page can read - so there is no override left to lose to, and the branch is
+    gone. What remains is the invariant it protected."""
+    p = generate_profile(42, pin={"screen.taskbar_px": 72})
+    assert p.screen.taskbar_px == 72
+    assert p.screen.avail_height == p.screen.height - 72
+    with pytest.raises(ValueError):
+        generate_profile(42, pin={"screen.avail_height": 1000})
 
 def test_availheight_matches_the_taskbar_with_no_pin_at_all():
     """The control: the default path was already coherent, and the fix must
