@@ -84,7 +84,18 @@ CONTRACT = {
         # una nel wrapper per la durata di una correzione, ed era la stessa
         # duplicazione che aveva prodotto il difetto, un piano piu' in basso.
         "parse_proxy",
-        "ensure_geoip_mmdb", "forced_gpu_class",
+        "ensure_geoip_mmdb",
+        # `forced_gpu_class` STAYS, and it was briefly removed on 2026-09-15
+        # before the evidence said otherwise. It stopped being an argument that
+        # day - `generate_profile` lost its `fixed_gpu_class=`, which was a
+        # second spelling of `pin["gpu.class_tier"]` - and the wrapper's shipped
+        # code stopped calling it. What keeps it is `test_backcompat.py` in the
+        # wrapper, which re-exports it through `invisible_playwright._webgl_personas`
+        # as one of the import shapes that survived the package split and names
+        # those as shipped in downstream PRs. A read-only derivation on a public
+        # path is surface, not complexity: it adds no branch and no second way
+        # to do anything. The duplicate INPUT is what had to go, and it did.
+        "forced_gpu_class",
         "get_default_args", "get_default_stealth_prefs",
         "make_virtual_display", "prefs", "prepare_session_geo",
         "resolve_session_locale", "resolve_session_timezone",

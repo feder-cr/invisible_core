@@ -535,7 +535,6 @@ def _apply_pins_to_raw(raw: Dict[str, Any], pin: Dict[str, Any]) -> Dict[str, An
 def generate_profile(
     seed: int,
     pin: Optional[Dict[str, Any]] = None,
-    fixed_gpu_class: Optional[str] = None,
 ) -> Profile:
     """Return a deterministic Profile for the given integer seed.
 
@@ -598,11 +597,15 @@ def generate_profile(
     # cross-checks against the reported GPU. That is why the class is now DERIVED
     # from the persona instead of being passed in beside it.
     #
-    # `fixed_gpu_class` survives as an argument for the published signature, and
-    # `choose_persona` treats it exactly like a `gpu.class_tier` pin.
-    persona = _choose_persona(int(seed), pin=pin, fixed_gpu_class=fixed_gpu_class)
+    # There is ONE way to ask for a class - the pin. `generate_profile` carried a
+    # `fixed_gpu_class=` argument as well, which `choose_persona` treated exactly
+    # like `pin["gpu.class_tier"]`: two spellings of one request, and after the
+    # class became DERIVED from the persona it had no caller left in src/ at all.
+    # Its internal namesake stays, one line down: `_sample_raw(fixed_gpu_class=)`
+    # is the forge's real parameter, the thing that conditions the CPT draw.
+    persona = _choose_persona(int(seed), pin=pin)
     eff_class = (persona["gpu_class"] if persona
-                 else ((pin or {}).get("gpu.class_tier") or fixed_gpu_class))
+                 else (pin or {}).get("gpu.class_tier"))
     raw = _sample_raw(int(seed), fixed_gpu_class=eff_class)
     # The GPU NAME the profile reports is the persona's, because the persona is
     # what the browser actually presents.
