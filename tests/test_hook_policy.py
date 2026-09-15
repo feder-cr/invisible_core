@@ -19,6 +19,8 @@ more than ran, so it is asserted as a claim, not as prose.
 """
 from __future__ import annotations
 
+import os
+import subprocess
 import textwrap
 from pathlib import Path
 from typing import Sequence
@@ -109,6 +111,12 @@ def make_repo(tmp_path: Path, *, block: str | None = "pytest = false\npin = fals
     """
     root = tmp_path / "release" / "pkg"
     root.mkdir(parents=True)
+    # A real repository, because the language gate runs IN-PROCESS and asks git
+    # for the tracked files: a bare folder made it refuse every scenario with
+    # "not inside a git repository". Nothing is added, so the tree is empty and
+    # the gate is silent; the two tests that want it to speak stage a file.
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True,
+                   env=hooks.outside_the_hook(dict(os.environ)))
     body = "[project]\nname = \"pkg\"\nversion = \"1.0\"\n"
     if block is not None:
         body += "\n[tool.invisible.hooks]\n" + textwrap.dedent(block) + "\n"
@@ -801,3 +809,59 @@ def test_a_gate_the_hook_launches_is_not_told_which_repository_the_hook_is_about
                            check=True, capture_output=True, text=True, env=quiet).stdout
     assert after == before, "the throwaway commit landed in the hook's repository"
     assert (throwaway / ".git").is_dir(), "the throwaway repository was never made"
+
+
+# ------------------------------------------------------------- the language
+
+#: In-string newlines are `chr(10)`, like the constants at the top of this file
+#: and for the reason written there: a backslash-n written through a shell
+#: heredoc arrives as a REAL newline and the module stops parsing. It happened
+#: again writing these two tests, on 2026-09-16.
+_ENGLISH_CLEAN = "# This comment is in English, which is what the repo uses." + chr(10)
+#: The Italian known-bad is IMPORTED from the gate's own corpus, never retyped
+#: here: a page of Italian in this file would be flagged by the very gate it
+#: tests, and the corpus lives in one place so there is exactly one exempt path.
+from invisible_core.english import _ITA as _ITALIAN  # noqa: E402
+_NO_GATES_AT_ALL = _NO_PYTEST_NO_PIN + chr(10) + "english = false"
+
+
+def _stage(root, rel, text):
+    """Write a file and stage it, so `git ls-files` sees it and so does the gate."""
+    (root / rel).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "add", rel], cwd=str(root), check=True, capture_output=True,
+                   env=hooks.outside_the_hook(dict(os.environ)))
+
+
+def test_italian_prose_in_a_tracked_file_refuses_the_push(tmp_path, capsys):
+    """The known-bad, run IN-PROCESS against a real repository.
+
+    ⛔ THE FIRST VERSION OF THIS GATE SPAWNED A CHILD `python -m` AND DIED
+    WITHOUT SAYING SO. From a git worktree the child imported the interpreter's
+    editable install, another checkout with no `english` module, and the hook
+    read its exit code as "the files above are not in English" with nothing
+    above. The gate is now a sibling call, so this test can only be green if the
+    module ran here and refused for the reason it prints.
+    """
+    root = make_repo(tmp_path, block=_NO_PYTEST_NO_PIN, workbench=False)
+    _stage(root, "clean.py", _ENGLISH_CLEAN)
+    assert run_policy(root)[0] == 0, "a clean tree must pass"
+    capsys.readouterr()          # the clean run's summary is not the one under test
+    _stage(root, "guilty.py", _ITALIAN)
+    code, _ = run_policy(root)
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "guilty.py" in out, out
+    assert "not in English" in out, out
+    assert "push proceeding" not in out
+
+
+def test_english_false_turns_the_language_gate_off_and_says_so(tmp_path, capsys):
+    """Off is a declaration, and it shows up as SKIPPED, never as a claim."""
+    root = make_repo(tmp_path, block=_NO_GATES_AT_ALL, workbench=False)
+    _stage(root, "guilty.py", _ITALIAN)
+    code, _ = run_policy(root)
+    line = [row for row in capsys.readouterr().out.splitlines()
+            if "push proceeding" in row][0]
+    assert code == 0
+    assert "language" in line.split("(SKIPPED:")[1], line
+    assert "language" not in line.split("(SKIPPED:")[0], line

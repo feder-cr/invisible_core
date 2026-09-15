@@ -521,10 +521,31 @@ def main(
              "for Italian prose in a public repository.")
         skipped.append("language")
     else:
-        rc = run([py, "-m", "invisible_core.english", "--root", str(root)], root)
+        # ⛔ IN-PROCESS, NOT A CHILD `python -m`. The first version spawned
+        # `py -m invisible_core.english`, and from a git worktree that child
+        # imported the interpreter's editable install - another checkout, one
+        # without the module - so it died on ImportError, and this block read
+        # the non-zero exit as "the files above are not in English" with no
+        # files above. Two defects in one line: a check that could miss its
+        # own package, and a refusal naming a cause it had not seen. The gate
+        # is a sibling module of THIS policy; calling it here means whichever
+        # tree the policy runs from, the gate runs from the same one.
+        from . import english
+
+        try:
+            rc = english.main(["--root", str(root)])
+        except SystemExit as stop:          # no git here, or a bad --root
+            _say("", err=True)
+            _say(f"REFUSED - the language gate could not run: {stop}", err=True)
+            return 1
+        except RuntimeError as exc:         # `git ls-files` refused
+            _say("", err=True)
+            _say(f"REFUSED - the language gate could not list the tree: {exc}",
+                 err=True)
+            return 1
         if rc:
             _say("", err=True)
-            _say("REFUSED - the files above are not in English. The public "
+            _say("REFUSED - see the gate's own verdict above. The public "
                  "repositories are English-only, names included; the workbench "
                  "is not, and is not pushed.", err=True)
             _say("Set INVISIBLE_ENGLISH_CHECK=skip to state on the record that "
