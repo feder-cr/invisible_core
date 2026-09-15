@@ -38,28 +38,13 @@ SEED = 1561645783
 
 #: Keys that legitimately emit no pref of their own. Each one needs a reason a
 #: reader can check, not a note that it is known.
-DELIBERATELY_NOT_EMITTED = {
-    "screen.avail_width": (
-        "The engine DERIVES the available rect from width/height minus "
-        "taskbar_px, so emitting it as well would be a second number for one "
-        "fact. Pinning it moves the Profile field only; what a page reads stays "
-        "coherent because it comes from the width that IS emitted."),
-    "screen.avail_height": (
-        "Same as avail_width. `generate_profile` re-derives it when taskbar_px "
-        "is pinned and avail_height is not, which is the coherence that matters."),
-    "screen.tier": (
-        "Sampler bookkeeping ('1440p'), used to condition the draw and never "
-        "shown to a page. No pref can carry it because there is nothing to "
-        "carry."),
-    "codec.webspeech_synth": (
-        "`media.webspeech.synth.enabled` is emitted as a constant True, which is "
-        "retail Firefox's own default on desktop, so a session that answered "
-        "False would be the abnormal one. ⛔ FOLLOW-UP: the forge still DRAWS "
-        "this field (about 10% False), so `Profile.codec.webspeech_synth` "
-        "disagrees with the pref for those profiles. The honest end state is to "
-        "stop drawing it; that touches the codec CPT and is deliberately not "
-        "bundled with the MSAA fix."),
-}
+#: EMPTY, and that is the point. It held five keys when this gate was written -
+#: three `gpu.*`, `webgl.msaa_samples`, `codec.webspeech_synth` - then two
+#: `screen.avail_*` and `screen.tier`. Every one of them either became a pin
+#: that reaches the browser or stopped being a pin. Every pinnable key now moves
+#: something a page can read, with no exceptions; an entry added here has to
+#: carry a reason that survives being read out loud.
+DELIBERATELY_NOT_EMITTED: dict = {}
 
 
 def _other_persona(profile):

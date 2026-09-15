@@ -164,7 +164,6 @@ class CodecProfile:
     webm_encoder_enabled: bool
     mediasource_webm: bool
     mediasource_mp4: bool
-    webspeech_synth: bool
 
 
 @dataclass(frozen=True)
@@ -253,7 +252,6 @@ class FontProfile:
 #      "audio.max_channel_count"
 #      "codec.av1_enabled", "codec.webm_encoder_enabled",
 #      "codec.mediasource_webm", "codec.mediasource_mp4",
-#      "codec.webspeech_synth"
 #      "webgl.msaa_samples"
 #      "font.ui_family", "font.ui_size", "font.monospace_size",
 #      "font.alpha_ladder"
@@ -268,7 +266,14 @@ class FontProfile:
 
 _PIN_GROUPS = {
     "gpu": {"vendor", "renderer", "class_tier"},
-    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
+    # ⛔ `tier` IS NOT HERE, and cannot be: pins land in `_apply_pins_to_raw`,
+    # which runs AFTER `_sample_raw`, so a pinned tier cannot condition the draw
+    # it names. It emitted no pref either - it is the sampler's own label for the
+    # screen it drew ("1440p"), never shown to a page - so pinning it overwrote a
+    # description of a decision already taken and changed nothing else. The FIELD
+    # stays on ScreenProfile, where it is an honest label; what went is the
+    # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
+    "screen": {"width", "height", "dpr", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
                "color_depth"},
     "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
                  "voices", "fake_media_devices",
@@ -277,7 +282,7 @@ _PIN_GROUPS = {
     "audio": {"sample_rate", "output_latency_ms", "max_channel_count"},
     "codec": {
         "av1_enabled", "webm_encoder_enabled",
-        "mediasource_webm", "mediasource_mp4", "webspeech_synth",
+        "mediasource_webm", "mediasource_mp4",
     },
     # ⛔ `webgl.msaa_samples` WAS HERE and came out on 2026-09-15. It could not be
     # honoured on Windows by design (the emitted value is pinned to 4 so
@@ -360,10 +365,7 @@ _PIN_TO_RAW = {
     "gpu.class_tier": "gpu_class",
     "screen.width": "screen_w",
     "screen.height": "screen_h",
-    "screen.avail_width": "screen_avail_w",
-    "screen.avail_height": "screen_avail_h",
     "screen.dpr": "dpr",
-    "screen.tier": "screen_tier",
     "hardware.concurrency": "hw_concurrency",
     "hardware.storage_quota_mb": "storage_quota_mb",
     "audio.sample_rate": "audio_sample_rate",
@@ -373,7 +375,6 @@ _PIN_TO_RAW = {
     "codec.webm_encoder_enabled": "webm_encoder_enabled",
     "codec.mediasource_webm": "mediasource_webm",
     "codec.mediasource_mp4": "mediasource_mp4",
-    "codec.webspeech_synth": "webspeech_synth",
     "webgl.msaa_samples": "msaa_samples",
     # Fonts: pinnable like everything else. The sampler does not produce these
     # (they are invariant, see FontProfile), so _sample_raw seeds the raw dict
@@ -535,7 +536,6 @@ def _apply_pins_to_raw(raw: Dict[str, Any], pin: Dict[str, Any]) -> Dict[str, An
 def generate_profile(
     seed: int,
     pin: Optional[Dict[str, Any]] = None,
-    fixed_gpu_class: Optional[str] = None,
 ) -> Profile:
     """Return a deterministic Profile for the given integer seed.
 
@@ -598,11 +598,15 @@ def generate_profile(
     # cross-checks against the reported GPU. That is why the class is now DERIVED
     # from the persona instead of being passed in beside it.
     #
-    # `fixed_gpu_class` survives as an argument for the published signature, and
-    # `choose_persona` treats it exactly like a `gpu.class_tier` pin.
-    persona = _choose_persona(int(seed), pin=pin, fixed_gpu_class=fixed_gpu_class)
+    # There is ONE way to ask for a class - the pin. `generate_profile` carried a
+    # `fixed_gpu_class=` argument as well, which `choose_persona` treated exactly
+    # like `pin["gpu.class_tier"]`: two spellings of one request, and after the
+    # class became DERIVED from the persona it had no caller left in src/ at all.
+    # Its internal namesake stays, one line down: `_sample_raw(fixed_gpu_class=)`
+    # is the forge's real parameter, the thing that conditions the CPT draw.
+    persona = _choose_persona(int(seed), pin=pin)
     eff_class = (persona["gpu_class"] if persona
-                 else ((pin or {}).get("gpu.class_tier") or fixed_gpu_class))
+                 else (pin or {}).get("gpu.class_tier"))
     raw = _sample_raw(int(seed), fixed_gpu_class=eff_class)
     # The GPU NAME the profile reports is the persona's, because the persona is
     # what the browser actually presents.
@@ -665,10 +669,17 @@ def generate_profile(
         # else was sized against: measured 2026-08-09, screen.taskbar_px=72 on
         # a 1080 screen still reported avail_height 1032, which is 1080-48.
         # Two properties of one window disagreeing is exactly the shape a page
-        # reads for free. Re-derive it here - unless avail_height was itself
-        # pinned, in which case the caller said what they wanted and an
-        # override must not overwrite a more specific override.
-        if "screen.taskbar_px" in pin and "screen.avail_height" not in pin:
+        # reads for free, so it is re-derived here.
+        #
+        # UNCONDITIONAL since 2026-09-15. It used to carry "unless avail_height
+        # was itself pinned, in which case the caller said what they wanted" -
+        # a special case for a pin that no longer exists. `screen.avail_width`
+        # and `screen.avail_height` left the pin table that day: the engine
+        # derives the available rect from width, height and taskbar_px, and
+        # neither is emitted, so pinning one moved the label on the Profile and
+        # nothing a page can read. Measured: `pin={"screen.avail_width": 999,
+        # "screen.avail_height": 888}` changes ZERO emitted preferences.
+        if "screen.taskbar_px" in pin:
             raw["screen_avail_h"] = int(raw["screen_h"]) - int(raw["taskbar_px"])
 
     return Profile(
@@ -712,7 +723,6 @@ def generate_profile(
             webm_encoder_enabled=bool(raw["webm_encoder_enabled"]),
             mediasource_webm=bool(raw["mediasource_webm"]),
             mediasource_mp4=bool(raw["mediasource_mp4"]),
-            webspeech_synth=bool(raw["webspeech_synth"]),
         ),
         webgl=WebGLProfile(msaa_samples=int(raw["msaa_samples"])),
         font=FontProfile(

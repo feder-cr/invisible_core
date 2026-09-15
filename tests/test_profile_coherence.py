@@ -39,7 +39,7 @@ from __future__ import annotations
 import pytest
 
 from invisible_core import generate_profile, translate_profile_to_prefs
-from invisible_core._webgl_personas import forced_gpu_class, select_persona
+from invisible_core._webgl_personas import _gpu_pool, select_persona
 
 pytestmark = pytest.mark.unit
 
@@ -50,30 +50,45 @@ _SWEEP = 500
 
 
 def test_every_seed_gets_a_bundle_matching_the_persona_it_will_expose():
-    bad = [
-        (s, forced_gpu_class(s), generate_profile(seed=s).gpu.class_tier)
-        for s in range(_SWEEP)
-        if generate_profile(seed=s).gpu.class_tier != forced_gpu_class(s)
-    ]
+    """Read through the EMITTED prefs, not through a helper.
+
+    This compared `forced_gpu_class(seed)` against `Profile.gpu.class_tier`,
+    which was two calls to one function once the class became derived from the
+    persona - it could not fail. The property is still worth holding, so it is
+    measured the long way round: take the renderer the browser is actually told,
+    find the pool entry that carries it, and compare THAT entry's class with the
+    one the bundle was conditioned on. Profile, prefs and pool are three reads."""
+    by_name = {(e["renderer"], e["vendor"]): e["gpu_class"] for e in _gpu_pool()}
+    bad = []
+    for seed in range(_SWEEP):
+        profile = generate_profile(seed=seed)
+        prefs = translate_profile_to_prefs(profile)
+        exposed = by_name.get((prefs["zoom.stealth.webgl.renderer"],
+                               prefs["zoom.stealth.webgl.vendor"]))
+        if exposed is not None and exposed != profile.gpu.class_tier:
+            bad.append((seed, exposed, profile.gpu.class_tier))
     assert not bad, (
         f"{len(bad)} of {_SWEEP} seeds build a bundle for one GPU class while "
-        f"exposing a persona from another, e.g. {bad[:3]} (seed, persona class, "
+        f"exposing a persona from another, e.g. {bad[:3]} (seed, exposed class, "
         f"bundle class). Every parameter the service cross-checks against the "
         f"renderer comes from that bundle")
 
 
-def test_the_bare_call_and_the_explicit_call_agree():
-    """The two spellings the five call sites used. They must now be the same
-    call - that is the whole content of the fix."""
-    for seed in range(200):
-        bare = translate_profile_to_prefs(generate_profile(seed=seed))
-        explicit = translate_profile_to_prefs(
-            generate_profile(seed, fixed_gpu_class=forced_gpu_class(seed)))
-        differing = sorted(k for k in set(bare) | set(explicit)
-                           if bare.get(k) != explicit.get(k))
-        assert not differing, (
-            f"seed {seed}: omitting fixed_gpu_class still changes {differing}. "
-            f"Two call sites omitted it and three did not")
+def test_there_is_only_one_way_to_ask_for_a_class():
+    """What made the two spellings agree was deleting one of them.
+
+    This compared `generate_profile(seed)` against
+    `generate_profile(seed, fixed_gpu_class=forced_gpu_class(seed))` across 200
+    seeds, because five call sites used those two spellings and three of them
+    disagreed with the other two. The argument is gone - the class is derived
+    from the persona, and `pin["gpu.class_tier"]` is the only way to ask - so
+    the comparison has nothing left to compare. What replaces it is the reason
+    it can never come back: passing the old argument is an error, not a
+    synonym."""
+    import inspect
+    assert "fixed_gpu_class" not in inspect.signature(generate_profile).parameters
+    with pytest.raises(TypeError):
+        generate_profile(42, fixed_gpu_class="mid_range")
 
 
 def test_the_exposed_renderer_is_the_personas_on_the_bare_call_too():
@@ -98,19 +113,6 @@ def test_an_explicit_class_pin_still_wins(tier):
     this whole file exists to prevent. It is now refused, and the refusal has its
     own test below."""
     assert generate_profile(7, pin={"gpu.class_tier": tier}).gpu.class_tier == tier
-
-
-@pytest.mark.parametrize("tier", ["low_end", "mid_range"])
-def test_an_explicit_fixed_gpu_class_still_wins(tier):
-    assert generate_profile(7, fixed_gpu_class=tier).gpu.class_tier == tier
-
-
-def test_a_pin_outranks_fixed_gpu_class():
-    """The documented precedence, unchanged: pin, then fixed_gpu_class, then the
-    seed's persona."""
-    p = generate_profile(7, pin={"gpu.class_tier": "mid_range"},
-                         fixed_gpu_class="low_end")
-    assert p.gpu.class_tier == "mid_range"
 
 
 @pytest.mark.parametrize("tier", ["high_end", "integrated_old", "integrated_modern"])
@@ -146,14 +148,20 @@ def test_a_pinned_taskbar_moves_availheight():
     assert p.screen.avail_height == p.screen.height - 72
 
 
-def test_a_pinned_availheight_outranks_the_derivation():
-    """An override must not overwrite a more specific override: if the
-    caller pinned availHeight as well, that is the value they asked for,
-    even though it no longer matches height minus the taskbar."""
-    p = generate_profile(42, pin={"screen.taskbar_px": 72,
-                                  "screen.avail_height": 900})
-    assert p.screen.avail_height == 900
+def test_the_taskbar_derivation_has_no_exception_left():
+    """The re-derivation used to carry "unless avail_height was itself pinned".
 
+    That special case existed to let a more specific override win over a
+    correction. `screen.avail_width` and `screen.avail_height` left the pin table
+    on 2026-09-15 - the engine derives the available rect from width, height and
+    taskbar_px, and neither is emitted, so pinning one moved a label and nothing
+    a page can read - so there is no override left to lose to, and the branch is
+    gone. What remains is the invariant it protected."""
+    p = generate_profile(42, pin={"screen.taskbar_px": 72})
+    assert p.screen.taskbar_px == 72
+    assert p.screen.avail_height == p.screen.height - 72
+    with pytest.raises(ValueError):
+        generate_profile(42, pin={"screen.avail_height": 1000})
 
 def test_availheight_matches_the_taskbar_with_no_pin_at_all():
     """The control: the default path was already coherent, and the fix must
@@ -268,8 +276,7 @@ def test_the_class_still_comes_from_the_persona_not_from_the_reported_name():
     """Il secondo caso che deve NON scattare. Il nome riportato e' cambiato;
     la CLASSE su cui il bundle e' condizionato non deve essersi mossa, o
     l'estrazione pesata rimappa ogni identita'."""
-    from invisible_core._webgl_personas import forced_gpu_class
     for seed in (0, 42, 999, 45061):
-        atteso = forced_gpu_class(seed)
-        if atteso:
-            assert generate_profile(seed).gpu.class_tier == atteso
+        persona = select_persona(seed)
+        if persona:
+            assert generate_profile(seed).gpu.class_tier == persona["gpu_class"]

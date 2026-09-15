@@ -187,9 +187,7 @@ def _matches(entry: Dict, renderer: Optional[str], vendor: Optional[str]) -> boo
             and (vendor is None or entry["vendor"] == vendor))
 
 
-def choose_persona(seed: int,
-                   pin: Optional[Dict] = None,
-                   fixed_gpu_class: Optional[str] = None) -> Optional[Dict]:
+def choose_persona(seed: int, pin: Optional[Dict] = None) -> Optional[Dict]:
     """THE answer to "which validated GPU persona does this session present?".
 
     One function, because that question used to be answered in six places that
@@ -252,7 +250,7 @@ def choose_persona(seed: int,
         # is stable across runs.
         return candidates[0]
 
-    wanted = pin.get("gpu.class_tier") or fixed_gpu_class
+    wanted = pin.get("gpu.class_tier")
     if wanted and base["gpu_class"] != wanted:
         candidates = [p for p in pool if p["gpu_class"] == wanted]
         if not candidates:
@@ -286,16 +284,24 @@ def persona_for(renderer: str, vendor: str) -> Optional[Dict]:
 
 
 def forced_gpu_class(seed: int) -> Optional[str]:
-    """The gpu_class the forge conditions the bundle on (== the selected GPU's class via
-    classify_gpu), so cores/screen/fonts stay coherent with the GPU we expose. Does NOT
-    affect FP Pro tampering_ml (proven) but matters for detectors that cross-check hardware
-    tier. None on Linux.
+    """The gpu_class of the persona this seed presents. A QUERY, not a knob.
 
-    ⛔ SUPERSEDED as an argument to `generate_profile`, and kept only because it is
-    a published name. `generate_profile` now derives the class from the persona it
-    chooses, so passing `fixed_gpu_class=forced_gpu_class(seed)` restates the
-    default and is one more place that has to be kept in step. Call
-    `generate_profile(seed, pin=...)` and let it decide."""
+    ⛔ IT IS NO LONGER AN ARGUMENT TO ANYTHING, and that is the whole of what
+    changed on 2026-09-15. `generate_profile` used to take a `fixed_gpu_class=`
+    beside its `pin`, which `choose_persona` treated as a synonym for
+    `pin["gpu.class_tier"]`: two spellings of one request, five call sites, and
+    three of them disagreeing with the other two about whether to pass it. The
+    argument is gone and the class is derived from the persona, so there is one
+    way to ask.
+
+    The function stays because it asks a different kind of question - what class
+    does this seed land on, without building a profile - and because
+    `invisible_playwright._webgl_personas` re-exports it as one of the import
+    shapes that survived the 2026-07-03 package split
+    (`tests/test_backcompat.py` in the wrapper names those as shipped in
+    downstream PRs). Reading it costs nothing and commits nobody: it derives
+    from `select_persona` and owns no state.
+    """
     p = select_persona(seed)
     return p["gpu_class"] if p else None
 

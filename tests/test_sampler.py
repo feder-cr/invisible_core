@@ -227,7 +227,11 @@ _EXPECTED_KEYS = {
     "hw_concurrency", "msaa_samples",
     "audio_sample_rate", "audio_output_latency_ms", "audio_max_channel_count",
     "av1_enabled", "webm_encoder_enabled",
-    "mediasource_webm", "mediasource_mp4", "webspeech_synth",
+    "mediasource_webm", "mediasource_mp4",
+    # `webspeech_synth` left the forge on 2026-09-15: it was drawn here and
+    # read by nobody, because `media.webspeech.synth.enabled` is emitted as a
+    # constant. All the draw did was make Profile.codec disagree with the pref
+    # the browser gets, on about 12% of seeds.
     "storage_quota_mb", "dark_theme",
 }
 
@@ -313,8 +317,7 @@ def test_forge_sample_avail_h_defaults_to_h_minus_the_taskbar_when_missing(monke
         "hw_concurrency": 8,
         "msaa_samples": 4,
         "codec": {"av1_enabled": True, "webm_encoder_enabled": True,
-                  "mediasource_webm": True, "mediasource_mp4": True,
-                  "webspeech_synth": True},
+                  "mediasource_webm": True, "mediasource_mp4": True},
         "storage_quota_mb": 256000,
         "audio": {"rate": 48000, "latency": 20, "channels": 2},
         "dark_theme": 0,
