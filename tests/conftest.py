@@ -26,11 +26,29 @@ installed copy is legitimately the one under test.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 
 import pytest
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
+
+# ⛔ A SUBPROCESS ESCAPES EVERYTHING THIS FILE GUARDS, so this is where it is
+# caught. `pythonpath = ["src"]` in the pyproject points pytest ITSELF at this
+# tree; a child `python -c "import invisible_core"` spawned by a test gets none
+# of that and falls back to the interpreter's editable install - which on a
+# machine with several checkouts is somebody else's tree on somebody else's
+# commit. Measured 2026-09-16 from a git worktree: `test_seal_version.py`
+# compared `__version__` in-process (30.23.0, this tree) against the same
+# attribute read by its own child process (30.22.0, the shared checkout), and
+# went red on a comparison between two correct answers to two different
+# questions. The same hole had been closed one test file at a time
+# (`test_english.py`); it is closed once here, at import, before any test
+# spawns anything.
+_SRC = str(_REPO / "src")
+if _SRC not in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+    os.environ["PYTHONPATH"] = _SRC + (
+        os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")
 
 
 def pytest_configure(config):

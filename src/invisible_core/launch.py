@@ -83,11 +83,11 @@ def build_launch_env(
     timezone: Optional[str] = None,
     #: The address to DECLARE as srflx, or None to declare nothing. ⛔ It is NOT
     #: the exit IP, and the old name (`egress_ip`) made it look like one: it is
-    #: the decision `SessionGeo.srflx_da_dichiarare` makes by looking at what the
+    #: the decision `SessionGeo.srflx_to_declare` makes by looking at what the
     #: exit is CAPABLE of. The twin in the wrapper (`_session.build_env`) carries
     #: the same name on purpose: there were already two landing points, and two
     #: different names would have hidden that they are the same thing.
-    srflx_dichiarato: Optional[str] = None,
+    srflx_declared: Optional[str] = None,
     manifest_path: "Optional[str | os.PathLike[str]]" = None,
     base_env: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
@@ -118,7 +118,7 @@ def build_launch_env(
         # An already-set value in base_env wins, same rule as the WebRTC IP:
         # an A/B harness has to be able to point this somewhere else.
         env.setdefault("STEALTHFOX_FONT_MANIFEST", str(manifest_path))
-    webrtc_ip = env.get("STEALTHFOX_WEBRTC_PUBLIC_IP") or srflx_dichiarato
+    webrtc_ip = env.get("STEALTHFOX_WEBRTC_PUBLIC_IP") or srflx_declared
     if webrtc_ip:
         env["STEALTHFOX_WEBRTC_PUBLIC_IP"] = webrtc_ip
         # SOLO dietro un proxy. Un Firefox retail dual-stack emette un srflx
@@ -373,7 +373,7 @@ def build_launch_plan(
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)
     env = build_launch_env(prefs, timezone=geo.timezone or None,
-                           srflx_dichiarato=geo.srflx_da_dichiarare())
+                           srflx_declared=geo.srflx_to_declare())
     argv = [binary, "-no-remote", "-profile", str(pdir)]
     argv += list(extra_args or [])
     if url:

@@ -32,26 +32,10 @@ pytestmark = pytest.mark.unit
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-
-def _env_of_this_tree():
-    """An environment in which a SUBPROCESS imports the tree under test.
-
-    ⛔ WITHOUT THIS THE SUBPROCESS IMPORTS SOMEBODY ELSE'S CHECKOUT. `pytest`
-    reaches this tree through `pythonpath = ["src"]`, resolved against the
-    pyproject; a child process gets none of that and falls back to the
-    interpreter's editable install, which on this machine points at the shared
-    checkout. Measured while writing these tests: `python -m
-    invisible_core.english` answered "No module named invisible_core.english",
-    correctly, about a tree that is not this one. It is the rule this project
-    already writes down for pytest, one process deeper.
-    """
-    import os
-
-    env = dict(os.environ)
-    existing = env.get("PYTHONPATH")
-    src = str(_ROOT / "src")
-    env["PYTHONPATH"] = src + (os.pathsep + existing if existing else "")
-    return env
+# The subprocesses below import THIS tree because `conftest.py` puts its `src`
+# on PYTHONPATH at import, for every test that spawns a child. A helper doing
+# the same thing lived here first, one file at a time; it was moved there when
+# `test_seal_version.py` went red on the same hole, so it is written once.
 
 
 @pytest.mark.parametrize(
@@ -206,8 +190,7 @@ def test_the_root_is_an_argument_so_there_is_nothing_to_refuse():
     # wrong question cannot be mistaken for a right answer.
     r = subprocess.run([sys.executable, "-m", "invisible_core.english",
                         "--root", str(other)],
-                       capture_output=True, text=True, cwd=str(other),
-                       env=_env_of_this_tree())
+                       capture_output=True, text=True, cwd=str(other))
     assert r.returncode == 0, r.stdout + r.stderr
     assert str(other) in r.stdout, r.stdout
 
@@ -216,6 +199,6 @@ def test_the_selftest_is_runnable_as_a_command():
     """The hook runs it as a command, so the command is what has to work."""
     r = subprocess.run([sys.executable, "-m", "invisible_core.english",
                         "--selftest"], capture_output=True, text=True,
-                       cwd=str(_ROOT), env=_env_of_this_tree())
+                       cwd=str(_ROOT))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "ALL GOOD" in r.stdout, r.stdout

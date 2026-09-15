@@ -666,7 +666,7 @@ class SessionGeo(NamedTuple):
     ⛔ ``egress_ip`` IS A FACT, NOT A DECISION: the address this session really
     leaves from, discovered once, with or without a proxy. Whether that value is
     then DECLARED to the engine as an srflx is decided by
-    :meth:`srflx_da_dichiarare`, and without a proxy the answer is no.
+    :meth:`srflx_to_declare`, and without a proxy the answer is no.
 
     Until 2026-08-26 this field was ``None`` without a proxy, and the "no" was
     expressed by that very ``None``. One field for two meanings: the effect was
@@ -703,9 +703,9 @@ class SessionGeo(NamedTuple):
     #: has UDP both demonstrated AND coherent, because there the real srflx is
     #: already born with the right address and declaring one would add a
     #: candidate with no matching allocation.
-    srflx_soppresso: bool = False
+    srflx_suppressed: bool = False
 
-    def srflx_da_dichiarare(self) -> Optional[str]:
+    def srflx_to_declare(self) -> Optional[str]:
         """The address the engine must announce as its srflx, or ``None``.
 
         ⛔ THE ONE PLACE where this question is answered. The two env builders -
@@ -713,10 +713,10 @@ class SessionGeo(NamedTuple):
         wrapper - call it rather than recomputing it: they were already two
         landing points, and the same rule written twice could have drifted.
         """
-        return None if self.srflx_soppresso else self.egress_ip
+        return None if self.srflx_suppressed else self.egress_ip
 
 
-def _srflx_soppresso(proxy: Optional[Dict[str, str]],
+def _srflx_suppressed(proxy: Optional[Dict[str, str]],
                      egress_ip: Optional[str]) -> bool:
     """Declare a synthetic srflx, or let the real one through?
 
@@ -854,7 +854,7 @@ def prepare_session_geo(
     if tz and tz.lower() != "auto":
         lat, lon = _coordinate(egress_ip)
         return SessionGeo(tz, egress_ip, lat, lon,
-                          _srflx_soppresso(proxy, egress_ip))  # explicit IANA wins
+                          _srflx_suppressed(proxy, egress_ip))  # explicit IANA wins
     try:
         ip = egress_ip if proxy_set else discover_egress_ip(None)
         if ip is None:  # proxy set but discovery failed above
@@ -865,7 +865,7 @@ def prepare_session_geo(
         # and `egress_ip` is `None`. Carrying the second meant throwing the
         # discovery away and making `resolve_session_locale` do it again.
         return SessionGeo(ip_to_timezone(ip, _geoip_database(ip, proxy_set)), ip, lat, lon,
-                          _srflx_soppresso(proxy, ip))
+                          _srflx_suppressed(proxy, ip))
     except Exception:
         if proxy_set:
             raise  # fail-early behind a proxy (timezone_mismatch trap)

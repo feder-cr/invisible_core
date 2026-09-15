@@ -405,7 +405,7 @@ def test_prepare_geo_no_webrtc_override_without_proxy(stub_egress):
     """
     geo = prepare_session_geo("auto", None)
     assert geo.timezone == "America/New_York"
-    assert geo.srflx_da_dichiarare() is None, (
+    assert geo.srflx_to_declare() is None, (
         "with no proxy the engine must receive no srflx to declare: the real "
         "one is born with the right address and with its own allocation")
     assert geo.egress_ip == "203.0.113.7", (
@@ -555,7 +555,7 @@ def _decide(monkeypatch, answer, egress="203.0.113.7"):
     from invisible_core import _capability, _geo
     fake = _FakeCapability(answer)
     monkeypatch.setattr(_capability, "capability", fake)
-    return _geo._srflx_soppresso({"server": "socks5://gw:1080"}, egress), fake
+    return _geo._srflx_suppressed({"server": "socks5://gw:1080"}, egress), fake
 
 
 def test_the_fields_DEFAULT_is_the_cautious_one():
@@ -570,8 +570,8 @@ def test_the_fields_DEFAULT_is_the_cautious_one():
     """
     from invisible_core._geo import SessionGeo
     g = SessionGeo("America/New_York", "198.51.100.4")
-    assert g.srflx_soppresso is False, "il default deve DICHIARARE"
-    assert g.srflx_da_dichiarare() == "198.51.100.4"
+    assert g.srflx_suppressed is False, "il default deve DICHIARARE"
+    assert g.srflx_to_declare() == "198.51.100.4"
 
 
 def test_with_coherent_udp_the_srflx_is_SUPPRESSED(monkeypatch):
@@ -588,32 +588,32 @@ def test_with_coherent_udp_the_srflx_is_SUPPRESSED(monkeypatch):
     # AND that the browser sends that UDP inside the proxy. This test exercised
     # one only, and for an hour the function checked one only.
     monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
-    soppresso, _ = _decide(monkeypatch, {"udp": True, "udp_matches_tcp": True})
-    assert soppresso is True
-    assert SessionGeo("tz", "203.0.113.7", None, None, True).srflx_da_dichiarare() is None
+    suppressed, _ = _decide(monkeypatch, {"udp": True, "udp_matches_tcp": True})
+    assert suppressed is True
+    assert SessionGeo("tz", "203.0.113.7", None, None, True).srflx_to_declare() is None
 
 
 def test_with_INCOHERENT_udp_it_declares(monkeypatch):
     """UDP is there but leaves from another address: the real srflx would carry it."""
-    soppresso, _ = _decide(monkeypatch, {"udp": True, "udp_matches_tcp": False})
-    assert soppresso is False
+    suppressed, _ = _decide(monkeypatch, {"udp": True, "udp_matches_tcp": False})
+    assert suppressed is False
 
 
 def test_without_udp_it_declares(monkeypatch):
-    soppresso, _ = _decide(monkeypatch, {"udp": False, "udp_matches_tcp": None})
-    assert soppresso is False
+    suppressed, _ = _decide(monkeypatch, {"udp": False, "udp_matches_tcp": None})
+    assert suppressed is False
 
 
 def test_a_SILENT_probe_is_not_a_licence_to_stay_quiet(monkeypatch):
     """Missing fields are not a demonstration of coherence."""
-    soppresso, _ = _decide(monkeypatch, {})
-    assert soppresso is False
+    suppressed, _ = _decide(monkeypatch, {})
+    assert suppressed is False
 
 
 def test_a_probe_that_BLOWS_UP_cannot_fail_the_launch(monkeypatch):
     """Qualunque errore cade dal lato prudente, e il lancio prosegue."""
-    soppresso, _ = _decide(monkeypatch, OSError("rete giu'"))
-    assert soppresso is False
+    suppressed, _ = _decide(monkeypatch, OSError("rete giu'"))
+    assert suppressed is False
 
 
 def test_the_exit_already_discovered_is_REUSED_not_remeasured(monkeypatch):
@@ -644,7 +644,7 @@ def test_without_a_proxy_the_probe_is_NOT_even_called(monkeypatch):
     from invisible_core import _capability, _geo
     fake = _FakeCapability({"udp": True, "udp_matches_tcp": True})
     monkeypatch.setattr(_capability, "capability", fake)
-    assert _geo._srflx_soppresso(None, "203.0.113.7") is True
+    assert _geo._srflx_suppressed(None, "203.0.113.7") is True
     assert fake.calls == [], "probing without a proxy is a wasted round-trip"
 
 
@@ -653,7 +653,7 @@ def test_the_question_is_answered_in_ONE_place_only():
     import inspect
     from invisible_core import launch
     src = inspect.getsource(launch.build_launch_env)
-    assert "srflx_soppresso" not in src, (
+    assert "srflx_suppressed" not in src, (
         "build_launch_env is re-reading the switch: the rule would go back to "
         "being written in two places, which is how they diverge")
 
@@ -696,11 +696,11 @@ def test_coherent_udp_is_NOT_enough_if_the_browser_does_not_route_udp_through_th
                         lambda p, **k: {"udp": True, "udp_matches_tcp": True})
 
     monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", False)
-    assert _geo._srflx_soppresso({"server": "socks5://g:1"}, "203.0.113.7") is False, (
+    assert _geo._srflx_suppressed({"server": "socks5://g:1"}, "203.0.113.7") is False, (
         "with no UDP routing through the proxy it MUST keep declaring")
 
     monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
-    assert _geo._srflx_soppresso({"server": "socks5://g:1"}, "203.0.113.7") is True, (
+    assert _geo._srflx_suppressed({"server": "socks5://g:1"}, "203.0.113.7") is True, (
         "con l'instradamento acceso E l'UDP coerente il ramo deve accendersi, "
         "altrimenti la costante non e' una condizione ma un interruttore morto")
 
@@ -718,7 +718,7 @@ def test_udp_routing_is_declared_in_one_place_only():
     # found it in the COMMENT explaining why the constant exists. It is this
     # project's most repeated rule, applied in reverse.
     lines = [r.split("#")[0] for r in
-             inspect.getsource(_geo._srflx_soppresso).splitlines()]
+             inspect.getsource(_geo._srflx_suppressed).splitlines()]
     source = chr(10).join(lines)
     assert "UDP_GOES_THROUGH_SOCKS" in source, (
         "the decision is not reading the constant: the fact would go back to "
@@ -802,7 +802,7 @@ def test_without_a_proxy_the_engine_gets_neither_srflx_nor_ipv6_filter(monkeypat
 
     assert geo.egress_ip == "203.0.113.7", "the fact has to be in hand"
     env = build_launch_env({}, timezone=geo.timezone or None,
-                           srflx_dichiarato=geo.srflx_da_dichiarare(),
+                           srflx_declared=geo.srflx_to_declare(),
                            base_env={})
 
     assert "STEALTHFOX_WEBRTC_PUBLIC_IP" not in env, (

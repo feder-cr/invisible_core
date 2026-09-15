@@ -279,7 +279,7 @@ def configure_proxy(
 #: Without it, **UDP goes around the proxy**, and a STUN reached that way answers
 #: with the machine's REAL address.
 #:
-#: Who reads it: `_geo._srflx_soppresso`. Giving up on declaring an srflx only
+#: Who reads it: `_geo._srflx_suppressed`. Giving up on declaring an srflx only
 #: makes sense if the REAL one will be born with the right address, and with UDP
 #: going around the proxy it would be born with the home address. In other words
 #: the condition "the exit carries coherent UDP" is NOT enough: the browser also
