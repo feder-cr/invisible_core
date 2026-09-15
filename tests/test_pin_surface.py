@@ -47,10 +47,6 @@ DELIBERATELY_NOT_EMITTED = {
     "screen.avail_height": (
         "Same as avail_width. `generate_profile` re-derives it when taskbar_px "
         "is pinned and avail_height is not, which is the coherence that matters."),
-    "screen.tier": (
-        "Sampler bookkeeping ('1440p'), used to condition the draw and never "
-        "shown to a page. No pref can carry it because there is nothing to "
-        "carry."),
 }
 
 

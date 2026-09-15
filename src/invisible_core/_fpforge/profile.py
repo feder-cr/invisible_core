@@ -266,7 +266,14 @@ class FontProfile:
 
 _PIN_GROUPS = {
     "gpu": {"vendor", "renderer", "class_tier"},
-    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "tier", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
+    # ⛔ `tier` IS NOT HERE, and cannot be: pins land in `_apply_pins_to_raw`,
+    # which runs AFTER `_sample_raw`, so a pinned tier cannot condition the draw
+    # it names. It emitted no pref either - it is the sampler's own label for the
+    # screen it drew ("1440p"), never shown to a page - so pinning it overwrote a
+    # description of a decision already taken and changed nothing else. The FIELD
+    # stays on ScreenProfile, where it is an honest label; what went is the
+    # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
+    "screen": {"width", "height", "avail_width", "avail_height", "dpr", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
                "color_depth"},
     "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
                  "voices", "fake_media_devices",
@@ -361,7 +368,6 @@ _PIN_TO_RAW = {
     "screen.avail_width": "screen_avail_w",
     "screen.avail_height": "screen_avail_h",
     "screen.dpr": "dpr",
-    "screen.tier": "screen_tier",
     "hardware.concurrency": "hw_concurrency",
     "hardware.storage_quota_mb": "storage_quota_mb",
     "audio.sample_rate": "audio_sample_rate",
