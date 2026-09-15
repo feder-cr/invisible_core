@@ -254,3 +254,23 @@ def test_the_codec_prefs_use_names_the_binary_actually_reads(profile):
     P._apply_codecs(prefs, profile)
     assert "media.webm.enabled" in prefs and "media.mp4.enabled" in prefs
     assert not any("mediasource" in k for k in prefs), sorted(prefs)
+
+
+def test_uploading_a_real_file_is_allowed_by_the_parent_process(profile):
+    """⛔ WITHOUT THIS PREF NO UPLOAD WORKS, AND THE ERROR NAMES NOTHING.
+
+    `set_input_files()` and `FileChooser.set_files()` both end in
+    `File.createFromFileName` inside the content process, and the parent
+    refuses that for any content process whose remote type is not `file`,
+    answering `NS_ERROR_DOM_INVALID_STATE_ERR`. What the caller reads is
+    `An attempt was made to use an object that is not, or is no longer,
+    usable`, which points at no file, no API and no pref.
+
+    Asserted on the WHOLE dict rather than on a section function, because this
+    one has no section of its own: it is a launch-wide capability, and the test
+    that matters is that every session gets it - not that some helper emits it.
+    """
+    prefs = P.translate_profile_to_prefs(profile)
+    assert prefs.get("dom.file.createInChild") is True, (
+        "without dom.file.createInChild every file upload fails with an "
+        "InvalidStateError that names nothing: see [B178]")

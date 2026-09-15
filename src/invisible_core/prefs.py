@@ -733,6 +733,32 @@ _BASELINE: Dict[str, Any] = {
     "fission.webContentIsolationStrategy":                0,  # IsolateNothing
     "dom.ipc.processCount.webIsolated":                   1,
 
+    # === Uploading a real file, which did not work without this ===
+    #
+    # Without it `set_input_files()` and `FileChooser.set_files()` both fail
+    # with `InvalidStateError: An attempt was made to use an object that is
+    # not, or is no longer, usable`, and the sentence names nothing that leads
+    # anywhere. The refusal is explicit and it is in the PARENT process, not in
+    # the sandbox: `BackgroundParentImpl::RecvPFileCreatorConstructor` answers
+    # `NS_ERROR_DOM_INVALID_STATE_ERR` to any content process whose remote type
+    # is not `file`, with the comment "We allow the creation of File via this
+    # IPC call only for the 'file' process or for testing", and this pref is
+    # the "or for testing".
+    #
+    # Automation is the case it was written for: Juggler builds the `File`
+    # objects in the content process (`PageAgent._setFileInputFiles` calls
+    # `File.createFromFileName`) because that is where the `<input>` lives.
+    # Measured 2026-09-15 on Firefox 151: four ways of creating the File - by
+    # name, by name with the existence check off, from an `nsIFile`, and
+    # through the page's own `File` - all reject with the same code, so the API
+    # is not the variable. With this pref the same call answers, and the page's
+    # `change` handler reports the real name and the real size.
+    #
+    # A page cannot see it: `File.createFromFileName` is `[ChromeOnly]` and
+    # prefs are not readable from content, so there is nothing here for a
+    # detector to measure. See `70-known-bugs.md` [B178].
+    "dom.file.createInChild":                             True,
+
 
     # Telemetry & data reporting.
 
