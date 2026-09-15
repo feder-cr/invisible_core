@@ -489,15 +489,30 @@ def test_the_summary_never_claims_a_gate_that_did_not_run(tmp_path, capsys):
     """The old closing line was `all tests green, pin matches, no forbidden
     names - push proceeding`, printed unconditionally in one of the three hooks
     and from a variable set in three places and read in none in another. It is
-    the sentence a human reads before believing the push was checked."""
-    root = make_repo(tmp_path, block="pytest = false\npin = false", workbench=False)
+    the sentence a human reads before believing the push was checked.
+
+    ⛔ EVERY GATE HAS TO BE NAMED IN THE BLOCK, and `english` joined it on
+    2026-09-15. The scenario is "nothing is configured to run", so a new gate
+    belongs in the list of things turned off - otherwise this stops testing the
+    summary and starts testing how many gates happen to be on by default.
+    """
+    root = make_repo(tmp_path,
+                     block="pytest = false\npin = false\nenglish = false",
+                     workbench=False)
     code, _ = run_policy(root)
     assert code == 0
     line = [l for l in capsys.readouterr().out.splitlines() if "push proceeding" in l][0]
-    for absent in ("tests", "pin", "names", "publish"):
-        assert f"- {absent}" not in line and f", {absent}" not in line, (
+    # ⛔ A CLAIM LIVES BEFORE `(SKIPPED:`, AND ONLY THERE. Searching the whole
+    # line conflates the two halves, which say opposite things: naming a gate in
+    # the SKIPPED list is the honest disclosure this test exists to require, not
+    # the false claim it exists to forbid. It read the whole line until
+    # 2026-09-15 and survived only because no skip label happened to contain a
+    # claim label - `language` does.
+    claimed = line.split("(SKIPPED:")[0]
+    for absent in ("tests", "pin", "names", "publish", "language"):
+        assert f"- {absent}" not in claimed and f", {absent}" not in claimed, (
             f"the summary claims {absent!r} ran: {line}")
-    assert "NOTHING was checked" in line
+    assert "NOTHING was checked" in claimed
 
 
 def test_the_summary_lists_exactly_what_ran(tmp_path, capsys):

@@ -39,6 +39,7 @@ WHAT EACH REPOSITORY DECLARES, in its own pyproject under
 
     pytest       = true|false     run the suite before pushing
     pin          = true|false     compare the invisible-core pin (consumers)
+    english      = true|false     refuse Italian prose in a public repository
     release_tags = ["v"]          tag prefixes that mean "this is a release"
 
 The block is REQUIRED. A missing one is a refusal rather than a default,
@@ -100,7 +101,14 @@ _NAME_CHECKER = "check_forbidden_names.py"
 #: repo, which is why it is looked up in the workbench and skipped when absent.
 _DISCLOSURE_CHECKER = "check_internal_disclosure.py"
 
-_DEFAULTS: Dict[str, object] = {"pytest": True, "pin": True, "release_tags": ["v"]}
+#: ⛔ `english` DEFAULTS TO TRUE, and that direction is the whole lesson. The
+#: check used to be a script COPIED into each repository that wanted it, so a
+#: repository got it only if somebody remembered - and `invisible_core`, the
+#: package both consumers pin, is the one nobody remembered. It went a year
+#: unchecked and carried Italian into two messages a user reads. A gate that
+#: arrives only on request is a gate the next repository will not have.
+_DEFAULTS: Dict[str, object] = {"pytest": True, "pin": True, "english": True,
+                                "release_tags": ["v"]}
 
 
 class HookConfigError(Exception):
@@ -133,7 +141,8 @@ def hook_config(root: Path) -> Dict[str, object]:
         raise HookConfigError(
             f"{pyproject} has no [tool.invisible.hooks] block, so this hook "
             f"does not know which gates this repository wants. Declare it - "
-            f"pytest / pin / release_tags - rather than letting a default "
+            f"pytest / pin / english / release_tags - rather than letting a "
+            f"default "
             f"decide, because the wrong default silently skips a gate and a "
             f"skipped gate reads exactly like a passed one.")
 
@@ -490,6 +499,38 @@ def main(
             if rc:
                 return rc
             ran.append("internals")
+
+    # --- the language ------------------------------------------------
+    # ⛔ THIS ONE DOES NOT LIVE IN THE WORKBENCH, AND THAT IS THE POINT. Every
+    # gate above is an external script found by walking up from the repo, so
+    # from a git WORKTREE - which rule 17 says is where all the work happens -
+    # the hook cannot find it and prints `SKIPPED: name scan, disclosure scan`
+    # in a line that reads like a normal one. This check ships inside the
+    # package both repos already depend on, so it is present wherever the core
+    # is, worktree or clone or runner, and it has nothing to skip.
+    #
+    # It also answers about the repository being PUSHED rather than about the
+    # one it lives in: the tree is an argument. The script version could only
+    # judge its own repo while looking like it judged whichever you pointed it
+    # at, and printed a clean bill for the wrong tree on 2026-09-15.
+    setting = env.get("INVISIBLE_ENGLISH_CHECK")
+    if not cfg["english"]:
+        skipped.append("language")
+    elif setting == "skip":
+        _say("WARNING: INVISIBLE_ENGLISH_CHECK=skip. Nothing checked this push "
+             "for Italian prose in a public repository.")
+        skipped.append("language")
+    else:
+        rc = run([py, "-m", "invisible_core.english", "--root", str(root)], root)
+        if rc:
+            _say("", err=True)
+            _say("REFUSED - the files above are not in English. The public "
+                 "repositories are English-only, names included; the workbench "
+                 "is not, and is not pushed.", err=True)
+            _say("Set INVISIBLE_ENGLISH_CHECK=skip to state on the record that "
+                 "this push goes out unchecked.", err=True)
+            return 1
+        ran.append("language")
 
     # --- the publish gate, on release tags only ------------------------
     # Only release tags: the gate builds the project twice, and a hook that
