@@ -164,7 +164,6 @@ class CodecProfile:
     webm_encoder_enabled: bool
     mediasource_webm: bool
     mediasource_mp4: bool
-    webspeech_synth: bool
 
 
 @dataclass(frozen=True)
@@ -253,7 +252,6 @@ class FontProfile:
 #      "audio.max_channel_count"
 #      "codec.av1_enabled", "codec.webm_encoder_enabled",
 #      "codec.mediasource_webm", "codec.mediasource_mp4",
-#      "codec.webspeech_synth"
 #      "webgl.msaa_samples"
 #      "font.ui_family", "font.ui_size", "font.monospace_size",
 #      "font.alpha_ladder"
@@ -277,7 +275,7 @@ _PIN_GROUPS = {
     "audio": {"sample_rate", "output_latency_ms", "max_channel_count"},
     "codec": {
         "av1_enabled", "webm_encoder_enabled",
-        "mediasource_webm", "mediasource_mp4", "webspeech_synth",
+        "mediasource_webm", "mediasource_mp4",
     },
     # ⛔ `webgl.msaa_samples` WAS HERE and came out on 2026-09-15. It could not be
     # honoured on Windows by design (the emitted value is pinned to 4 so
@@ -373,7 +371,6 @@ _PIN_TO_RAW = {
     "codec.webm_encoder_enabled": "webm_encoder_enabled",
     "codec.mediasource_webm": "mediasource_webm",
     "codec.mediasource_mp4": "mediasource_mp4",
-    "codec.webspeech_synth": "webspeech_synth",
     "webgl.msaa_samples": "msaa_samples",
     # Fonts: pinnable like everything else. The sampler does not produce these
     # (they are invariant, see FontProfile), so _sample_raw seeds the raw dict
@@ -715,7 +712,6 @@ def generate_profile(
             webm_encoder_enabled=bool(raw["webm_encoder_enabled"]),
             mediasource_webm=bool(raw["mediasource_webm"]),
             mediasource_mp4=bool(raw["mediasource_mp4"]),
-            webspeech_synth=bool(raw["webspeech_synth"]),
         ),
         webgl=WebGLProfile(msaa_samples=int(raw["msaa_samples"])),
         font=FontProfile(

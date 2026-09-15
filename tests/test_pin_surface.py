@@ -51,14 +51,6 @@ DELIBERATELY_NOT_EMITTED = {
         "Sampler bookkeeping ('1440p'), used to condition the draw and never "
         "shown to a page. No pref can carry it because there is nothing to "
         "carry."),
-    "codec.webspeech_synth": (
-        "`media.webspeech.synth.enabled` is emitted as a constant True, which is "
-        "retail Firefox's own default on desktop, so a session that answered "
-        "False would be the abnormal one. ⛔ FOLLOW-UP: the forge still DRAWS "
-        "this field (about 10% False), so `Profile.codec.webspeech_synth` "
-        "disagrees with the pref for those profiles. The honest end state is to "
-        "stop drawing it; that touches the codec CPT and is deliberately not "
-        "bundled with the MSAA fix."),
 }
 
 

@@ -390,13 +390,14 @@ class Forge:
             "audio_max_channel_count": int(audio["channels"]),
             # Codec prefs (joint, coherent with GPU class). All 5 are
             # JS-visible: av1/webm_encoder via canPlayType/MediaRecorder,
-            # mediasource_* via MediaSource.isTypeSupported, webspeech_synth
+            # mediasource_* via MediaSource.isTypeSupported. `webspeech_synth`
+            # was drawn here until 2026-09-15 and read by nobody: the pref is a
+            # constant, so the draw only made the Profile contradict it
             # via 'speechSynthesis' in window (CreepJS voices probe).
             "av1_enabled": bool(codec["av1_enabled"]),
             "webm_encoder_enabled": bool(codec["webm_encoder_enabled"]),
             "mediasource_webm": bool(codec["mediasource_webm"]),
             "mediasource_mp4": bool(codec["mediasource_mp4"]),
-            "webspeech_synth": bool(codec["webspeech_synth"]),
             # Storage quota MB (coherent with GPU class - workstation larger SSDs).
             "storage_quota_mb": int(bundle["storage_quota_mb"]),
             # navigator.maxTouchPoints. Sampled per GPU class, from its own
