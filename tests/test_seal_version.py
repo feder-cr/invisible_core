@@ -161,9 +161,9 @@ def test_the_packaged_seal_carries_a_build_id_per_leg():
 
 
 def test_the_packaged_release_seal_declares_no_seal_wide_build_id():
-    """There is no value of a single build_id that is true of five builds. A
-    release seal that carried one would be a true statement about one platform
-    and a false one about the other four, which is how the scalar survived
+    """There is no value of a single build_id that is true of every leg's build.
+    A release seal that carried one would be a true statement about one platform
+    and a false one about all the others, which is how the scalar survived
     review the first time."""
     data = json.loads(packaged_seal_path().read_bytes().decode("utf-8"))
     if not data.get("assets"):

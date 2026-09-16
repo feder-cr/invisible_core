@@ -11,7 +11,7 @@ and the launch-time engine check.
 Two facts about real releases shape the schema, both measured off the five
 published firefox-18 archives on 2026-07-25:
 
-  * The five legs are five independent CI builds, so they carry five different
+  * The legs are independent CI builds, so they carry different
     application.ini BuildIDs (they do agree, and must agree, on Version). The
     BuildID therefore lives in the PER-ASSET record: a client verifies the leg
     it actually runs. A single top-level build_id refused every launch that was
@@ -35,8 +35,8 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 # 1 -> 2 (2026-07-25): BuildID moved into the per-asset record. A schema-1 seal
-# cannot be read forward, because its single BuildID matches at most one of the
-# five legs and there is no way to recover the other four from it.
+# cannot be read forward, because its single BuildID matches at most one leg
+# (see SUPPORTED_LEGS below) and there is no way to recover the others from it.
 SUPPORTED_SEAL_SCHEMA = 2
 
 # The legs we publish: the (platform, arch) pairs an asset can be downloaded
@@ -156,7 +156,7 @@ class Asset:
     size: int
     entry_rel: str
     omni_sha256: str
-    # This leg's application.ini BuildID. Five legs are five CI runs, so this is
+    # This leg's application.ini BuildID. Every leg is its own CI run, so this is
     # the authority for the launch-time check, never a seal-wide scalar.
     build_id: str = ""
 
@@ -173,8 +173,8 @@ class Seal:
     origin: str
     # Top-level "build_id", present only on a seal with no assets (one tree, one
     # build). A release seal MUST NOT carry one: there is no single value that is
-    # true for all five legs, and a scalar that is true for one platform is a
-    # refusal for the other four.
+    # true for every leg in SUPPORTED_LEGS, and a scalar that is true for one
+    # platform is a refusal for all the others.
     build_id_declared: str = ""
 
     @property
@@ -282,10 +282,10 @@ def _parse_seal_bytes(raw: bytes, origin: str) -> Seal:
         readable = ", ".join(str(s) for s in READABLE_SEAL_SCHEMAS)
         why = ""
         if schema < SUPPORTED_SEAL_SCHEMA:
-            why = (" A schema-1 seal carries one BuildID for all five platform "
-                   "legs, which are five separate CI builds; it cannot be read "
-                   "forward, because four of those BuildIDs are simply not in it. "
-                   "Regenerate it (scripts/make_seal.py, or "
+            why = (" A schema-1 seal carries one BuildID for every platform leg "
+                   "it covers, and those legs are separate CI builds; it cannot "
+                   "be read forward, because the BuildIDs of the other legs are "
+                   "simply not in it. Regenerate it (scripts/make_seal.py, or "
                    "`python -m invisible_core seal` for a local one).")
         raise SealError(
             f"seal at {origin} has schema {schema}, this invisible-core reads "
@@ -296,9 +296,9 @@ def _parse_seal_bytes(raw: bytes, origin: str) -> Seal:
         if not build_id:
             raise SealError(
                 f"seal at {origin}: asset {name!r} carries no build_id. Since schema 2 the "
-                f"per-asset BuildID is the authority for the launch-time check (the five "
-                f"published legs are five CI builds with five BuildIDs), so an asset "
-                f"without one would verify against nothing. Regenerate the seal with "
+                f"per-asset BuildID is the authority for the launch-time check (the legs "
+                f"this build publishes are separate CI builds, each with its own BuildID), "
+                f"so an asset without one would verify against nothing. Regenerate the seal with "
                 f"scripts/make_seal.py.")
         assets[name] = Asset(
             name=name, platform=a["platform"], arch=a["arch"], sha256=a["sha256"],
@@ -552,9 +552,9 @@ def engine_problems(ident: EngineIdentity, seal: Seal,
     probs = list(ident.notes)
     if ident.version != seal.upstream_version:
         probs.append(f"application.ini Version {ident.version!r} != {seal.upstream_version!r}")
-    # Five legs, five CI builds, five BuildIDs: the tree is checked against the
-    # leg it IS, not against a seal-wide scalar (which matched one platform and
-    # refused the other four).
+    # One leg, one CI build, one BuildID: the tree is checked against the leg it
+    # IS, not against a seal-wide scalar (which matched one platform and refused
+    # every other).
     expected = expected_build_ids_for(ident, seal, asset)
     p = _build_id_problem("application.ini", ident.build_id, expected)
     if p:

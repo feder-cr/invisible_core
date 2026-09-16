@@ -28,9 +28,10 @@ _SEAL = active_seal()
 
 BINARY_VERSION: str = _SEAL.tag
 FIREFOX_UPSTREAM_VERSION: str = _SEAL.upstream_version
-# The BuildID of the leg THIS host runs. The five published legs are five CI
-# builds with five BuildIDs, so there is no seal-wide value to export here; the
-# launch-time check compares against the per-asset one, not against this.
+# The BuildID of the leg THIS host runs. The published legs (SUPPORTED_LEGS in
+# seal.py) are separate CI builds with separate BuildIDs, so there is no
+# seal-wide value to export here; the launch-time check compares against the
+# per-asset one, not against this.
 BUILD_ID: str = _SEAL.build_id
 CONTRACT_N: int = _SEAL.contract_n
 SEAL_DIGEST: str = _SEAL.digest

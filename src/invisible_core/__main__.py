@@ -394,7 +394,7 @@ def _cmd_seal(a) -> int:
     seal = active_seal()
     out = {
         # One tree, one build, so the top-level build_id IS the whole truth here.
-        # A release seal has no top-level value: its five legs are five builds.
+        # A release seal has no top-level value: each of its legs is its own build.
         "comment": "LOCAL seal generated from an unpacked tree. Not a release.",
         "schema": SUPPORTED_SEAL_SCHEMA, "tag": a.tag, "upstream_version": ident.version,
         "build_id": ident.build_id, "source_commit": "",
