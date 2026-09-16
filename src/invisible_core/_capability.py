@@ -265,6 +265,41 @@ def is_sticky(proxy: Dict[str, str], rounds: int = 6):
 # The verdict, and what is remembered
 # --------------------------------------------------------------------------
 
+def udp_is_usable(udp_allowed: Optional[bool],
+                  udp_exit_ip: Optional[str],
+                  tcp_exit_ip: Optional[str]) -> Optional[bool]:
+    """Is this gateway's UDP USABLE, rather than merely GRANTED? Three answers.
+
+    Measured, and the whole reason the distinction exists: a gateway grants the
+    UDP ASSOCIATE and hands back a relay, and through that relay STUN never
+    answers. Granted is not usable, so the grant on its own must never be read
+    as a capability - `_geo._srflx_suppressed` requires this AND the grant
+    before it stops declaring a candidate, and getting that wrong costs the
+    worst sentence a detector writes.
+
+    The three answers are not two:
+
+    * ``None``  - the question does not apply. The gateway did not grant UDP
+      ASSOCIATE, so there is nothing that could have been usable. Flattening it
+      to ``False`` erases the difference between a gateway that refused and one
+      that granted and then failed to carry a packet, which are different facts
+      about the provider and different things to do about them.
+    * ``False`` - granted and not usable: no UDP exit came back at all, or the
+      one that did is not the address TCP leaves from.
+    * ``True``  - granted, and the two exits are the same address.
+
+    A top-level function, and not the inline expression it was inside
+    ``measure``, because ``measure`` does network and so cannot be called by
+    anything that wants to check this rule. The workbench gate that exists to
+    prove exactly this line had copied it instead, and the copy fell behind the
+    day the core was translated and the field names moved. One place computes
+    it now; a caller that cannot afford the network calls this.
+    """
+    if not udp_allowed:
+        return None
+    return bool(udp_exit_ip) and udp_exit_ip == tcp_exit_ip
+
+
 def _key(proxy: Dict[str, str]) -> str:
     u = urlparse(proxy["server"])
     return "%s://%s:%s" % (u.scheme, u.hostname, u.port)
@@ -304,10 +339,12 @@ def measure(proxy: Dict[str, str],
         "udp": ok_udp,
         "udp_perche": why,
         "udp_exit": ip_udp,
-        # ⛔ la riga che decide se UDP sia USABILE, non solo CONCESSO.
-        # Misurato: un gateway concede l'UDP ASSOCIATE e restituisce un relay,
-        # e attraverso quel relay lo STUN non risponde. Concesso non e' usabile.
-        "udp_matches_tcp": (bool(ip_udp) and ip_udp == ip_tcp) if ok_udp else None,
+        # Usable, not merely granted. The rule and the measurement behind it are
+        # in `udp_is_usable`, which is where they live now: this used to be the
+        # expression itself, and a gate that cannot call `measure` had a second
+        # copy of it that went stale.
+        "udp_matches_tcp": udp_is_usable(ok_udp, udp_exit_ip=ip_udp,
+                                         tcp_exit_ip=ip_tcp),
         "ipv6": has_ipv6(proxy),
         "measured_at": int(time.time()),
     }
