@@ -243,25 +243,17 @@ class FontProfile:
 # ──────────────────────────────────────────────────────────────────────
 #  Pin map: flat dotted-path -> value. Set via `pin=` on generate_profile.
 #
-#  Supported keys:
-#      "gpu.vendor", "gpu.renderer", "gpu.class_tier"
-#      "screen.width", "screen.height", "screen.avail_width",
-#      "screen.avail_height", "screen.dpr", "screen.tier"
-#      "hardware.concurrency", "hardware.storage_quota_mb"
-#      "audio.sample_rate", "audio.output_latency_ms",
-#      "audio.max_channel_count"
-#      "codec.av1_enabled", "codec.webm_encoder_enabled",
-#      "codec.mediasource_webm", "codec.mediasource_mp4",
-#      "webgl.msaa_samples"
-#      "font.ui_family", "font.ui_size", "font.monospace_size",
-#      "font.alpha_ladder"
-#      "font.cleartype_gamma", "font.cleartype_contrast",
-#      "font.cleartype_level", "font.cleartype_pixel_structure",
-#      "font.cleartype_rendering_mode", "font.freetype_gamma",
-#      "font.freetype_contrast"
-#      "screen.color_depth"
-#      "hardware.max_touch_points"
-#      "dark_theme"
+#  Supported keys: the _PIN_GROUPS / _PIN_TOP tables below, which are the only
+#  thing `_validate_pin_key` reads and therefore the only thing a caller can
+#  actually pin.
+#
+#  There is deliberately no hand-written list here any more: a list kept beside
+#  the table it describes drifts from it, and this one already had. Measured
+#  2026-09-16, it named 33 keys against the tables' 40 - it promised four the
+#  core refuses with ValueError ("screen.avail_width", "screen.avail_height",
+#  "screen.tier", "webgl.msaa_samples") and omitted eleven it accepts, among
+#  them "screen.taskbar_px", "screen.chrome_w"/"chrome_h",
+#  "screen.window_x"/"window_y" and five of "hardware.*".
 # ──────────────────────────────────────────────────────────────────────
 
 _PIN_GROUPS = {
