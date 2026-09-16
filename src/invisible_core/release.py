@@ -47,6 +47,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_ROOT = Path.cwd()
 LEDGER_NAME = "PUBLISHED.json"
 LEDGER_SCHEMA = 1
+#: The changelog `record` realigns after an upload, when the project has one.
+#: Not every project does - this one does not - and its absence is not an error.
+CHANGELOG_NAME = "CHANGELOG.md"
 # The identity of the project being gated. DEFAULTS: `main()` resolves them from
 # the pyproject.toml at --project-root before anything reads them, so one gate
 # serves every package that runs it - three when this was written, two since
@@ -768,6 +771,10 @@ def cmd_record(args) -> int:
     print(f"recorded {version} in {ledger_path}")
     print(f"  wheel {info['wheel']['digest']}")
     print(f"  sdist {info['sdist']['digest']}")
+    # The upload has landed, so the index now knows WHEN. Anything the project
+    # states about that moment is derivable from here on and must not be guessed
+    # earlier by hand - see `_align_changelog_date`.
+    _align_changelog_date(root, version, _index_url_for(args))
     return EXIT_OK
 
 
@@ -846,8 +853,12 @@ def cmd_publish(args) -> int:
     return cmd_record(args)
 
 
-def _index_versions(url: str) -> list[str]:
-    """Every version the index serves for this distribution. Raises GateBroken.
+def _index_releases(url: str) -> dict:
+    """The index's `releases` map for this distribution: version -> file records.
+
+    THE ONE place this module opens the index. Every reader below is a view of
+    this call, so the versions the gate cross-checks and the upload date a
+    changelog heading is aligned to cannot come from two fetches that disagree.
 
     A 404 is an answer, not a failure: the project has never been published.
     Anything else that goes wrong is NOT an answer, and the caller must never be
@@ -861,14 +872,90 @@ def _index_versions(url: str) -> list[str]:
             data = json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return []
+            return {}
         raise GateBroken(f"index cross-check failed: {e} ({url})")
     except Exception as e:
         raise GateBroken(f"index cross-check failed: {e} ({url})")
     if not isinstance(data, dict) or not isinstance(data.get("releases", {}), dict):
         raise GateBroken(f"index cross-check failed: {url} did not answer with a "
                          f"releases object")
-    return sorted(data.get("releases", {}))
+    return data.get("releases", {})
+
+
+def _index_versions(url: str) -> list[str]:
+    """Every version the index serves for this distribution. Raises GateBroken."""
+    return sorted(_index_releases(url))
+
+
+def _index_upload_date(version: str, url: str) -> str | None:
+    """The date the index records for `version`, "YYYY-MM-DD", or None.
+
+    The EARLIEST `upload_time_iso_8601` among that version's files, truncated to
+    its date. That is UTC, and it is the same field reduced the same way that the
+    consumer's changelog gate compares a heading against
+    (`min(f["upload_time_iso_8601"] for f in files)[:10]`). Reading it from here
+    rather than from a clock is what makes the two unable to disagree.
+    """
+    files = _index_releases(url).get(version) or []
+    stamps = [f["upload_time_iso_8601"] for f in files
+              if isinstance(f, dict) and f.get("upload_time_iso_8601")]
+    return min(stamps)[:10] if stamps else None
+
+
+def _align_changelog_date(root: Path, version: str, index_url: str) -> None:
+    """Give the CHANGELOG heading for `version` the date the index recorded.
+
+    Run straight after the ledger is written, which is the first moment the fact
+    EXISTS. Before the upload lands, a heading dated by the person writing it is
+    a prediction of a timestamp, and the prediction is wrong whenever the author
+    is east of UTC late in the day: 0.16.2 of the wrapper was headed 2026-09-16
+    (Rome) against an upload at 2026-09-15T23:21Z, and the consumer's e2e gate
+    went red on main. 0.6.0 had been a day out before that, which is why the
+    gate's own docstring says dates are compared at all.
+
+    Nothing here invents a date. If the index cannot be reached, or does not
+    serve this version yet, the file is left exactly as it is and the reason is
+    printed: the consumer's gate is still the net, and a date written
+    confidently from the wrong source is worse than a heading nobody touched.
+    """
+    path = root / CHANGELOG_NAME
+    if not path.is_file():
+        return  # a project without a changelog has nothing to align
+    try:
+        recorded = _index_upload_date(version, index_url)
+    except GateBroken as e:
+        print(f"  {CHANGELOG_NAME} NOT aligned: the index did not answer ({e}). "
+              f"The heading keeps whatever it says.")
+        return
+    if recorded is None:
+        print(f"  {CHANGELOG_NAME} NOT aligned: the index does not serve "
+              f"{DIST_NAME} {version} yet, so there is no upload date to copy. "
+              f"The heading keeps whatever it says.")
+        return
+    raw = path.read_bytes()
+    text = raw.decode("utf-8")
+    heading = re.compile(r"(?m)^(##[ \t]*\[" + re.escape(version)
+                         + r"\][ \t]*-[ \t]*)(\d{4}-\d{2}-\d{2})")
+    found = heading.search(text)
+    if found is None:
+        print(f"  {CHANGELOG_NAME} has no `## [{version}] - YYYY-MM-DD` heading, "
+              f"nothing to align.")
+        return
+    if found.group(2) == recorded:
+        print(f"  {CHANGELOG_NAME} heading for {version} already reads {recorded}.")
+        return
+    new = heading.sub(lambda m: m.group(1) + recorded, text).encode("utf-8")
+    # BYTES, never write_text: the wrapper's changelog is 1017 CRLF lines and
+    # `pathlib.write_text` translates every newline on Windows, which would show
+    # a one-word correction as a full rewrite of the file. A date is the same
+    # length as a date, so the write is length-preserving and the line endings
+    # are untouched - assert both rather than hope.
+    assert len(new) == len(raw), (len(new), len(raw))
+    assert new.count(b"\r\n") == raw.count(b"\r\n")
+    assert new.count(b"\n") == raw.count(b"\n")
+    path.write_bytes(new)
+    print(f"  {CHANGELOG_NAME} heading for {version}: {found.group(2)} -> "
+          f"{recorded}, from the index's upload_time_iso_8601")
 
 
 def _verify_index(version: str, url: str, ledger: Path | None = None) -> int:
@@ -1028,6 +1115,14 @@ def main(argv=None) -> int:
                    help="run the gate and print the upload it authorises, upload nothing")
     u.set_defaults(fn=cmd_publish)
     r = sub.add_parser("record", help="record this version as published (after a successful upload)")
+    # `record` asks the index for the upload date it aligns the changelog to, so
+    # it needs to be pointable at the index the upload actually landed on. Same
+    # default=None reasoning as in _gate_flags: the module constant is not
+    # resolved until main() has read the pyproject.
+    r.add_argument("--index-json-url", default=None,
+                   help="the index JSON API to read the upload date from "
+                        "(default: this project's own, derived from its "
+                        "pyproject name)")
     r.set_defaults(fn=cmd_record)
     s = sub.add_parser("show", help="print the digests, no verdict")
     s.set_defaults(fn=cmd_show)

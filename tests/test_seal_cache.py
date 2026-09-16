@@ -104,7 +104,7 @@ def write_seal(path: Path, *, tag: str = "firefox-18", version: str = SEALED_VER
             "platform": sys.platform, "arch": normalize_arch(platform.machine()),
             "sha256": "00" * 32, "size": 1, "entry_rel": entry_rel(),
             "omni_sha256": omni_sha256,
-            # Per-asset since schema 2: the published legs are five CI builds.
+            # Per-asset since schema 2: each published leg is its own CI build.
             "build_id": build_id,
         }
     path.write_text(json.dumps({

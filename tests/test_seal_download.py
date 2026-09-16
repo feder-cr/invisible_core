@@ -18,12 +18,15 @@ Cells closed here:
   a payload that is not the sealed bytes is refused, whatever the release says
   an archive that unpacks without the executable installs nothing
   a platform or arch the seal has no leg for is refused before a byte moves
-  the five legs are five CI builds: the leg the host runs is the leg that names
+  every leg is its own CI build: the leg the host runs is the leg that names
       the cache directory, is verified, and is recorded in the stamp
 
-Every seal built here carries all five published legs with five DIFFERENT
-BuildIDs, which is what the schema-1 seal could not express. A test that sealed
-one leg would pass against a seal-wide BuildID too, and prove nothing.
+Every seal built here carries five legs with five DIFFERENT BuildIDs, which is
+what the schema-1 seal could not express. A test that sealed one leg would pass
+against a seal-wide BuildID too, and prove nothing. Five, not the three this
+build publishes, on purpose: the two macOS legs went out on 2026-08-26 and
+seals already published still carry them, so the reader has to stay able to
+read one.
 
 Hermetic by construction: every test asserts cache_root() is inside tmp_path
 before anything is written, so the developer's real 110 MB cache is never read,

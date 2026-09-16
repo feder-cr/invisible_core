@@ -7,7 +7,8 @@ to live here went with the Release Seal, which moved the payload authority off
 the release's own checksums.txt and the cache key off the bare tag:
 
   cold path / SHA verify / extract / missing entry / unsupported platform
-      -> invisible_core/tests/test_seal_download.py (five legs, per-leg BuildID)
+      -> invisible_core/tests/test_seal_download.py (one leg per CI build, so a
+         BuildID per leg)
   cache hit without HTTP
       -> invisible_core/tests/test_seal_cache.py
          ::test_stamped_matching_tree_is_served_with_no_network, and

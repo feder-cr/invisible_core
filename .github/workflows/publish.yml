@@ -222,6 +222,17 @@ jobs:
           git config user.name "feder-cr"
           git config user.email "85809106+feder-cr@users.noreply.github.com"
           git add PUBLISHED.json
+          # `record` also realigns the CHANGELOG heading for this version to the
+          # upload date the index reports, and a file rewritten on the runner's
+          # disk that nobody stages is a change that never happened: the whole
+          # point is that the date stops being written by hand. Conditional
+          # because not every project using this gate ships a changelog - this
+          # one does not - and `git add` on a missing path fails the step under
+          # `bash -e`. Same shape as the `if [ -f CHANGELOG.md ]` in the release
+          # notes step below.
+          if [ -f CHANGELOG.md ]; then
+            git add CHANGELOG.md
+          fi
           git commit -m "record $VERSION as published"
           BRANCH="${{ github.event.repository.default_branch }}"
           if git push origin "HEAD:refs/heads/$BRANCH"; then
