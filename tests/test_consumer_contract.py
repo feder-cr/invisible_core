@@ -76,6 +76,12 @@ _CONSUMERS = ("invisible_playwright",)
 CONTRACT = {
     "invisible_core": {
         "BINARY_VERSION", "FIREFOX_UPSTREAM_VERSION", "GeoTimezoneError",
+        # ⛔ The name of the desktop the browser is created on, read by the
+        # wrapper's spawner since 2026-09-20 (`_juggler/connection.py`). It is
+        # a contract between the two packages the way `INVPW_SESSION_TOKEN`
+        # is: an older wrapper reading a renamed variable creates the browser
+        # on the visible desktop with no error anywhere.
+        "DESKTOP_ENV",
         "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
@@ -129,10 +135,12 @@ CONTRACT = {
         # The wrapper's build_prefs was the third place stacking layers on top of
         # translate_profile_to_prefs in its own order; now it asks for the one
         # composition, so it no longer names `translate_profile_to_prefs` or
-        # `cloak_prefs` itself. Neither is deleted from the core - both are
-        # public and exported - they are simply not load-bearing for a consumer
-        # any more, and a contract that over-claims freezes this package for
-        # nobody.
+        # `cloak_prefs` itself. The first is still public and exported, simply
+        # not load-bearing for a consumer any more; the second was DELETED on
+        # 2026-09-20 with the in-binary cloak it switched on, and nothing
+        # outside this package had named it since 2026-08-01, which is what
+        # this contract exists to know. A contract that over-claims freezes
+        # this package for nobody.
         "compose_session_prefs",
         # consent_region_lang joined on 2026-08-09 and DELETED a table in the
         # wrapper rather than adding one here: `_TZ_TO_REGION`, 22 IANA zones
