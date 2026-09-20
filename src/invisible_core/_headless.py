@@ -5,20 +5,37 @@ no widget tree, software-only rendering, distinct timing - and anti-bot
 systems can spot the divergence. Running the browser *headed* but hidden
 gives us the real rendering pipeline while keeping the windows off screen.
 
-Two mechanisms, by platform:
+One idea, two mechanisms: the browser is not hidden, the SCREEN it draws on
+is one nobody looks at.
 
-- **Windows & macOS**: the patched binary cloaks its OWN chrome windows
-  when ``zoom.stealth.cloak_windows`` is set - ``DWMWA_CLOAK`` (Windows)
-  / ``NSWindow`` alpha-0 + pinned occlusion-ignore (macOS). The window
-  renders on the real GPU but never appears on screen, in the taskbar or
-  the Dock. The launcher injects the pref; nothing host-side is spawned.
+- **Windows**: a fresh Win32 desktop object (``CreateDesktop``) that is never
+  switched to. The spawner creates the browser process with
+  ``STARTUPINFO.lpDesktop`` naming it, so the whole tree - launcher, parent,
+  GPU and content processes - is born there and never appears on the
+  interactive desktop, in the taskbar or in alt-tab. The binary is stock: no
+  window attribute is touched from inside it.
 
-- **Linux**: spawns its own ``Xvfb`` instance and points ``DISPLAY`` at
-  it (X11/Wayland have no per-window cloak that keeps the GPU rendering).
+- **Linux**: a private ``Xvfb`` instance, with ``DISPLAY`` pointed at it
+  (X11/Wayland have no per-window cloak that keeps the GPU rendering).
+
+Both objects carry the same moves: ``start()`` creates the surface,
+``launch_env()`` names the variables the BROWSER's environment must carry
+for it, ``stop()`` releases the surface. The launcher merges ``launch_env()``
+into the one environment it composes for the child (``_session.build_env``
+in the wrapper), so the fact stays with the session: a second session in the
+same process never inherits the first one's surface. The Linux object still
+also writes ``DISPLAY`` into ``os.environ`` in ``start()``, because that is
+how it has always worked and a change there cannot be measured from here;
+the Windows object touches no process state at all.
+
+The in-binary cloak (``DWMWA_CLOAK`` gated by ``zoom.stealth.cloak_windows``)
+that hid the Windows window from 2026-06-11 to 2026-09-20 is gone, and its
+pref is no longer emitted: the engine is stock on this surface again.
 """
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -35,6 +52,14 @@ _WAYLAND_LEAK_VARS = (
     "PULSE_SERVER",
     "WSL2_GUI_APPS_ENABLED",
 )
+
+#: The name of the Win32 desktop the browser must be created on. Put into the
+#: browser's launch environment by ``_WindowsVirtualDesktop.launch_env()``,
+#: read by the spawner that calls ``CreateProcess`` and REMOVED from the
+#: environment it hands the browser: the engine never reads it, so it must
+#: not travel into the process tree. Never rename: a published wrapper reads
+#: exactly this.
+DESKTOP_ENV = "INVPW_DESKTOP"
 
 
 class _LinuxVirtualDisplay:
@@ -117,6 +142,10 @@ class _LinuxVirtualDisplay:
         os.environ["MOZ_ENABLE_WAYLAND"] = "0"
         os.environ["GDK_BACKEND"] = "x11"
 
+    def launch_env(self) -> dict:
+        """Nothing beyond what ``start()`` already put into ``os.environ``."""
+        return {}
+
     def stop(self) -> None:
         for k, v in self._saved_env.items():
             if v is None:
@@ -136,45 +165,98 @@ class _LinuxVirtualDisplay:
         self._display = None
 
 
-# Windows & macOS: the patched Firefox cloaks its own chrome windows when this
-# pref is set (DWMWA_CLOAK / NSWindow alpha-0 + pinned occlusion-ignore), so the
-# window renders on the real GPU but never shows on screen / in the taskbar or
-# Dock.
-#
-# ⛔ `widget.windows.window_occlusion_tracking.enabled` USED TO BE HERE, and that
-# was the defect: this dict is merged only when `cloak=True`, and `cloak` requires
-# `headless=True` (`_session.py`), so the DEFAULT headful path ran with occlusion
-# tracking ON. The knowledge was already in this comment - "so a hidden window
-# keeps painting" - attached to the wrong condition. It is now applied
-# unconditionally in `prefs.compose_session_prefs`, which is the one place every session
-# passes through. Moved 2026-08-14; see the reason there and `70-known-bugs.md`
-# [B150].
-CLOAK_PREFS = {
-    "zoom.stealth.cloak_windows": True,
-}
+class _WindowsVirtualDesktop:
+    """A Win32 desktop object nobody switches to, owned by this session.
 
+    Windows has no per-window cloak that leaves a stock binary untouched, but
+    it has something Linux lacks: a process is CREATED on a desktop, and every
+    process it spawns is born on the same one. Naming a fresh desktop in
+    ``STARTUPINFO.lpDesktop`` therefore hides the whole browser tree at once -
+    launcher, parent, GPU process, content processes - with no cooperation
+    from the binary. The desktop lives on the interactive window station, so
+    the GPU is the real one; only ``SwitchDesktop`` would show it, and nothing
+    here ever calls that.
 
-def cloak_prefs() -> dict:
-    """Prefs that make the patched binary self-cloak its chrome windows.
+    Two facts about that desktop are consequences, not choices, and the prefs
+    that follow from them live in ``prefs._WIN_VIRT_DESKTOP_WORKAROUNDS``:
+    the GPU process cannot parent its compositor window across desktops under
+    the default GPU sandbox, and content processes above sandbox level 4 are
+    put on the sandbox's own window station. Both were measured on this exact
+    setup in 2026-05 (`22-patch-port-history.md` §P16, `71-bug-archive.md`
+    #18 Bug A) and are what ``virtual_display=True`` switches on.
 
-    Used on Windows & macOS, where hiding is done inside the binary rather than
-    with a host-side virtual display.
+    ⛔ ``SetThreadDesktop`` on the launching thread is NOT enough, and that is
+    the mistake this class replaces for the second time: with ``lpDesktop``
+    NULL a child inherits the parent PROCESS desktop, not the thread's, so a
+    thread-level switch hid nothing (measured 2026-06-11). The name has to
+    reach ``CreateProcess`` itself, which is why ``launch_env()`` hands it to
+    the environment the spawner reads - the SESSION's, never the process's:
+    a headed session opened while a hidden one is still alive must not be
+    born on the hidden one's desktop.
     """
-    return dict(CLOAK_PREFS)
+
+    def __init__(self) -> None:
+        self._handle: Optional[int] = None
+        self._name: Optional[str] = None
+
+    @property
+    def name(self) -> Optional[str]:
+        return self._name
+
+    def start(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.CreateDesktopW.restype = wintypes.HANDLE
+        user32.CreateDesktopW.argtypes = (
+            wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.c_void_p,
+            wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p)
+        # Unique per session, so two sessions in one process - or in two
+        # processes of the same logon - never share a desktop and never see
+        # each other's windows.
+        name = "invpw_" + secrets.token_hex(6)
+        generic_all = 0x10000000
+        handle = user32.CreateDesktopW(name, None, None, 0, generic_all, None)
+        if not handle:
+            err = ctypes.get_last_error()
+            raise RuntimeError(
+                "invisible_playwright headless=True could not create a hidden "
+                "desktop (CreateDesktopW failed, WinError %d). A session with "
+                "no interactive window station - a service, a scheduled task "
+                "with no logon - cannot host a headed browser; run from a "
+                "logged-on session." % err)
+        self._handle = int(handle)
+        self._name = name
+
+    def launch_env(self) -> dict:
+        """The one variable the spawner needs: which desktop to create on."""
+        return {DESKTOP_ENV: self._name} if self._name else {}
+
+    def stop(self) -> None:
+        if self._handle is not None:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.CloseDesktop.argtypes = (wintypes.HANDLE,)
+            user32.CloseDesktop.restype = wintypes.BOOL
+            # The object itself outlives this handle for as long as a process
+            # still runs on it; closing ours only says we are done with it.
+            user32.CloseDesktop(wintypes.HANDLE(self._handle))
+        self._handle = None
+        self._name = None
 
 
 def make_virtual_display():
-    """Return a start()/stop()-able virtual display, or ``None`` when the
-    platform hides windows via the in-binary cloak pref instead.
+    """Return a start()/stop()-able hidden surface for this platform.
 
     - Linux: a fresh ``Xvfb`` (the launcher start()s/stop()s it).
-    - Windows: ``None`` - the binary self-cloaks via ``cloak_prefs()``,
-      injected by the launcher; nothing host-side needs spawning.
+    - Windows: a fresh Win32 desktop the spawner creates the browser on.
     """
     if sys.platform.startswith("linux"):
         return _LinuxVirtualDisplay()
     if sys.platform == "win32":
-        return None
+        return _WindowsVirtualDesktop()
     raise RuntimeError(
         f"invisible_playwright supports Windows and Linux "
         f"(macOS is no longer a supported platform; got {sys.platform!r})"

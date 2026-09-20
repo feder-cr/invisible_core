@@ -25,11 +25,12 @@ KEY = "invisible_firefox.usage_ping.url"
 
 def test_every_session_declares_where_to_report_a_launch():
     profile = generate_profile(seed=4242)
-    for cloak in (False, True):
-        prefs = compose_session_prefs(profile, cloak=cloak).prefs
+    for virtual_display in (False, True):
+        prefs = compose_session_prefs(profile,
+                                      virtual_display=virtual_display).prefs
         assert prefs[KEY] == USAGE_PING_URL, (
-            "a session with cloak=%r would let the engine fall back to the "
-            "address compiled into it" % cloak)
+            "a session with virtual_display=%r would let the engine fall back "
+            "to the address compiled into it" % virtual_display)
 
 
 def test_the_address_is_the_engine_repository():

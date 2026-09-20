@@ -5,7 +5,7 @@ until 2026-08-01 each added its own layers in its own order:
 
     build_launch_plan          proxy, crash prefs        (direct launch)
     get_default_stealth_prefs  humanize                  (public API)
-    _session.build_prefs       cloak, humanize           (invisible-playwright)
+    _session.build_prefs       humanize                  (invisible-playwright)
 
 Nothing compared the results. The measured consequence was that a caller using
 `get_default_stealth_prefs` with a SOCKS proxy got a prefs dict containing no
@@ -168,21 +168,24 @@ def _profile():
     return generate_profile(SEED)
 
 
-def test_extra_prefs_beat_the_cloak_and_humanize_beats_extra_prefs():
+def test_extra_prefs_beat_the_crash_prefs_and_humanize_beats_extra_prefs():
     """setdefault vs update is the precedence each layer already had.
 
     Swapping either is invisible in every test that checks one layer at a time,
-    and it changes what a caller's extra_prefs can reach.
+    and it changes what a caller's extra_prefs can reach. The setdefault half
+    used to be exercised on the window cloak; that layer is gone (2026-09-20),
+    and the hard-kill prefs carry the same precedence.
     """
-    from invisible_core._headless import cloak_prefs
-
-    cloak_key = next(iter(cloak_prefs()))
+    crash_key = "toolkit.startup.max_resumed_crashes"
     composed = compose_session_prefs(
         _profile(),
-        extra_prefs={cloak_key: "mine", "stealthfox.humanize": "mine"},
-        cloak=True, humanize=True,
+        extra_prefs={crash_key: "mine", "stealthfox.humanize": "mine"},
+        survive_hard_kill=True, humanize=True,
     ).prefs
-    assert composed[cloak_key] == "mine", "the cloak overwrote an explicit override"
+    assert composed[crash_key] == "mine", (
+        "the crash layer overwrote an explicit override")
+    assert "zoom.stealth.cloak_windows" not in composed, (
+        "the in-binary cloak pref is back")
     assert composed["stealthfox.humanize"] is True, (
         "humanize did not win over extra_prefs, so a caller could leave both "
         "trajectory generators live and have every waypoint expanded again")

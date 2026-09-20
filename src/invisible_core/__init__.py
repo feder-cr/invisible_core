@@ -41,7 +41,7 @@ from ._geo import (
     resolve_session_locale,
     resolve_session_timezone,
 )
-from ._headless import cloak_prefs, make_virtual_display
+from ._headless import DESKTOP_ENV, make_virtual_display
 from ._proxy import configure_proxy, parse_proxy, ProxyEndpoint
 from .config import get_default_args, get_default_stealth_prefs
 from .constants import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
@@ -111,7 +111,7 @@ __all__ = [
     "configure_proxy",
     "parse_proxy",
     "ProxyEndpoint",
-    "cloak_prefs",
+    "DESKTOP_ENV",
     "make_virtual_display",
     # direct-launch helpers (used by the wrapper; used by the profile manager
     # until its 2026-08-18 deletion)

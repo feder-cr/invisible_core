@@ -24,7 +24,6 @@ from typing import Any, Dict, NamedTuple, Optional
 from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._webgl_personas import persona_for, render_noise_seed
-from ._headless import cloak_prefs
 from ._proxy import configure_proxy
 
 
@@ -971,22 +970,25 @@ _LINUX_XVFB_WORKAROUNDS: Dict[str, Any] = {
 }
 
 # ──────────────────────────────────────────────────────────────────────
-#  Windows virtual-desktop workarounds - when headless=True on Windows,
-#  Firefox runs on a CreateDesktop virtual desktop. The hardware GPU is
-#  inaccessible from the virtual desktop, so the GPU process crashes when
-#  it tries to initialize the D3D11 compositor with hardware acceleration.
+#  Windows hidden-desktop workarounds - when headless=True on Windows,
+#  Firefox is CREATED on a fresh Win32 desktop (`_headless._WindowsVirtualDesktop`,
+#  named in `STARTUPINFO.lpDesktop` by the wrapper's spawner). Two of the
+#  engine's sandboxes assume the parent lives on the interactive desktop, and
+#  each of the two keys below closes one of those assumptions. They are
+#  emitted only when `virtual_display=True`, i.e. only when that desktop was
+#  actually created (B172: the REAL fact, never a guess from the platform).
 #
-#  Approach: force D3D11 WARP (CPU software renderer) for the GPU process.
-#  layers.d3d11.force-warp=True → compositor uses WARP → GPU process stable.
-#  webgl.angle.force-warp=True  → ANGLE uses WARP → WebGL context creates.
+#  The path this replaced, for the record: from 2026-06-11 to 2026-09-20 the
+#  window was hidden by a DWMWA_CLOAK inside the binary instead, on the normal
+#  desktop, and these two keys were dead code. The owner chose a stock engine
+#  on this surface and the desktop as the hiding place, which is also what
+#  the mass-test harness had used since 2026-05.
 #
-#  CRITICAL: do NOT set webgl.out-of-process=False. That moves WebGL from the
-#  GPU process to the sandboxed content process. The content process sandbox
-#  blocks D3D11 access entirely → ANGLE crashes the content process →
-#  canvas.getContext('webgl') throws instead of returning null.
-#
-#  gfx.canvas.accelerated=False: default is true, disabling avoids any
-#  hardware GPU dependency for 2D canvas in the content process.
+#  Rejected before either key, measured 2026-05-05 (`22-patch-port-history.md`
+#  §P16): forcing WARP (`layers.d3d11.force-warp`, `webgl.angle.force-warp`)
+#  gives "Microsoft Basic Render Driver" and WebGL fields still null under
+#  load; `webgl.out-of-process=False` moves WebGL into the content sandbox,
+#  where ANGLE crashes the content process.
 # ──────────────────────────────────────────────────────────────────────
 
 _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
@@ -1847,12 +1849,12 @@ def translate_profile_to_prefs(
 # ──────────────────────────────────────────────────────────────────────
 #
 # `translate_profile_to_prefs` is the fingerprint. It is never the whole prefs
-# dict a session runs with: a proxy, a cloak, a humanize toggle and two crash
-# prefs sit on top of it, and until 2026-08-01 each of the three entry points
-# added its own subset in its own order.
+# dict a session runs with: a proxy, a humanize toggle and two crash prefs sit
+# on top of it, and until 2026-08-01 each of the three entry points added its
+# own subset in its own order.
 #
 #     build_launch_plan          proxy, crash prefs
-#     _session.build_prefs       cloak, humanize          (invisible-playwright)
+#     _session.build_prefs       humanize                 (invisible-playwright)
 #     get_default_stealth_prefs  humanize
 #
 # Measured consequence: a caller using `get_default_stealth_prefs` with a SOCKS
@@ -1863,9 +1865,12 @@ def translate_profile_to_prefs(
 #
 #   1. the fingerprint          translate_profile_to_prefs (extra_prefs last)
 #   2. the proxy                configure_proxy, mutating
-#   3. the cloak                setdefault, so extra_prefs still wins
-#   4. humanize                 update, so it wins over extra_prefs
-#   5. surviving a hard kill    setdefault, so a caller can override
+#   3. humanize                 update, so it wins over extra_prefs
+#   4. surviving a hard kill    setdefault, so a caller can override
+#
+# A third layer, the window cloak (`zoom.stealth.cloak_windows`, setdefault),
+# sat between 2 and 3 from 2026-06-11 to 2026-09-20. It is gone with the
+# in-binary cloak: the hidden desktop needs no pref.
 #
 # setdefault vs update is not a detail: each one is the precedence the layer had
 # before, and swapping either silently changes what a caller's extra_prefs can
@@ -1994,7 +1999,6 @@ def compose_session_prefs(
     extra_prefs: Optional[Dict[str, Any]] = None,
     virtual_display: bool = False,
     proxy: Optional[Dict[str, str]] = None,
-    cloak: bool = False,
     humanize: Any = None,
     show_cursor: Any = None,
     survive_hard_kill: bool = False,
@@ -2047,9 +2051,10 @@ def compose_session_prefs(
     # must never be treated as backgrounded: nobody is looking at it, but the page
     # is.
     #
-    # This lived in `CLOAK_PREFS` until 2026-08-14, i.e. applied only when
-    # `cloak=True`, which requires `headless=True` - so the DEFAULT headful path
-    # ran with the tracker on. Measured that day on the persistent-relaunch path:
+    # This lived in `CLOAK_PREFS` until 2026-08-14, i.e. applied only when the
+    # in-binary cloak was on, which required `headless=True` - so the DEFAULT
+    # headful path ran with the tracker on. Measured that day on the
+    # persistent-relaunch path:
     # 14 relaunches out of 14 with this pref against 6 hangs out of 9 without.
     # The hang's own mechanism is NOT established (`70-known-bugs.md` [B150]);
     # this pref is justified by the observable list above, which does not depend
@@ -2070,10 +2075,6 @@ def compose_session_prefs(
     # with `invisible_firefox.usage_ping.enabled`.
     prefs.setdefault("invisible_firefox.usage_ping.url", USAGE_PING_URL)
 
-    if cloak:
-        # setdefault: an explicit caller override wins over the cloak.
-        for key, value in cloak_prefs().items():
-            prefs.setdefault(key, value)
     if humanize is not None:
         prefs.update(humanize_prefs(humanize))
     # ⛔ ALWAYS EMITTED, never left to the engine. `None` from a caller
