@@ -81,6 +81,32 @@ def test_build_launch_env_no_font_env_but_webrtc():
     assert env["TZ"]  # a POSIX TZ string was set
 
 
+def test_build_launch_env_applies_the_surface_env_over_a_cleared_slot():
+    """The hidden surface's ``launch_env()`` is applied HERE, last: variables
+    to set, and - with ``None`` - variables the browser must not carry; the
+    desktop slot is cleared first whatever the caller's environment says.
+    Until 34.26.0 only the wrapper's twin knew this half of the contract, so a
+    consumer on this builder could not express a removal. The known-bad input
+    is an ``update()`` of the dict: it would keep ``WAYLAND_DISPLAY``, hand a
+    ``None`` to the subprocess and let a stale desktop name through."""
+    base = {"PATH": "/usr/bin", "WAYLAND_DISPLAY": "wayland-0",
+            "INVPW_DESKTOP": "invpw_stale", "DISPLAY": ":0"}
+    env = build_launch_env({}, base_env=base,
+                           display_env={"DISPLAY": ":123", "GDK_BACKEND": "x11",
+                                        "WAYLAND_DISPLAY": None})
+    assert env["DISPLAY"] == ":123"
+    assert env["GDK_BACKEND"] == "x11"
+    assert "WAYLAND_DISPLAY" not in env
+    assert "INVPW_DESKTOP" not in env, "a stale desktop name reached the browser"
+    assert all(v is not None for v in env.values())
+    assert base["WAYLAND_DISPLAY"] == "wayland-0", "the caller's mapping was written into"
+
+    windows = build_launch_env({}, base_env={"INVPW_DESKTOP": "invpw_stale"},
+                               display_env={"INVPW_DESKTOP": "invpw_fresh"})
+    assert windows["INVPW_DESKTOP"] == "invpw_fresh"
+    assert "INVPW_DESKTOP" not in build_launch_env({}, base_env={"INVPW_DESKTOP": "x"})
+
+
 def test_build_launch_env_no_proxy_no_webrtc_no_tz():
     env = build_launch_env({}, base_env={})
     assert "STEALTHFOX_WEBRTC_PUBLIC_IP" not in env

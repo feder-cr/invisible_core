@@ -417,8 +417,8 @@ _BASELINE: Dict[str, Any] = {
     # IPv6: media.peerconnection.ice.disableIPv6 is DEAD on FF150 (read by no
     #   ICE-gathering code). The real filter is in nICEr (addrs.cpp), and since
     #   2026-08-25 it reads ONE source: the environment variable
-    #   STEALTHFOX_WEBRTC_DISABLE_IPV6, written unconditionally by
-    #   `launch.build_launch_env` and by the wrapper's `_session.build_env`.
+    #   STEALTHFOX_WEBRTC_DISABLE_IPV6, written by `launch.build_launch_env`,
+    #   the one composer (the wrapper's `_session.build_env` delegates to it).
     #   The pref `zoom.stealth.webrtc.disable_ipv6` is NOT written any more: the
     #   native bridge does not read it, and a pref no C++ reads is precisely what
     #   `test_no_orphan_prefs_in_baseline` forbids emitting.
