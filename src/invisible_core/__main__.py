@@ -370,7 +370,14 @@ def _repair_engine(seal) -> int:
         entry = ensure_binary(seal=seal, status=lambda p: print(f"    {p}..."))
     except Exception as e:
         print(f"  repair FAILED: {e}", file=sys.stderr)
-        print("  Not retrying: a second identical attempt would fail identically.")
+        # It used to say "a second identical attempt would fail identically",
+        # which was a blanket claim and, for the class that actually shows up -
+        # a gateway timing out on the asset - it was false. The download itself
+        # now asks again on a transient failure and says so while it does it, so
+        # what reaches here has already been repeated or was never worth
+        # repeating.
+        print("  Not retrying here: the transport already asked again on anything "
+              "transient, so this failure is not one a repeat fixes.")
         return 1
     ok, detail = engine_status(seal)
     if not ok:

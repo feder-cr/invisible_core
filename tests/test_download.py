@@ -457,12 +457,25 @@ def test_download_file_propagates_http_404(tmp_path):
 
 @pytest.mark.unit
 @responses.activate
-def test_download_file_propagates_http_500(tmp_path):
-    """Server errors must surface, not be swallowed as 'empty download'."""
+def test_download_file_propagates_http_500(tmp_path, no_waiting):
+    """Server errors must surface, not be swallowed as 'empty download'.
+
+    The shape of the surfacing changed in 34.27.0 and the intent did not: a 500
+    is transient, so it is asked again, and when every attempt gives the same
+    answer it comes out naming the status AND the number of attempts. Asserting
+    only that something raises would be weaker than what this used to hold, so
+    the count is pinned too: a retry that quietly became unbounded would leave
+    this passing.
+    """
     url = "https://example.com/broken.bin"
-    responses.add(responses.GET, url, status=500)
-    with pytest.raises(requests.HTTPError):
+    for _ in range(download.DOWNLOAD_ATTEMPTS):
+        responses.add(responses.GET, url, status=500)
+
+    with pytest.raises(RuntimeError) as exc:
         _download_file(url, tmp_path / "out.bin")
+
+    assert "500" in str(exc.value)
+    assert len(responses.calls) == download.DOWNLOAD_ATTEMPTS
 
 
 @pytest.mark.unit
@@ -725,3 +738,173 @@ def test_an_unset_deadline_is_the_documented_default(monkeypatch):
     assert download._download_deadline() == download.DOWNLOAD_DEADLINE_DEFAULT
     monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "   ")
     assert download._download_deadline() == download.DOWNLOAD_DEADLINE_DEFAULT
+
+
+# ========================================================================== #
+# Asking again: what is transient, what is not, and what the caller is told
+#
+# On 2026-09-21 a job asking for the engine archive got `504 Gateway Time-out`
+# and stopped, because nothing here had ever asked twice; the same request
+# worked on the next run. The same code runs on a user's machine on first use,
+# so that hiccup on a 262 MB download told them `error: 504` and nothing else.
+# What follows pins the behaviour and, just as much, its limits: a permanent
+# answer must still come out untouched and on the first ask, or the 404 message
+# and the deadline bound both stop working.
+# ========================================================================== #
+
+
+def _http_error(status, headers=None):
+    """A requests.HTTPError carrying a response, the way raise_for_status makes."""
+    response = requests.Response()
+    response.status_code = status
+    if headers:
+        response.headers.update(headers)
+    return requests.HTTPError("%s Server Error" % status, response=response)
+
+
+@pytest.fixture
+def no_waiting(monkeypatch):
+    """Record the backoff instead of serving it, and keep notes out of the run."""
+    slept = []
+    monkeypatch.setattr(download, "_SLEEP", slept.append)
+    monkeypatch.setattr(download, "_note", lambda message: None)
+    return slept
+
+
+@pytest.mark.unit
+def test_only_the_failures_that_mean_ask_again_are_transient():
+    """The known-bad input is a classifier that reads "an error happened" and
+    repeats everything. A 404 repeated three times is three times the wait for
+    the same permanent answer, and the deadline RuntimeError repeated is three
+    times the bound the user set."""
+    for status in (408, 429, 500, 502, 503, 504):
+        assert download._is_transient(_http_error(status)), status
+    for status in (400, 401, 403, 404, 410, 422):
+        assert not download._is_transient(_http_error(status)), status
+
+    assert download._is_transient(requests.ConnectionError("reset by peer"))
+    assert download._is_transient(requests.Timeout("read timed out"))
+    assert download._is_transient(requests.exceptions.ChunkedEncodingError("cut"))
+
+    # The deadline raises this one, and it is the case where asking again
+    # multiplies exactly the wait the bound exists to cap.
+    assert not download._is_transient(RuntimeError("passed its 1800s deadline"))
+    assert not download._is_transient(ValueError("not a number of seconds"))
+    assert not download._is_transient(requests.HTTPError("no response attached"))
+
+
+@pytest.mark.unit
+@responses.activate
+def test_a_gateway_timeout_is_asked_again_and_the_answer_is_kept(tmp_path, no_waiting):
+    """The measured case, end to end: 504 then 200, and the file on disk is the
+    second answer. Known-bad input: no retry at all, which is what this package
+    did until 34.27.0 and what made a green CI job red for a reason that had
+    nothing to do with the code under test."""
+    url = "https://example.com/engine.tar.gz"
+    responses.add(responses.GET, url, body="gateway", status=504)
+    responses.add(responses.GET, url, body=b"ELF!", status=200)
+
+    dst = tmp_path / "engine.tar.gz"
+    _download_file(url, dst)
+
+    assert dst.read_bytes() == b"ELF!"
+    assert len(responses.calls) == 2
+    assert no_waiting == [download.DOWNLOAD_BACKOFF_S[0]]
+
+
+@pytest.mark.unit
+@responses.activate
+def test_a_404_is_answered_once_and_reaches_the_caller_unwrapped(tmp_path, no_waiting):
+    """`ensure_binary` reads `status_code` off this exception to decide whether
+    to print the "that tag is gone" message, so a permanent failure has to come
+    out as the HTTPError it was. And it has to come out on the FIRST ask: the
+    message this feeds says "no amount of retrying will find it"."""
+    url = "https://example.com/gone.tar.gz"
+    responses.add(responses.GET, url, body="not found", status=404)
+
+    with pytest.raises(requests.HTTPError) as exc:
+        _download_file(url, tmp_path / "gone.tar.gz")
+
+    assert exc.value.response.status_code == 404
+    assert len(responses.calls) == 1
+    assert no_waiting == []
+
+
+@pytest.mark.unit
+@responses.activate
+def test_when_every_attempt_fails_the_error_says_how_many_and_how_long(tmp_path, no_waiting):
+    """An outage that lasts must not be dressed up as one failure: what comes
+    out names the number of attempts, so nobody reads three minutes of silence
+    as a single unlucky request."""
+    url = "https://example.com/down.tar.gz"
+    for _ in range(download.DOWNLOAD_ATTEMPTS):
+        responses.add(responses.GET, url, body="gateway", status=504)
+
+    with pytest.raises(RuntimeError) as exc:
+        _download_file(url, tmp_path / "down.tar.gz")
+
+    assert "%d times" % download.DOWNLOAD_ATTEMPTS in str(exc.value)
+    assert "504" in str(exc.value)
+    assert len(responses.calls) == download.DOWNLOAD_ATTEMPTS
+    assert no_waiting == list(download.DOWNLOAD_BACKOFF_S)
+
+
+@pytest.mark.unit
+def test_a_server_that_names_retry_after_is_believed_up_to_the_cap():
+    """A number the server sends is a better wait than one we guessed, and an
+    absurd one is not: the cap is what stops a header from parking a download
+    for an hour. The known-bad input is honouring it unbounded."""
+    assert download._retry_after(_http_error(503, {"Retry-After": "5"})) == 5.0
+    assert (download._retry_after(_http_error(429, {"Retry-After": "99999"}))
+            == download.RETRY_AFTER_CAP_S)
+    # The HTTP-date form needs a clock and a timezone to be useful, and this
+    # function stays out of both: the caller's own backoff covers it.
+    assert download._retry_after(_http_error(503, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})) is None
+    assert download._retry_after(_http_error(503)) is None
+    assert download._retry_after(RuntimeError("no response at all")) is None
+
+
+@pytest.mark.unit
+@responses.activate
+def test_the_servers_own_wait_is_the_one_served(tmp_path, no_waiting):
+    url = "https://example.com/busy.tar.gz"
+    responses.add(responses.GET, url, body="slow down", status=429,
+                  headers={"Retry-After": "3"})
+    responses.add(responses.GET, url, body=b"ELF!", status=200)
+
+    _download_file(url, tmp_path / "busy.tar.gz")
+
+    assert no_waiting == [3.0]
+
+
+@pytest.mark.unit
+def test_the_deadline_is_a_bound_and_not_a_failure_to_repeat(tmp_path, monkeypatch, no_waiting):
+    """Per attempt, and never asked again. A link slow enough to run out the
+    deadline is not one a second full download beats, and repeating it would
+    multiply the wait the bound exists to cap: 3 x 1800s instead of 1800s."""
+    monkeypatch.setattr(download.requests, "get",
+                        lambda *a, **k: _FakeResponse([b"x"] * 10, total=10))
+    monkeypatch.setattr(download.time, "monotonic", _fake_clock([0, 10**9]))
+    monkeypatch.setenv(download.DOWNLOAD_DEADLINE_ENV, "1800")
+
+    with pytest.raises(RuntimeError) as exc:
+        download._download_file("https://example.com/slow.zip", tmp_path / "slow.zip")
+
+    assert "deadline" in str(exc.value)
+    assert no_waiting == []
+
+
+@pytest.mark.unit
+def test_the_two_retry_constants_hold_each_other_up():
+    """One wait per GAP between attempts, and at least one gap to wait in.
+
+    Both halves are load-bearing and neither is obvious from the loop. Raising
+    DOWNLOAD_ATTEMPTS without adding a wait raises IndexError on the last
+    retry, in the middle of a 262 MB download and only when a server is already
+    misbehaving - the worst place to find out. Lowering it below 2 leaves a
+    driver that never retries and whose loop can end without returning or
+    raising, which reads to the caller as a download that produced nothing.
+    """
+    assert download.DOWNLOAD_ATTEMPTS >= 2
+    assert len(download.DOWNLOAD_BACKOFF_S) == download.DOWNLOAD_ATTEMPTS - 1
+    assert all(w > 0 for w in download.DOWNLOAD_BACKOFF_S)
