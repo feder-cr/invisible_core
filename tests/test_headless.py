@@ -218,7 +218,44 @@ def test_linux_virtual_display_initial_state_is_clean():
     vd = _LinuxVirtualDisplay()
     assert vd._proc is None
     assert vd._display is None
-    assert vd._saved_env == {}
+    assert vd.launch_env() == {}
+
+
+@pytest.mark.unit
+def test_the_display_never_touches_the_process_environment(monkeypatch):
+    """⛔ The Linux half of B221. Until 34.25.0 ``start()`` wrote ``DISPLAY``
+    into ``os.environ`` and popped the Wayland variables from it, so a headed
+    session opened while an Xvfb session was alive in the same process was
+    born on the Xvfb. Now the whole fact travels in ``launch_env()``: the
+    variables to set, and - with ``None`` - the five to remove. The process
+    environment is the same before, during and after.
+
+    Xvfb itself is stubbed out (no display on this host); what is real is
+    the object's bookkeeping, which is what the wrapper reads."""
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(headless, "_binary_on_path", lambda name: True)
+    fake_proc = type("P", (), {"poll": lambda self: 0})()
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_spawn",
+                        lambda self, display: setattr(self, "_proc", fake_proc))
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_wait_until_ready",
+                        lambda self, display: None)
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_pick_display", lambda self: ":123")
+    before = dict(os.environ)
+
+    vd = _LinuxVirtualDisplay()
+    vd.start()
+    env = vd.launch_env()
+    assert env["DISPLAY"] == ":123"
+    assert env["MOZ_ENABLE_WAYLAND"] == "0"
+    assert env["GDK_BACKEND"] == "x11"
+    for k in headless._WAYLAND_LEAK_VARS:
+        assert k in env and env[k] is None, k
+    assert dict(os.environ) == before, "start() wrote into the process"
+
+    vd.stop()
+    assert vd.launch_env() == {}
+    assert dict(os.environ) == before, "stop() wrote into the process"
 
 
 @pytest.mark.unit
@@ -241,8 +278,7 @@ def test_linux_virtual_display_custom_geometry():
 @pytest.mark.unit
 def test_linux_virtual_display_stop_without_start_is_safe():
     """``stop()`` before ``start()`` must be a no-op - supports the
-    ``__exit__`` path on a launcher that failed before Xvfb was spawned.
-    Verifies no AttributeError on env restore (saved_env is empty)."""
+    ``__exit__`` path on a launcher that failed before Xvfb was spawned."""
     vd = _LinuxVirtualDisplay()
     vd.stop()
     vd.stop()

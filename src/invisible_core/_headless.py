@@ -20,13 +20,16 @@ is one nobody looks at.
 
 Both objects carry the same moves: ``start()`` creates the surface,
 ``launch_env()`` names the variables the BROWSER's environment must carry
-for it, ``stop()`` releases the surface. The launcher merges ``launch_env()``
-into the one environment it composes for the child (``_session.build_env``
-in the wrapper), so the fact stays with the session: a second session in the
-same process never inherits the first one's surface. The Linux object still
-also writes ``DISPLAY`` into ``os.environ`` in ``start()``, because that is
-how it has always worked and a change there cannot be measured from here;
-the Windows object touches no process state at all.
+for it - and, with the value ``None``, the ones it must NOT carry -,
+``stop()`` releases the surface. The launcher merges ``launch_env()`` into
+the one environment it composes for the child (``_session.build_env`` in the
+wrapper), so the fact stays with the session: a second session in the same
+process never inherits the first one's surface. Neither object touches
+``os.environ``. Until 34.25.0 the Linux one wrote ``DISPLAY`` there in
+``start()`` and restored it in ``stop()``, so a headed session opened while
+an Xvfb session was still alive in the same process was born on the Xvfb
+(B221); the ``None`` half of the contract is what moved the five Wayland
+removals out of the process too.
 
 The in-binary cloak (``DWMWA_CLOAK`` gated by ``zoom.stealth.cloak_windows``)
 that hid the Windows window from 2026-06-11 to 2026-09-20 is gone, and its
@@ -44,7 +47,8 @@ from typing import Optional
 
 # Inherited from WSLg / GNOME / etc. these env vars make Firefox prefer a
 # Wayland compositor over the X11 DISPLAY we set, so the window leaks onto
-# the real desktop. Strip them all before starting.
+# the real desktop. `launch_env()` names them with None, and the launcher
+# drops them from the browser's environment - the session's, not ours.
 _WAYLAND_LEAK_VARS = (
     "WAYLAND_DISPLAY",
     "XDG_RUNTIME_DIR",
@@ -69,7 +73,6 @@ class _LinuxVirtualDisplay:
         self._geometry = f"{width}x{height}x24"
         self._proc: Optional[subprocess.Popen] = None
         self._display: Optional[str] = None
-        self._saved_env: dict[str, Optional[str]] = {}
 
     def start(self) -> None:
         if not _binary_on_path("Xvfb"):
@@ -87,7 +90,6 @@ class _LinuxVirtualDisplay:
                 self._spawn(display)
                 self._wait_until_ready(display)
                 self._display = display
-                self._apply_env(display)
                 return
             except RuntimeError as e:
                 last_err = e
@@ -132,28 +134,28 @@ class _LinuxVirtualDisplay:
             time.sleep(0.02)
         raise RuntimeError(f"Xvfb {display} did not become ready in 3s")
 
-    def _apply_env(self, display: str) -> None:
-        keys = ("DISPLAY", "MOZ_ENABLE_WAYLAND", "GDK_BACKEND") + _WAYLAND_LEAK_VARS
-        for k in keys:
-            self._saved_env[k] = os.environ.get(k)
-        for k in _WAYLAND_LEAK_VARS:
-            os.environ.pop(k, None)
-        os.environ["DISPLAY"] = display
-        os.environ["MOZ_ENABLE_WAYLAND"] = "0"
-        os.environ["GDK_BACKEND"] = "x11"
-
     def launch_env(self) -> dict:
-        """Nothing beyond what ``start()`` already put into ``os.environ``."""
-        return {}
+        """What the browser's environment must carry to draw on this Xvfb.
+
+        ``DISPLAY`` names the display, the two GTK/Firefox switches keep the
+        toolkit on X11, and the five Wayland variables are named with ``None``
+        so the launcher REMOVES them: inherited from WSLg or GNOME they make
+        Firefox prefer the compositor over the display we set, and the window
+        leaks onto the real desktop. All of it is this session's, none of it
+        is the process's.
+        """
+        if not self._display:
+            return {}
+        env: dict = {
+            "DISPLAY": self._display,
+            "MOZ_ENABLE_WAYLAND": "0",
+            "GDK_BACKEND": "x11",
+        }
+        for k in _WAYLAND_LEAK_VARS:
+            env[k] = None
+        return env
 
     def stop(self) -> None:
-        for k, v in self._saved_env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        self._saved_env.clear()
-
         if self._proc is not None and self._proc.poll() is None:
             self._proc.terminate()
             try:
