@@ -6,7 +6,6 @@ import os
 import platform
 import re
 import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
@@ -18,14 +17,11 @@ import platformdirs
 import psutil
 import requests
 
-from .constants import (
-    BINARY_ENTRY_REL,
-    GEOIP_ASSET,
-    GEOIP_MMDB_NAME,
-    GEOIP_REPO,
-    GEOIP_RELEASE_URL_TEMPLATE,
-    RELEASE_URL_TEMPLATE,
-)
+# The four GEOIP_* names went with the geoip half on 2026-07-27 and stayed
+# imported here, unused, ever since. They are not a back-compat re-export -
+# those are spelled out at the foot of this file with an explicit noqa - and
+# nothing in the three repositories reads them from this module.
+from .constants import BINARY_ENTRY_REL, RELEASE_URL_TEMPLATE
 from .seal import (
     Asset,
     EngineMismatch,
@@ -155,8 +151,8 @@ def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
     lines = [
         f"the engine archive for {tag} is not published: {asset_name} -> HTTP 404",
         f"  tried {url}",
-        f"  the tag comes from the release seal inside invisible-core, not from "
-        f"anything you configured.",
+        "  the tag comes from the release seal inside invisible-core, not from "
+        "anything you configured.",
     ]
     if number is not None and number < OLDEST_PUBLISHED_TAG_NUMBER:
         lines += [
@@ -289,13 +285,19 @@ def _retry_after(exc: BaseException) -> float | None:
     return max(0.0, min(seconds, RETRY_AFTER_CAP_S))
 
 
-def _with_retries(call, what: str):
+def _with_retries(call, what: str, attempts: int = DOWNLOAD_ATTEMPTS):
     """Run ``call()``, and run it again while the failure says to ask again.
 
     ``what`` names the thing being fetched, for the note and for the failure.
     A permanent failure is re-raised untouched on the first attempt, so callers
     that read a status code off it - the 404 branch in ``ensure_binary`` - still
     see the exception they expect.
+
+    ``attempts`` is the CALLER's, and one attempt is a legitimate answer. Asking
+    again is only worth its wall clock to someone who has nothing better to do
+    with the failure; a caller holding a good enough copy already has something
+    better, and waiting ten seconds to reach a fallback it was going to take
+    anyway is a cost with no buyer. See ``_geoip_db.ensure_geoip_mmdb``.
     """
     # No clock in here, deliberately. The elapsed time would add nothing the
     # caller does not already have - the waits are constants and every retry
@@ -303,11 +305,11 @@ def _with_retries(call, what: str):
     # this share a seam with the deadline, which is a different bound measured
     # by a different rule. The one measurement that belongs in the failure is
     # how many times this asked.
-    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+    for attempt in range(1, attempts + 1):
         try:
             return call()
         except Exception as exc:
-            if attempt == DOWNLOAD_ATTEMPTS or not _is_transient(exc):
+            if attempt == attempts or not _is_transient(exc):
                 if attempt > 1 and _is_transient(exc):
                     raise RuntimeError(
                         f"{what} failed {attempt} times; the last attempt "
@@ -316,12 +318,13 @@ def _with_retries(call, what: str):
             wait = _retry_after(exc)
             if wait is None:
                 wait = DOWNLOAD_BACKOFF_S[attempt - 1]
-            _note(f"  {what}: attempt {attempt} of {DOWNLOAD_ATTEMPTS} failed "
+            _note(f"  {what}: attempt {attempt} of {attempts} failed "
                   f"({exc}); asking again in {wait:.0f}s")
             _SLEEP(wait)
 
 
-def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
+def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None,
+                   attempts: int = DOWNLOAD_ATTEMPTS) -> None:
     """Download ``url`` to ``dst``, asking again when the failure is transient.
 
     ``dst`` is truncated at the start of every attempt, so a retry starts from
@@ -330,9 +333,16 @@ def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None
     failure this was written for. Callers download into a temporary directory
     and only move the tree into the cache after the sha256 matches, so a
     half-written file from a dead attempt is never adopted.
+
+    ``attempts`` defaults to the engine's policy because that is the caller with
+    nothing to fall back on. It is a parameter and not a constant read inside
+    because this function is shared, and a shared primitive that carries one
+    caller's policy imposes it on the other: ``_geoip_db`` had already written
+    down the opposite answer and would have inherited a ten-second wait on the
+    way to a fallback it was taking anyway.
     """
     return _with_retries(lambda: _download_once(url, dst, chunk_size, progress),
-                         url.rsplit("/", 1)[-1])
+                         url.rsplit("/", 1)[-1], attempts)
 
 
 def _download_once(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:

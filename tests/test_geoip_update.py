@@ -78,7 +78,16 @@ def test_cache_is_latest_no_download(cache, monkeypatch):
 def test_new_tag_downloads_and_prunes(cache, monkeypatch):
     old = _make_cached(cache, "2026.06.10")
     monkeypatch.setattr(dl, "_resolve_latest_geoip_tag", lambda: "2026.06.17")
-    monkeypatch.setattr(dl, "_download_geoip_tag", lambda tag: _make_cached(cache, tag))
+
+    def _fetch(tag, *, attempts):
+        # ONE attempt, because the `except` below is holding a usable mmdb: a
+        # retry would buy ten seconds at session start to reach the fallback it
+        # was taking anyway. Pinned here rather than left to the stub, because
+        # this is the caller that knows there is something to fall back on.
+        assert attempts == 1, "a refresh with a cache to fall back on must not retry"
+        return _make_cached(cache, tag)
+
+    monkeypatch.setattr(dl, "_download_geoip_tag", _fetch)
     got = dl.ensure_geoip_mmdb()
     assert got.parent.name == "2026.06.17"
     assert not old.parent.exists()  # old tag pruned
@@ -88,7 +97,16 @@ def test_new_tag_downloads_and_prunes(cache, monkeypatch):
 @pytest.mark.unit
 def test_cold_cache_downloads_latest(cache, monkeypatch):
     monkeypatch.setattr(dl, "_resolve_latest_geoip_tag", lambda: "2026.06.17")
-    monkeypatch.setattr(dl, "_download_geoip_tag", lambda tag: _make_cached(cache, tag))
+
+    def _fetch(tag, *, attempts):
+        # The other half of the same rule: with nothing cached the failure is
+        # terminal for the caller - it raises and `timezone="auto"` stops
+        # working - so here the attempts are the whole point.
+        assert attempts == dl.DOWNLOAD_ATTEMPTS, (
+            "a cold cache has no fallback, so a transient failure must be retried")
+        return _make_cached(cache, tag)
+
+    monkeypatch.setattr(dl, "_download_geoip_tag", _fetch)
     got = dl.ensure_geoip_mmdb()
     assert got.parent.name == "2026.06.17"
     assert got.exists()
@@ -118,7 +136,7 @@ def test_download_failure_with_cache_falls_back(cache, monkeypatch):
     f = _make_cached(cache, "2026.06.10")
     monkeypatch.setattr(dl, "_resolve_latest_geoip_tag", lambda: "2026.06.17")
 
-    def boom(tag):
+    def boom(tag, *, attempts):
         raise OSError("transient download failure")
 
     monkeypatch.setattr(dl, "_download_geoip_tag", boom)
@@ -157,3 +175,29 @@ def test_resolve_tag_all_fail_returns_none(monkeypatch):
     monkeypatch.setattr(dl.requests, "head", boom)
     monkeypatch.setattr(dl, "_latest_geoip_tag_api", boom)
     assert dl._resolve_latest_geoip_tag() is None
+
+
+@pytest.mark.unit
+def test_the_tag_fetcher_hands_the_attempts_to_the_downloader(cache, monkeypatch, tmp_path):
+    """The link the stubs above hide.
+
+    `test_download_failure_with_cache_falls_back` replaces `_download_geoip_tag`
+    wholesale, so it cannot see what that function does with what it is given -
+    and that is exactly where the policy has to arrive. Without this, a version
+    that accepted `attempts` and then called `_download_file` without it would
+    pass every other test in this file.
+    """
+    seen = {}
+
+    def _fake_download(url, dst, *a, **kw):
+        seen["attempts"] = kw.get("attempts")
+        raise OSError("no network in a unit test")
+
+    monkeypatch.setattr(dl, "_download_file", _fake_download)
+    with pytest.raises(OSError):
+        dl._download_geoip_tag("2026.06.17", attempts=1)
+    assert seen["attempts"] == 1
+
+    with pytest.raises(OSError):
+        dl._download_geoip_tag("2026.06.18", attempts=dl.DOWNLOAD_ATTEMPTS)
+    assert seen["attempts"] == dl.DOWNLOAD_ATTEMPTS

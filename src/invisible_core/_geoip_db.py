@@ -33,7 +33,8 @@ from .constants import (
     GEOIP_RELEASE_URL_TEMPLATE,
     GEOIP_REPO,
 )
-from .download import _download_file, _extract, _github_token, cache_root
+from .download import (DOWNLOAD_ATTEMPTS, _download_file, _extract,
+                       _github_token, cache_root)
 
 __all__ = ["ensure_geoip_mmdb", "geoip_mmdb_path"]
 
@@ -102,8 +103,14 @@ def _resolve_latest_geoip_tag() -> str | None:
         return None
 
 
-def _download_geoip_tag(tag: str) -> Path:
-    """Download + extract a specific tag's mmdb if not already cached."""
+def _download_geoip_tag(tag: str, *, attempts: int) -> Path:
+    """Download + extract a specific tag's mmdb if not already cached.
+
+    ``attempts`` has no default on purpose. Whether a transient failure here is
+    worth asking again about depends on something only the caller knows - is
+    there a cached mmdb to fall back on - and a default would let the next
+    caller skip that question without noticing they had been asked it.
+    """
     dst_dir = _geoip_root() / tag
     target = dst_dir / GEOIP_MMDB_NAME
     if not target.exists():
@@ -111,7 +118,7 @@ def _download_geoip_tag(tag: str) -> Path:
         dst_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as td:
             archive = Path(td) / GEOIP_ASSET
-            _download_file(url, archive)
+            _download_file(url, archive, attempts=attempts)
             _extract(archive, dst_dir)
     if target.exists():
         return target
@@ -161,9 +168,19 @@ def ensure_geoip_mmdb() -> Path:
 
     latest = _resolve_latest_geoip_tag()
     if latest and latest != cached_tag:
-        # newer build available (or nothing cached) → fetch it
+        # newer build available (or nothing cached) → fetch it.
+        #
+        # ⛔ ASKING AGAIN IS WORTH IT ONLY WITH NOTHING TO FALL BACK ON, and this
+        # is the one function that knows which case it is in. With a cached mmdb
+        # the refresh is an improvement, not a requirement: the `except` below
+        # is about to return that copy, so retrying would buy ten seconds of
+        # wall clock and a couple of lines on stderr, at browser-session start,
+        # to reach exactly the same answer. With a COLD cache the failure is
+        # terminal for the caller - it raises, and `timezone="auto"` stops
+        # working - so there the attempts are the whole point.
+        attempts = 1 if cached else DOWNLOAD_ATTEMPTS
         try:
-            mmdb = _download_geoip_tag(latest)
+            mmdb = _download_geoip_tag(latest, attempts=attempts)
             _prune_old_geoip_tags(mmdb.parent.name)
             return mmdb
         except Exception:
