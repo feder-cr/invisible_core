@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ._headless import DESKTOP_ENV
+
 
 def _pref_literal(v: Any) -> str:
     """Serialize a pref value the way Firefox's prefs parser accepts it.
@@ -90,8 +92,22 @@ def build_launch_env(
     srflx_declared: Optional[str] = None,
     manifest_path: "Optional[str | os.PathLike[str]]" = None,
     base_env: Optional[Dict[str, str]] = None,
+    #: What the session's hidden surface wants in the browser's environment
+    #: (`make_virtual_display().launch_env()`), or nothing. A value of `None`
+    #: names a variable the browser must NOT carry (the Wayland ones an Xvfb
+    #: session drops). Applied LAST and over a cleared slot: the surface is a
+    #: fact of THIS session, and a headed session opened while a hidden one is
+    #: still alive in the same process must not inherit the hidden one's
+    #: desktop or display through `os.environ`; `INVPW_DESKTOP` is removed
+    #: unconditionally first for the same reason.
+    display_env: Optional[Dict[str, Optional[str]]] = None,
 ) -> Dict[str, str]:
-    """Subprocess env for the patched binary. Mirrors the wrapper's _build_env.
+    """Subprocess env for the patched binary - the ONE place that composes it.
+
+    The wrapper's `_session.build_env` delegates here after verifying the font
+    manifest against the executable; until 34.26.0 it was a twin of this body,
+    and the hidden-surface half of the contract lived only in the twin, so a
+    consumer on this builder could not express a removal at all.
 
     TZ tunes the libc clock. STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy
     egress IP; an already-set value in base_env wins.
@@ -126,8 +142,13 @@ def build_launch_env(
         # hosts): behind an IPv4 proxy that would be a leak and an inconsistency,
         # without a proxy it is simply what an ordinary browser does. Measured
         # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
-        # Same line and same reason in the wrapper's `_session.build_env`.
         env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] = "1"
+    env.pop(DESKTOP_ENV, None)
+    for k, v in (display_env or {}).items():
+        if v is None:
+            env.pop(k, None)
+        else:
+            env[k] = v
     return env
 
 

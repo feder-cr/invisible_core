@@ -197,6 +197,11 @@ CONTRACT = {
         # raise, they just lay the page out wrong.
         "FontManifestMismatch", "cached_font_manifest_path",
         "verify_font_manifest",
+        # The one composer of the launch environment, since 34.26.0: the
+        # wrapper's `_session.build_env` verifies the font manifest against
+        # the executable and delegates everything else here, hidden-surface
+        # variables included.
+        "build_launch_env",
     },
     "invisible_core.download": {
         "cache_root", "ensure_binary",
