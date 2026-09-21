@@ -908,3 +908,26 @@ def test_the_two_retry_constants_hold_each_other_up():
     assert download.DOWNLOAD_ATTEMPTS >= 2
     assert len(download.DOWNLOAD_BACKOFF_S) == download.DOWNLOAD_ATTEMPTS - 1
     assert all(w > 0 for w in download.DOWNLOAD_BACKOFF_S)
+
+
+@pytest.mark.unit
+@responses.activate
+def test_one_attempt_is_a_caller_answer_and_not_a_broken_retry(tmp_path, no_waiting):
+    """A caller holding something good enough asks once and moves on.
+
+    The engine has nothing to fall back on, so it wants the attempts; the geoip
+    refresh has a cached mmdb it is about to return anyway, so ten seconds of
+    backoff would buy it nothing. The known-bad input is a shared primitive that
+    reads the constant itself: the second caller then inherits the first one's
+    policy and pays for it at browser-session start.
+    """
+    url = "https://example.com/refresh.zip"
+    responses.add(responses.GET, url, body="gateway", status=504)
+
+    with pytest.raises(requests.HTTPError) as exc:
+        _download_file(url, tmp_path / "refresh.zip", attempts=1)
+
+    # Untouched, not wrapped: one attempt has nothing to report about attempts.
+    assert exc.value.response.status_code == 504
+    assert len(responses.calls) == 1
+    assert no_waiting == []
