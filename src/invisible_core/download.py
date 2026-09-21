@@ -101,8 +101,16 @@ def _resolve_asset_url(tag: str, asset_name: str) -> str:
         return RELEASE_URL_TEMPLATE.format(tag=tag, asset=asset_name)
     owner, repo = _parse_owner_repo(RELEASE_URL_TEMPLATE)
     api = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
-    r = requests.get(api, headers={"Authorization": f"token {token}"}, timeout=30)
-    r.raise_for_status()
+
+    # Retried for the same reason the asset itself is, and it is easy to forget
+    # that this one is on the path at all: it runs BEFORE `ensure_binary`'s try
+    # block, so a gateway error here never reached the 404 message either.
+    def _ask():
+        r = requests.get(api, headers={"Authorization": f"token {token}"}, timeout=30)
+        r.raise_for_status()
+        return r
+
+    r = _with_retries(_ask, f"the release index for {tag}")
     for a in r.json().get("assets", []):
         if a.get("name") == asset_name:
             return a["url"]
@@ -205,13 +213,139 @@ def _download_deadline() -> float:
         ) from None
 
 
+#: Attempts for ONE transfer, total, not extra ones on top.
+#:
+#: WHY THIS EXISTS. On 2026-09-21 a CI job asking for the engine archive got
+#: `504 Server Error: Gateway Time-out` from GitHub and stopped there, because
+#: nothing in this package had ever asked twice; the same request succeeded on
+#: the next run. That is not a CI detail: this function is what runs on a
+#: user's machine the first time they use the package, so the same gateway hiccup
+#: on a 262 MB download told them `error: 504` and nothing else.
+#:
+#: This is missing behaviour and not a paper-over, and the reason is that the
+#: judge is downstream and does not move: the bytes still have to match
+#: `asset.sha256` and the extracted tree still has to pass `verify_engine`. A
+#: retry here cannot make a wrong payload pass. The only thing it could hide is
+#: an outage that lasts, and it does not hide that either: the failure that
+#: comes out at the end says how many times this asked and for how long.
+DOWNLOAD_ATTEMPTS = 3
+#: Waits BETWEEN attempts, in seconds: one entry per gap, so its length is
+#: DOWNLOAD_ATTEMPTS - 1 and the loop cannot run off the end of it.
+DOWNLOAD_BACKOFF_S = (2.0, 8.0)
+#: The statuses where the server did not answer the question that was asked.
+#: 404 is deliberately NOT here: a tag whose asset is gone is a permanent fact
+#: about the pin, and `_missing_release_message` says so in as many words -
+#: "It is not coming back and no amount of retrying will find it".
+TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+#: A server that names its own `Retry-After` is believed, up to this much. The
+#: cap exists because the header is attacker-adjacent in the general case and
+#: because a caller waiting on a download should not be parked for an hour by
+#: a number in a header.
+RETRY_AFTER_CAP_S = 60.0
+
+#: Seams, both of them for the tests: the clock the backoff sleeps on, and where
+#: a retry announces itself. It announces by default, and to stderr, because a
+#: download that silently stalls for ten seconds is indistinguishable from one
+#: that has hung, and `status=` cannot carry it - that callback is documented to
+#: receive one of three phase words and a UI may switch on them.
+_SLEEP = time.sleep
+
+
+def _note(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Does this failure say "ask again", or does it say something?
+
+    Pure: no clock, no network, no state, so the answer can be checked against
+    known-bad inputs without a server. Everything it does not recognise is
+    permanent, which is the safe direction: an unknown failure is reported once
+    rather than repeated three times.
+    """
+    if isinstance(exc, requests.HTTPError):
+        status = getattr(exc.response, "status_code", None)
+        return status in TRANSIENT_STATUS
+    # ConnectionError covers ConnectTimeout and the resets; ChunkedEncodingError
+    # is the stream that died in the middle, which is the shape a dropped socket
+    # takes once `iter_content` is running.
+    return isinstance(exc, (requests.ConnectionError, requests.Timeout,
+                            requests.exceptions.ChunkedEncodingError))
+
+
+def _retry_after(exc: BaseException) -> float | None:
+    """The server's own answer to "when should I ask again", or None."""
+    raw = getattr(getattr(exc, "response", None), "headers", {}) or {}
+    value = raw.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        seconds = float(str(value).strip())
+    except ValueError:
+        # The header also has an HTTP-date form. Parsing it would need a clock
+        # and a timezone to be useful, and both are exactly what this function
+        # stays out of; the caller's own backoff covers the case.
+        return None
+    return max(0.0, min(seconds, RETRY_AFTER_CAP_S))
+
+
+def _with_retries(call, what: str):
+    """Run ``call()``, and run it again while the failure says to ask again.
+
+    ``what`` names the thing being fetched, for the note and for the failure.
+    A permanent failure is re-raised untouched on the first attempt, so callers
+    that read a status code off it - the 404 branch in ``ensure_binary`` - still
+    see the exception they expect.
+    """
+    # No clock in here, deliberately. The elapsed time would add nothing the
+    # caller does not already have - the waits are constants and every retry
+    # announces itself as it happens - and reading `time.monotonic` would make
+    # this share a seam with the deadline, which is a different bound measured
+    # by a different rule. The one measurement that belongs in the failure is
+    # how many times this asked.
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return call()
+        except Exception as exc:
+            if attempt == DOWNLOAD_ATTEMPTS or not _is_transient(exc):
+                if attempt > 1 and _is_transient(exc):
+                    raise RuntimeError(
+                        f"{what} failed {attempt} times; the last attempt "
+                        f"said: {exc}") from exc
+                raise
+            wait = _retry_after(exc)
+            if wait is None:
+                wait = DOWNLOAD_BACKOFF_S[attempt - 1]
+            _note(f"  {what}: attempt {attempt} of {DOWNLOAD_ATTEMPTS} failed "
+                  f"({exc}); asking again in {wait:.0f}s")
+            _SLEEP(wait)
+
+
 def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
-    """Download ``url`` to ``dst``. If ``progress`` is given it is called with
+    """Download ``url`` to ``dst``, asking again when the failure is transient.
+
+    ``dst`` is truncated at the start of every attempt, so a retry starts from
+    byte zero: there is no resume here, and the failure that wants one - a
+    socket dropping most of the way through a 262 MB transfer - is not the
+    failure this was written for. Callers download into a temporary directory
+    and only move the tree into the cache after the sha256 matches, so a
+    half-written file from a dead attempt is never adopted.
+    """
+    return _with_retries(lambda: _download_once(url, dst, chunk_size, progress),
+                         url.rsplit("/", 1)[-1])
+
+
+def _download_once(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
+    """One attempt. If ``progress`` is given it is called with
     ``(bytes_done, total_bytes)`` as the download proceeds (total is 0 when the
     server sends no Content-Length).
 
     Bounded by ``DOWNLOAD_DEADLINE_ENV`` across the whole transfer; see that
-    constant for why the per-read timeout below cannot do it."""
+    constant for why the per-read timeout below cannot do it. That bound is per
+    attempt, and the RuntimeError it raises is deliberately NOT transient: a
+    link slow enough to run out the deadline is not a link that a second full
+    download would beat, and retrying it would multiply the very wait the bound
+    exists to cap."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     headers: dict[str, str] = {}
     token = _github_token()
