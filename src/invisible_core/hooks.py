@@ -40,6 +40,8 @@ WHAT EACH REPOSITORY DECLARES, in its own pyproject under
     pytest       = true|false     run the suite before pushing
     pin          = true|false     compare the invisible-core pin (consumers)
     english      = true|false     refuse Italian prose in a public repository
+    identity     = true|false     refuse author/committer/tagger addresses that
+                                  are not GitHub noreply ones (default true)
     release_tags = ["v"]          tag prefixes that mean "this is a release"
 
 The block is REQUIRED. A missing one is a refusal rather than a default,
@@ -68,13 +70,14 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [
     "main",
     "hook_config",
     "release_tag_in",
     "push_range",
+    "foreign_identities",
     "outside_the_hook",
     "HOOK_LOCATION_VARIABLES",
     "GATE_NOTHING_TO_DO",
@@ -108,7 +111,7 @@ _DISCLOSURE_CHECKER = "check_internal_disclosure.py"
 #: unchecked and carried Italian into two messages a user reads. A gate that
 #: arrives only on request is a gate the next repository will not have.
 _DEFAULTS: Dict[str, object] = {"pytest": True, "pin": True, "english": True,
-                                "release_tags": ["v"]}
+                                "identity": True, "release_tags": ["v"]}
 
 
 class HookConfigError(Exception):
@@ -141,9 +144,8 @@ def hook_config(root: Path) -> Dict[str, object]:
         raise HookConfigError(
             f"{pyproject} has no [tool.invisible.hooks] block, so this hook "
             f"does not know which gates this repository wants. Declare it - "
-            f"pytest / pin / english / release_tags - rather than letting a "
-            f"default "
-            f"decide, because the wrong default silently skips a gate and a "
+            f"pytest / pin / english / identity / release_tags - rather than "
+            f"letting a default decide, because the wrong default silently skips a gate and a "
             f"skipped gate reads exactly like a passed one.")
 
     unknown = sorted(k for k in declared if k not in _DEFAULTS)
@@ -276,6 +278,84 @@ def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
             return f"{_EMPTY_TREE}..{local_sha}"
         return f"{remote_sha}..{local_sha}"
     return ""
+
+
+#: The only kind of address a commit going to a public repository may carry.
+#: ⛔ AN ALLOW-LIST, NOT A DENY-LIST. The address this gate exists to stop is a
+#: private one, and naming it here would publish it in the very code meant to
+#: keep it out; a deny-list also misses every address nobody thought to list.
+#: GitHub's noreply form is what the maintainer signs with, and it identifies
+#: the account without disclosing anything about the person.
+_PUBLIC_EMAIL_SUFFIX = "@users.noreply.github.com"
+
+#: The committer GitHub itself writes on a squash or merge made through its
+#: web flow or API. ⛔ NOT a suffix match, and not optional: measured on this
+#: repository's main, 77 of 232 commits carry it. Without this line a branch
+#: rebased on a newer main and pushed over its old remote copy is refused,
+#: because the range then contains main's merges, which nobody here made.
+_GITHUB_WEB_FLOW = "noreply@github.com"
+
+
+def _is_public(email: str) -> bool:
+    return email.endswith(_PUBLIC_EMAIL_SUFFIX) or email == _GITHUB_WEB_FLOW
+
+
+def _masked(email: str) -> str:
+    """The address with its local part hidden, so a refusal is safe to paste."""
+    _local, at, domain = email.partition("@")
+    return ("***@" + domain) if at else "***"
+
+
+def _git_out(repo: Path, *args: str) -> Optional[str]:
+    try:
+        out = subprocess.run(["git", "-C", str(repo), *args],
+                             capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
+    return out.stdout if out.returncode == 0 else None
+
+
+def foreign_identities(push_refs: str, repo: Path) -> List[Tuple[str, str, str]]:
+    """Every (sha, role, masked address) in this push that is not a noreply one.
+
+    ⛔ EVERY PUSHED REF, and each one's whole new range - not `push_range`, which
+    answers for the first ref only because the scanners need one range to read.
+    One branch clean and a tag behind it carrying a foreign committer is still a
+    leak.
+
+    ⛔ THE COMMITTER TOO, not only the author. Measured 2026-09-24: four commits
+    reached a public `main` with a noreply AUTHOR and a private COMMITTER,
+    because they were made from a clone outside the directory where the
+    maintainer identity is configured; everything that looked at the author saw
+    nothing wrong. An annotated tag's TAGGER is the third place an address lives.
+    """
+    found: List[Tuple[str, str, str]] = []
+    seen: set = set()
+    for local_sha, remote_ref, remote_sha in _ref_lines(push_refs):
+        if remote_sha and set(remote_sha) == {"0"}:
+            commits = _commits_not_on_a_remote(local_sha, repo)
+        else:
+            listed = _git_out(repo, "rev-list", f"{remote_sha}..{local_sha}")
+            commits = (listed or "").split()
+        for sha in commits:
+            if sha in seen:
+                continue
+            seen.add(sha)
+            line = _git_out(repo, "log", "-1", "--format=%ae%x1f%ce", sha) or ""
+            author, _sep, committer = line.strip().partition("\x1f")
+            for role, email in (("author", author), ("committer", committer)):
+                if email and not _is_public(email):
+                    found.append((sha, role, _masked(email)))
+        if remote_ref.startswith("refs/tags/") and \
+                (_git_out(repo, "cat-file", "-t", local_sha) or "").strip() == "tag":
+            body = _git_out(repo, "cat-file", "-p", local_sha) or ""
+            for tag_line in body.splitlines():
+                if not tag_line.startswith("tagger "):
+                    continue
+                email = tag_line.partition("<")[2].partition(">")[0]
+                if email and not _is_public(email):
+                    found.append((local_sha, "tagger of " + remote_ref, _masked(email)))
+    return found
 
 
 #: The variables git exports to a hook to say WHICH repository the hook is
@@ -552,6 +632,38 @@ def main(
                  "this push goes out unchecked.", err=True)
             return 1
         ran.append("language")
+
+    # --- who the commits say they are ------------------------------------
+    # In-process like the language gate, for the same reason: it has to run
+    # from a worktree, a clone or a runner, wherever the core is installed.
+    setting = env.get("INVISIBLE_IDENTITY_CHECK")
+    if not cfg["identity"]:
+        skipped.append("identity")
+    elif setting == "skip":
+        _say("WARNING: INVISIBLE_IDENTITY_CHECK=skip. Nothing checked the "
+             "author, committer and tagger addresses of this push. An address "
+             "that goes out is public for good: a force-push leaves the old "
+             "commits reachable by SHA, in every fork and every clone.")
+        skipped.append("identity")
+    elif not refs.strip():
+        _say("NOTE: no push refs on stdin, so the commit identities were not "
+             "checked.")
+        skipped.append("identity")
+    else:
+        foreign = foreign_identities(refs, root)
+        if foreign:
+            _say("", err=True)
+            _say("REFUSED - this push carries addresses that are not a GitHub "
+                 "noreply one:", err=True)
+            for sha, role, masked in foreign[:20]:
+                _say(f"  {sha[:12]} {role}: {masked}", err=True)
+            if len(foreign) > 20:
+                _say(f"  ... and {len(foreign) - 20} more", err=True)
+            _say("Rewrite them with the noreply identity before pushing, and "
+                 "set that identity in this clone (`git config user.email`), "
+                 "or the next commit will carry the same address.", err=True)
+            return 1
+        ran.append("identity")
 
     # --- the publish gate, on release tags only ------------------------
     # Only release tags: the gate builds the project twice, and a hook that
