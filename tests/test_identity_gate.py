@@ -83,6 +83,16 @@ def test_a_private_COMMITTER_is_refused_even_with_a_noreply_author(repo, capsys)
     assert "committer" in err and "person@" not in err  # the log is pasteable
 
 
+def test_a_merge_committed_by_github_itself_goes_through(repo):
+    """A squash merge made through the web flow has committer
+    `noreply@github.com`: 77 of the commits on this repository's own main.
+    A rebase on such a main puts them in the next push's range."""
+    base = git(repo, "rev-parse", "HEAD")
+    tip = commit(repo, "a.txt", committer="noreply@github.com")
+    assert hooks.foreign_identities(refs_line(tip, remote_sha=base), repo) == []
+    assert run(repo, refs_line(tip, remote_sha=base)) == 0
+
+
 def test_a_private_author_is_refused(repo):
     base = git(repo, "rev-parse", "HEAD")
     tip = commit(repo, "a.txt", author=PRIVATE)

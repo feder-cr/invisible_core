@@ -288,6 +288,17 @@ def push_range(push_refs: str, repo: Optional[Path] = None) -> str:
 #: the account without disclosing anything about the person.
 _PUBLIC_EMAIL_SUFFIX = "@users.noreply.github.com"
 
+#: The committer GitHub itself writes on a squash or merge made through its
+#: web flow or API. ⛔ NOT a suffix match, and not optional: measured on this
+#: repository's main, 77 of 232 commits carry it. Without this line a branch
+#: rebased on a newer main and pushed over its old remote copy is refused,
+#: because the range then contains main's merges, which nobody here made.
+_GITHUB_WEB_FLOW = "noreply@github.com"
+
+
+def _is_public(email: str) -> bool:
+    return email.endswith(_PUBLIC_EMAIL_SUFFIX) or email == _GITHUB_WEB_FLOW
+
 
 def _masked(email: str) -> str:
     """The address with its local part hidden, so a refusal is safe to paste."""
@@ -333,7 +344,7 @@ def foreign_identities(push_refs: str, repo: Path) -> List[Tuple[str, str, str]]
             line = _git_out(repo, "log", "-1", "--format=%ae%x1f%ce", sha) or ""
             author, _sep, committer = line.strip().partition("\x1f")
             for role, email in (("author", author), ("committer", committer)):
-                if email and not email.endswith(_PUBLIC_EMAIL_SUFFIX):
+                if email and not _is_public(email):
                     found.append((sha, role, _masked(email)))
         if remote_ref.startswith("refs/tags/") and \
                 (_git_out(repo, "cat-file", "-t", local_sha) or "").strip() == "tag":
@@ -342,7 +353,7 @@ def foreign_identities(push_refs: str, repo: Path) -> List[Tuple[str, str, str]]
                 if not tag_line.startswith("tagger "):
                     continue
                 email = tag_line.partition("<")[2].partition(">")[0]
-                if email and not email.endswith(_PUBLIC_EMAIL_SUFFIX):
+                if email and not _is_public(email):
                     found.append((local_sha, "tagger of " + remote_ref, _masked(email)))
     return found
 
