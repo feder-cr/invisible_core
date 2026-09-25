@@ -50,6 +50,17 @@ SUPPORTED_SEAL_SCHEMA = 2
 # carry them and stay readable as history.
 SUPPORTED_LEGS = (("linux", "arm64"), ("linux", "x86_64"), ("win32", "x86_64"))
 SUPPORTED_PLATFORMS = tuple(dict.fromkeys(p for p, _ in SUPPORTED_LEGS))
+
+#: Hosts with no asset of their own that run another leg's, by a guarantee of
+#: the operating system and not by hope. Windows 11 on ARM runs x64 programs
+#: through its emulator, so an ARM64 Python - the one uv installs on those
+#: machines - gets the x86_64 engine. Until 2026-09-25 that host was refused
+#: with `NotImplementedError: no asset for platform=win32 arch=arm64` and no
+#: remedy, while the engine it could have run was one line away. Declared
+#: here, in one place, and measured by the `arm64-host` job of ci.yml on a
+#: `windows-11-arm` runner, which launches that engine from an ARM64 Python.
+#: A native asset for a host, if one is ever published, wins over this.
+EMULATED_LEGS = {("win32", "arm64"): "x86_64"}
 READABLE_SEAL_SCHEMAS = (2,)
 SEAL_FILE_ENV = "INVISIBLE_SEAL_FILE"
 STAMP_NAME = ".invisible-seal.json"
@@ -244,9 +255,12 @@ class Seal:
 
     def asset_for(self, platform_key: str, machine: str) -> Asset:
         arch = normalize_arch(machine)
-        for a in self.assets.values():
-            if a.platform == platform_key and a.arch == arch:
-                return a
+        for want in (arch, EMULATED_LEGS.get((platform_key, arch))):
+            if want is None:
+                continue
+            for a in self.assets.values():
+                if a.platform == platform_key and a.arch == want:
+                    return a
         raise NotImplementedError(
             f"seal {self.tag} has no asset for platform={platform_key} arch={arch}")
 

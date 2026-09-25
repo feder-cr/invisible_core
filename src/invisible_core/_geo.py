@@ -147,6 +147,11 @@ _REMEDY = {
         "download or a disk problem, NOT a proxy problem",
         "the geoip database could not be obtained, so nothing can be mapped - a "
         "download or a disk problem"),
+    "geoip_unreadable": (
+        "the geoip database is on disk but could not be opened or read - a "
+        "damaged file or a path the reader cannot open, NOT a proxy problem",
+        "the geoip database is on disk but could not be opened or read - a "
+        "damaged file or a path the reader cannot open"),
     "ip_not_in_db": (
         "the egress IP is absent from the geoip database, which usually means the "
         "database is stale rather than that the IP is wrong",
@@ -456,11 +461,35 @@ def _geo_record(ip: str, mmdb_path: Any) -> "Optional[Dict[str, Any]]":
     Returns ``None`` when the IP is not there: the caller decides whether that is
     fatal (the timezone, which behind a proxy must fail loudly) or not (the
     locale, which has a declared fallback).
+
+    ⛔ THE MODE IS EXPLICIT, AND ``MODE_MMAP`` ON PURPOSE ([B227], 2026-09-25).
+    The default picks the C extension, which on Windows opens the file with a
+    path in BYTES and cannot find a name that is not ASCII. The cache lives
+    under the user's profile, so every Windows user called José, Müller or with
+    a CJK account name got ``FileNotFoundError`` on a database that exists, and
+    behind a proxy that refused the launch outright. Measured on the same file:
+    ``MODE_AUTO`` and ``MODE_MMAP_EXT`` fail, ``MODE_MMAP``, ``MODE_FILE`` and
+    ``MODE_MEMORY`` answer. ``MODE_MMAP`` opens the file from Python and maps it
+    like the extension does; the handful of lookups a launch makes do not
+    notice the pure-Python reader.
+
+    A database that is there but cannot be read is said as such
+    (``geoip_unreadable``), not as the bare ``OSError``, which named a missing
+    file and sent the reader looking for a download problem.
     """
     import maxminddb
 
-    with maxminddb.open_database(str(mmdb_path)) as reader:
-        record = reader.get(ip)
+    try:
+        with maxminddb.open_database(str(mmdb_path), mode=maxminddb.MODE_MMAP) as reader:
+            record = reader.get(ip)
+    # `InvalidDatabaseError` is a RuntimeError in maxminddb, so it is named
+    # rather than caught through a base class that would also swallow ours.
+    except (OSError, ValueError,
+            getattr(maxminddb, "InvalidDatabaseError", ValueError)) as exc:
+        raise GeoTimezoneError(
+            f"the geoip database at {mmdb_path} could not be read - "
+            f"{_remedy('geoip_unreadable', False)}: {exc}",
+            kind="geoip_unreadable") from exc
     return record if isinstance(record, dict) else None
 
 
