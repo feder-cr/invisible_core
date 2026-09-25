@@ -479,7 +479,11 @@ def _adopt_existing_cache(seal: Seal, asset: Asset, version_dir: Path) -> Path |
         write_stamp(d, seal, asset=asset.name, asset_sha256=None, adopted=True)
         print(f"invisible-core: adopted the engine already cached at {d} "
               f"({seal.describe()}); no download needed", file=sys.stderr)
-        return entry
+        # Through verify_engine again, not `return entry`: the tree may just
+        # have moved, and the path a caller launches must be the one
+        # verify_engine hands back, never one computed next to it. The other
+        # two returns of ensure_binary already are.
+        return verify_engine(entry, seal, source=f"adopted {d.name}", asset=asset)
     return None
 
 

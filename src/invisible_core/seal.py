@@ -593,12 +593,31 @@ def verify_engine(entry: "str | os.PathLike[str]", seal: Optional[Seal] = None,
     Called on every route that turns a path into a running Firefox. Returns the
     path so it can wrap an expression in place. `asset`, when the caller knows
     which leg it fetched, pins the BuildID comparison to that exact leg.
+
+    The path handed back is the one the FILE SYSTEM says the executable is at,
+    not the one it was asked about, because that is the path a launch needs.
+    Under an MSIX host (Claude Desktop, the Microsoft Store Python) writes into
+    AppData are silently redirected into the package's own LocalCache folder:
+    the process that downloaded the engine sees it at the AppData path, but
+    nothing is there on disk. CreateProcessW accepts that path and then fails
+    with ERROR_SXS_CANT_GEN_ACTCTX (14001), because Windows resolves the
+    `mozglue` assembly that firefox.exe declares against the directory as it
+    really is, outside the redirection. Retail Firefox fails identically when
+    installed that way, so this is not about our archive. `os.path.realpath`
+    asks the file system through the handle and returns the LocalCache path,
+    from which the same engine starts. Reported as invisible_playwright
+    discussion #256 on 2026-09-25, and issue #22 in May was the same failure
+    under the Store Python.
+
+    It sits HERE, and not in the downloader, because this is the one function
+    both routes cross: the cached engine from `ensure_binary` and a caller's
+    own `binary_path=`. Anywhere else would need a second copy of the same fact.
     """
     seal = seal or active_seal()
     ident = read_engine_identity(entry)
     probs = engine_problems(ident, seal, asset)
     if not probs:
-        return Path(entry)
+        return Path(os.path.realpath(entry))
     expected = expected_build_ids_for(ident, seal, asset)
     want = " or ".join(expected) if expected else "?"
     lines = [

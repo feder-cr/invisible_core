@@ -18,6 +18,7 @@ to the network instead of serving the stale tree" is an assertion, not a hope.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -394,3 +395,78 @@ def test_engine_status_reports_the_problem_not_the_observation(cache, sealed):
     assert "engine says" not in detail, detail
     assert OLD_VERSION in detail and SEALED_VERSION in detail, detail
     assert "\n" not in detail, detail
+
+
+# ------------------------------------ the path handed back is the real one (#256)
+#
+# Under an MSIX host, Windows redirects writes into AppData to the package's
+# own LocalCache folder, and a Firefox launched from the redirected path dies
+# with ERROR_SXS_CANT_GEN_ACTCTX (14001): the mozglue assembly is looked up in
+# the directory as it really is. No CI runner can create that redirection, so
+# these tests use the one property that matters and every runner can build: a
+# directory link, so the engine is VISIBLE at a path that is not where it IS.
+# A junction on Windows (no privilege needed), a symlink elsewhere. The real
+# MSIX case was reproduced by hand on 2026-09-25, with the published package,
+# and the fix was proved there: the same packaged process launched the same
+# engine once it was handed the path os.path.realpath returns.
+
+def link_dir(link: Path, target: Path) -> None:
+    """Make `target` reachable at `link` without being there."""
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+@pytest.fixture
+def linked_cache(tmp_path, monkeypatch):
+    """A cache root reached through a link: (the path callers see, the real one)."""
+    real = tmp_path / "RealCache"
+    real.mkdir()
+    seen = tmp_path / "SeenCache"
+    link_dir(seen, real)
+    monkeypatch.setenv("INVISIBLE_PLAYWRIGHT_CACHE_DIR", str(seen))
+    assert cache_root() == seen, cache_root()
+    return seen, real
+
+
+def _is_the_real_path(got: Path) -> bool:
+    return "SeenCache" not in got.parts and "RealCache" in got.parts
+
+
+def test_verify_engine_hands_back_where_the_file_really_is(tmp_path, sealed):
+    """The one function every launch route crosses: what it returns is what
+    CreateProcessW is given, so it must be the file system's own answer."""
+    from invisible_core.seal import verify_engine
+    real = tmp_path / "real"
+    entry = build_tree(real)
+    link_dir(tmp_path / "seen", real)
+    seen_entry = tmp_path / "seen" / entry_rel()
+    got = verify_engine(seen_entry, sealed, source="unit")
+    assert got == Path(os.path.realpath(entry)), got
+    assert "seen" not in got.parts, got
+
+
+def test_a_warm_cache_hit_hands_back_the_real_path(linked_cache, no_network, sealed):
+    """The route every launch after the first one takes."""
+    version_dir = cache_dir_for_seal(sealed)
+    build_tree(version_dir)
+    stamp_for(version_dir, sealed)
+    got = ensure_binary(seal=sealed)
+    assert _is_the_real_path(got), got
+    assert got.exists(), got
+
+
+def test_an_adopted_tree_hands_back_the_real_path(linked_cache, no_network, tmp_path):
+    """The route that used to return its own `entry` instead of what
+    verify_engine handed back, so a fix inside verify_engine alone would have
+    missed it."""
+    seen, _real = linked_cache
+    legacy = seen / "firefox-18"
+    build_tree(legacy)
+    omni_sha = _sha256(resources_of(legacy) / "omni.ja")
+    seal = load_seal(write_seal(tmp_path / "s.json", omni_sha256=omni_sha))
+    got = ensure_binary(seal=seal)
+    assert _is_the_real_path(got), got
+    assert got.exists(), got
