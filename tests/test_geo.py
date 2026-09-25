@@ -185,7 +185,8 @@ class _FakeReader:
 
 def _install_fake_maxminddb(monkeypatch, record):
     mod = types.ModuleType("maxminddb")
-    mod.open_database = lambda path: _FakeReader(record)
+    mod.open_database = lambda path, mode=None: _FakeReader(record)
+    mod.MODE_MMAP = 2
     monkeypatch.setitem(sys.modules, "maxminddb", mod)
 
 

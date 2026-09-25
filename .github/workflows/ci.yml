@@ -135,6 +135,25 @@ jobs:
           $verdict = (Get-Content $out -Raw | ConvertFrom-Json).verdict
           if ($verdict -ne "PASS") { throw "msix-host verdict: $verdict" }
 
+  # THE ARM64 WINDOWS HOST RUNS THE x86_64 ENGINE, AND THIS IS WHERE THAT IS
+  # MEASURED. `EMULATED_LEGS` in seal.py declares it; before 2026-09-25 an
+  # ARM64 Python - the one uv installs on Snapdragon laptops - was refused with
+  # "no asset for platform=win32 arch=arm64". The probe downloads the engine
+  # from an ARM64 interpreter and makes it start and render a page, and exits
+  # 2 (BENCH_NOT_LIVE) if the interpreter is not ARM64 after all.
+  arm64-host:
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: arm64
+      - run: python -m pip install -e .
+      - name: an ARM64 Python gets the engine and the engine starts
+        run: python tests/arm64/host_probe.py
+
   # ONE CONTEXT FOR THE BRANCH PROTECTION, and that is the reason this job
   # exists. The protection used to list `tests (windows-latest)` and
   # `tests (ubuntu-latest)`: real names when the matrix had only the operating
@@ -155,7 +174,7 @@ jobs:
   # failing it - and a skipped context is not a red context, it is a context
   # that never arrives. That would be the same hole, one floor up.
   gate:
-    needs: [tests, msix-host]
+    needs: [tests, msix-host, arm64-host]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -163,5 +182,7 @@ jobs:
         run: |
           echo "tests: ${{ needs.tests.result }}"
           echo "msix-host: ${{ needs.msix-host.result }}"
+          echo "arm64-host: ${{ needs.arm64-host.result }}"
           test "${{ needs.tests.result }}" = "success"
           test "${{ needs.msix-host.result }}" = "success"
+          test "${{ needs.arm64-host.result }}" = "success"
