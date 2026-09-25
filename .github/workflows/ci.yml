@@ -84,6 +84,57 @@ jobs:
           print(f"{passed} tests ran")
           PY
 
+  # THE ENGINE HAS TO START INSIDE THE HOST THE PRODUCT IS USED FROM. Claude
+  # Desktop on Windows is an MSIX package: files its processes write under
+  # AppData really land in the package's LocalCache, and an engine launched
+  # from the AppData path died with 14001 because Windows resolves `mozglue`
+  # where the file really is. Nobody could start the MCP server from Claude
+  # Desktop on Windows until core 34.30.0, and nothing here ever ran inside
+  # such a host (invisible_playwright discussion #256, issue #22). This job
+  # registers a minimal full-trust package and runs tests/msix/host_probe.py
+  # as its first process: download into a redirected cache, then launch. The
+  # probe also proves the bench is live - the old path must still fail with
+  # 14001 - and refuses as BENCH_NOT_LIVE when it is not, because a job that
+  # cannot fail is indistinguishable from one that passes. windows-2025 is
+  # build 26100, the one the report came from.
+  msix-host:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The BASE interpreter, never a venv: a venv's python.exe starts the base
+      # one as a child, and the child leaves the package.
+      - run: python -m pip install -e .
+      - name: register the probe package in developer mode
+        shell: pwsh
+        run: |
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f
+          $pkg = Join-Path $env:RUNNER_TEMP "msix-host"
+          New-Item -ItemType Directory -Force $pkg | Out-Null
+          Copy-Item tests/msix/AppxManifest.xml $pkg
+          Copy-Item "$env:WINDIR\System32\cmd.exe" (Join-Path $pkg "probe.exe")
+          [IO.File]::WriteAllBytes((Join-Path $pkg "logo.png"), [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="))
+          Add-AppxPackage -Register (Join-Path $pkg "AppxManifest.xml")
+          $p = Get-AppxPackage -Name InvisibleCoreMsixHost
+          if (-not $p) { throw "the probe package did not register" }
+          "PFN=$($p.PackageFamilyName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: download and launch the engine inside the package
+        shell: pwsh
+        run: |
+          $py = (Get-Command python).Source
+          $out = Join-Path $env:RUNNER_TEMP "msix-probe.json"
+          $probe = (Resolve-Path tests/msix/host_probe.py).Path
+          Invoke-CommandInDesktopPackage -PackageFamilyName $env:PFN -AppId Probe -Command $py -Args "`"$probe`" `"$out`""
+          $deadline = (Get-Date).AddMinutes(20)
+          while ((Get-Date) -lt $deadline -and -not (Test-Path $out)) { Start-Sleep -Seconds 5 }
+          if (-not (Test-Path $out)) { throw "the probe wrote no verdict in 20 minutes" }
+          Get-Content $out
+          $verdict = (Get-Content $out -Raw | ConvertFrom-Json).verdict
+          if ($verdict -ne "PASS") { throw "msix-host verdict: $verdict" }
+
   # ONE CONTEXT FOR THE BRANCH PROTECTION, and that is the reason this job
   # exists. The protection used to list `tests (windows-latest)` and
   # `tests (ubuntu-latest)`: real names when the matrix had only the operating
@@ -104,11 +155,13 @@ jobs:
   # failing it - and a skipped context is not a red context, it is a context
   # that never arrives. That would be the same hole, one floor up.
   gate:
-    needs: [tests]
+    needs: [tests, msix-host]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: refuse unless every matrix job succeeded
         run: |
           echo "tests: ${{ needs.tests.result }}"
+          echo "msix-host: ${{ needs.msix-host.result }}"
           test "${{ needs.tests.result }}" = "success"
+          test "${{ needs.msix-host.result }}" = "success"
