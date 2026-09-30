@@ -240,7 +240,7 @@ def test_the_display_never_touches_the_process_environment(monkeypatch):
                         lambda self, display: setattr(self, "_proc", fake_proc))
     monkeypatch.setattr(_LinuxVirtualDisplay, "_wait_until_ready",
                         lambda self, display: None)
-    monkeypatch.setattr(_LinuxVirtualDisplay, "_pick_display", lambda self: ":123")
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_pick_display", lambda self, exclude=frozenset(): ":123")
     before = dict(os.environ)
 
     vd = _LinuxVirtualDisplay()
@@ -321,3 +321,160 @@ def test_occlusion_tracking_is_off_for_every_session():
     # And an explicit caller override must still win: it is a setdefault.
     forced = compose_session_prefs(profile, extra_prefs={key: True}).prefs
     assert forced[key] is True
+
+
+
+#  _pick_display / start() - which number is chosen. These are selection and
+#  bookkeeping tests: Xvfb is not started, and readiness is stubbed.
+
+_REAL_EXISTS = os.path.exists
+
+
+def _only_these_locks(monkeypatch, locks=()):
+    """Answer for X lockfiles only; every other path is the real filesystem."""
+    def exists(path):
+        if str(path).startswith("/tmp/.X") and str(path).endswith("-lock"):
+            return path in locks
+        return _REAL_EXISTS(path)
+    monkeypatch.setattr(headless.os.path, "exists", exists)
+
+
+def _proc(monkeypatch, unix="", tcp="", tcp6=""):
+    files = {"/proc/net/unix": unix, "/proc/net/tcp": tcp, "/proc/net/tcp6": tcp6}
+    # raising=False: the seam is new, so these tests also run against a
+    # version without it and fail there on the behaviour, not on the mock.
+    monkeypatch.setattr(headless, "_read_proc", lambda path: files.get(path, ""), raising=False)
+
+
+_UNIX_HEADER = "Num       RefCount Protocol Flags    Type St Inode Path\n"
+_TCP_HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+
+
+def _unix_row(path):
+    return f"0000000000000000: 00000002 00000000 00010000 0001 01 35038 {path}\n"
+
+
+def _tcp6_row(port, remote_port=0, state="0A"):
+    return (f"   0: 00000000000000000000000000000000:{port:04X} "
+            f"00000000000000000000000000000000:{remote_port:04X} {state} 00000000:00000000 00:00000000 00000000  1000        0 1\n")
+
+
+def _tcp_row(port, state="0A"):
+    return f"   0: 00000000:{port:04X} 00000000:0000 {state} 00000000:00000000 00:00000000 00000000  1000        0 1\n"
+
+
+def _stub_start(monkeypatch, failing):
+    monkeypatch.setattr(headless, "_binary_on_path", lambda name: True)
+    spawned = []
+
+    def spawn(self, display):
+        spawned.append(display)
+        self._proc = None
+
+    def ready(self, display):
+        if display in failing:
+            raise RuntimeError(f"Xvfb {display} exited immediately")
+
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_spawn", spawn)
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_wait_until_ready", ready)
+    return spawned
+
+
+@pytest.mark.unit
+def test_every_display_that_fails_stays_excluded(monkeypatch):
+    """A display taken by a server this process cannot see used to be picked
+    on all ten attempts. Every failed number is skipped from then on, not just
+    the last one: two hidden servers must not be alternated between."""
+    _only_these_locks(monkeypatch)
+    _proc(monkeypatch)
+    spawned = _stub_start(monkeypatch, failing={":99", ":100", ":101"})
+    vd = _LinuxVirtualDisplay()
+    vd.start()
+    assert spawned == [":99", ":100", ":101", ":102"]
+    assert vd.launch_env()["DISPLAY"] == ":102"
+
+
+@pytest.mark.unit
+def test_ten_failures_are_ten_different_numbers(monkeypatch):
+    _only_these_locks(monkeypatch)
+    _proc(monkeypatch)
+    spawned = _stub_start(monkeypatch, failing={f":{n}" for n in range(99, 400)})
+    with pytest.raises(RuntimeError, match="after 10 attempts"):
+        _LinuxVirtualDisplay().start()
+    assert spawned == [f":{n}" for n in range(99, 109)]
+
+
+@pytest.mark.unit
+def test_an_abstract_x_socket_in_this_namespace_is_taken(monkeypatch):
+    """The case that started this: a container sharing the host network
+    namespace holds :100. Its lockfile and socket FILE are in its own /tmp,
+    but its abstract socket is listed in this namespace's /proc/net/unix."""
+    _only_these_locks(monkeypatch, locks={"/tmp/.X99-lock"})
+    _proc(monkeypatch, unix=_UNIX_HEADER + _unix_row("@/tmp/.X11-unix/X100"))
+    assert _LinuxVirtualDisplay()._pick_display() == ":101"
+
+
+@pytest.mark.unit
+def test_a_path_x_socket_that_is_listening_is_taken(monkeypatch):
+    _only_these_locks(monkeypatch)
+    _proc(monkeypatch, unix=_UNIX_HEADER + _unix_row("/tmp/.X11-unix/X99"))
+    assert _LinuxVirtualDisplay()._pick_display() == ":100"
+
+
+@pytest.mark.unit
+def test_a_tcp_listener_on_the_x_port_is_taken(monkeypatch):
+    """This Xvfb listens on TCP 6000+n, so a listener there collides."""
+    _only_these_locks(monkeypatch)
+    _proc(monkeypatch, tcp=_TCP_HEADER + _tcp_row(6099),
+          tcp6=_TCP_HEADER + _tcp6_row(6100, remote_port=6101))
+    assert _LinuxVirtualDisplay()._pick_display() == ":101"
+
+
+@pytest.mark.unit
+def test_a_tcp_connection_that_is_not_listening_does_not_count(monkeypatch):
+    _only_these_locks(monkeypatch)
+    _proc(monkeypatch, tcp=_TCP_HEADER + _tcp_row(6099, state="01"))
+    assert _LinuxVirtualDisplay()._pick_display() == ":99"
+
+
+@pytest.mark.unit
+def test_empty_proc_tables_leave_the_lockfile_check(monkeypatch):
+    """Nothing listening: the lockfile check, the only one there was, still
+    applies."""
+    _only_these_locks(monkeypatch, locks={"/tmp/.X99-lock"})
+    _proc(monkeypatch)
+    assert _LinuxVirtualDisplay()._pick_display() == ":100"
+
+
+@pytest.mark.unit
+def test_a_socket_name_with_an_x_looking_suffix_is_not_a_display(monkeypatch):
+    """The path is everything after the seventh column and may contain spaces.
+    Matching its last word would read these unrelated sockets as :99."""
+    _only_these_locks(monkeypatch)
+    _proc(monkeypatch, unix=_UNIX_HEADER
+          + _unix_row("@other /tmp/.X11-unix/X99")
+          + _unix_row("/tmp/.X11-unix/X99 "))
+    assert _LinuxVirtualDisplay()._pick_display() == ":99"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("error", [FileNotFoundError, PermissionError])
+def test_an_unreadable_proc_table_is_not_an_error(monkeypatch, error):
+    """No /proc, or one this user cannot read: the real reader answers empty
+    and the table that IS readable still counts."""
+    _only_these_locks(monkeypatch)
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/net/unix":
+            raise error(path)
+        if path == "/proc/net/tcp6":
+            raise error(path)
+        if path == "/proc/net/tcp":
+            import io
+            return io.StringIO(_TCP_HEADER + _tcp_row(6099))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    assert headless._read_proc("/proc/net/unix") == ""
+    assert _LinuxVirtualDisplay()._pick_display() == ":100"

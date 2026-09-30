@@ -38,11 +38,12 @@ pref is no longer emitted: the engine is stock on this surface again.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import subprocess
 import sys
 import time
-from typing import Optional
+from typing import AbstractSet, Optional
 
 
 # Inherited from WSLg / GNOME / etc. these env vars make Firefox prefer a
@@ -66,6 +67,52 @@ _WAYLAND_LEAK_VARS = (
 DESKTOP_ENV = "INVPW_DESKTOP"
 
 
+#: Where Linux lists the sockets of this network namespace. Read, never
+#: written; a host without them (not Linux, or /proc not mounted) reports
+#: nothing listening and the lockfile check stands alone.
+_PROC_UNIX = "/proc/net/unix"
+_PROC_TCP = ("/proc/net/tcp", "/proc/net/tcp6")
+_X_SOCKET = re.compile(r"^@?/tmp/\.X11-unix/X(\d+)$")
+_TCP_LISTEN = "0A"
+_X_TCP_BASE = 6000
+
+
+def _read_proc(path: str) -> str:
+    try:
+        with open(path, encoding="ascii", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _x_displays_listening() -> set:
+    """Display numbers in use in this network namespace: any live unix socket
+    named for an X display (abstract or path) in /proc/net/unix, whatever its
+    state - a conservative reading - or a TCP listener on 6000+n. Only live
+    sockets are listed there, so a stale socket file left in /tmp/.X11-unix
+    by a server that has exited does not count."""
+    busy = set()
+    for line in _read_proc(_PROC_UNIX).splitlines()[1:]:
+        # Seven fixed columns, then the path, which may itself contain spaces:
+        # match the WHOLE path, never its last word.
+        cols = line.split(None, 7)
+        m = _X_SOCKET.fullmatch(cols[7]) if len(cols) == 8 else None
+        if m:
+            busy.add(int(m.group(1)))
+    for path in _PROC_TCP:
+        for line in _read_proc(path).splitlines()[1:]:
+            cols = line.split()
+            if len(cols) < 4 or cols[3] != _TCP_LISTEN:
+                continue
+            try:
+                port = int(cols[1].rsplit(":", 1)[1], 16)
+            except (IndexError, ValueError):
+                continue
+            if _X_TCP_BASE <= port < _X_TCP_BASE + 1000:
+                busy.add(port - _X_TCP_BASE)
+    return busy
+
+
 class _LinuxVirtualDisplay:
     """Standalone Xvfb instance owned by this InvisiblePlaywright session."""
 
@@ -83,9 +130,17 @@ class _LinuxVirtualDisplay:
         # Retry: when many workers start in parallel they can pick the same
         # display number before any has created its lockfile. Xvfb on the
         # losing side exits immediately - try again with a fresh number.
+        #
+        # A number that failed is not offered again. Without that, a display
+        # held by an X server whose lockfile this process cannot see (one in a
+        # container that shares the host network namespace, whose lock is in
+        # the container's own /tmp) was picked on every attempt, and all ten
+        # failed on the same number.
         last_err: Optional[Exception] = None
+        tried: set[str] = set()
         for _ in range(10):
-            display = self._pick_display()
+            display = self._pick_display(exclude=tried)
+            tried.add(display)
             try:
                 self._spawn(display)
                 self._wait_until_ready(display)
@@ -114,10 +169,20 @@ class _LinuxVirtualDisplay:
             start_new_session=True,
         )
 
-    def _pick_display(self) -> str:
+    def _pick_display(self, exclude: AbstractSet[str] = frozenset()) -> str:
+        # A number is taken when its lockfile exists OR something is listening
+        # on it. The lockfile alone misses an X server whose /tmp is not this
+        # one - a container sharing the host network namespace keeps its lock
+        # and its socket file in its own /tmp, but its abstract socket and TCP
+        # port are in the namespace this process shares.
+        busy = _x_displays_listening()
         for n in range(99, 400):
-            if not os.path.exists(f"/tmp/.X{n}-lock"):
-                return f":{n}"
+            display = f":{n}"
+            if display in exclude or n in busy:
+                continue
+            if os.path.exists(f"/tmp/.X{n}-lock"):
+                continue
+            return display
         raise RuntimeError("no free X display number in :99-:399")
 
     def _wait_until_ready(self, display: str) -> None:
