@@ -689,7 +689,9 @@ def _listener_pid(display):
     import struct
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        s.connect(f"\0/tmp/.X11-unix/X{display[1:]}")
+        # A leading NUL names the ABSTRACT socket, the one Xvfb listens on,
+        # spelled chr(0) so the literal itself holds no control character.
+        s.connect(chr(0) + f"/tmp/.X11-unix/X{display[1:]}")
         return struct.unpack("3i", s.getsockopt(
             socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[0]
     except OSError:

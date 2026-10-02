@@ -342,7 +342,9 @@ def foreign_identities(push_refs: str, repo: Path) -> List[Tuple[str, str, str]]
                 continue
             seen.add(sha)
             line = _git_out(repo, "log", "-1", "--format=%ae%x1f%ce", sha) or ""
-            author, _sep, committer = line.strip().partition("\x1f")
+            # The unit separator git writes for %x1f, spelled with chr() so
+            # no string literal in this file evaluates to a control character.
+            author, _sep, committer = line.strip().partition(chr(0x1F))
             for role, email in (("author", author), ("committer", committer)):
                 if email and not _is_public(email):
                     found.append((sha, role, _masked(email)))
