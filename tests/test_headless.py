@@ -236,10 +236,12 @@ def test_the_display_never_touches_the_process_environment(monkeypatch):
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
     monkeypatch.setattr(headless, "_binary_on_path", lambda name: True)
     fake_proc = type("P", (), {"poll": lambda self: 0})()
-    monkeypatch.setattr(_LinuxVirtualDisplay, "_spawn",
-                        lambda self, display: setattr(self, "_proc", fake_proc))
-    monkeypatch.setattr(_LinuxVirtualDisplay, "_wait_until_ready",
-                        lambda self, display: None)
+
+    def spawn(self, display):
+        self._proc = fake_proc
+        return display
+
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_spawn", spawn)
     monkeypatch.setattr(_LinuxVirtualDisplay, "_pick_display", lambda self, exclude=frozenset(): ":123")
     before = dict(os.environ)
 
@@ -325,7 +327,7 @@ def test_occlusion_tracking_is_off_for_every_session():
 
 
 #  _pick_display / start() - which number is chosen. These are selection and
-#  bookkeeping tests: Xvfb is not started, and readiness is stubbed.
+#  bookkeeping tests: Xvfb is not started, and _spawn is stubbed.
 
 _REAL_EXISTS = os.path.exists
 
@@ -337,6 +339,12 @@ def _only_these_locks(monkeypatch, locks=()):
             return path in locks
         return _REAL_EXISTS(path)
     monkeypatch.setattr(headless.os.path, "exists", exists)
+
+
+def _lowest_first(monkeypatch):
+    """The picker chooses at random among the free numbers; these tests pin
+    the choice to the lowest, so they can name the number they expect."""
+    monkeypatch.setattr(headless.secrets, "choice", lambda seq: seq[0])
 
 
 def _proc(monkeypatch, unix="", tcp="", tcp6=""):
@@ -365,18 +373,16 @@ def _tcp_row(port, state="0A"):
 
 def _stub_start(monkeypatch, failing):
     monkeypatch.setattr(headless, "_binary_on_path", lambda name: True)
+    _lowest_first(monkeypatch)
     spawned = []
 
     def spawn(self, display):
         spawned.append(display)
-        self._proc = None
-
-    def ready(self, display):
         if display in failing:
-            raise RuntimeError(f"Xvfb {display} exited immediately")
+            raise headless._XvfbExited(f"Xvfb {display} exited before it was listening")
+        return display
 
     monkeypatch.setattr(_LinuxVirtualDisplay, "_spawn", spawn)
-    monkeypatch.setattr(_LinuxVirtualDisplay, "_wait_until_ready", ready)
     return spawned
 
 
@@ -405,10 +411,37 @@ def test_ten_failures_are_ten_different_numbers(monkeypatch):
 
 
 @pytest.mark.unit
+def test_sessions_starting_together_do_not_all_pick_the_same_number(monkeypatch):
+    """⛔ The herd. Taking the lowest free number, N sessions starting at once
+    all tried :99, every loser moved to :100 together, and so on: the k-th
+    needed k attempts and, measured with 15 at once, five ran out of their
+    ten. The choice is random among the free numbers, and only among them."""
+    _only_these_locks(monkeypatch, locks={"/tmp/.X101-lock"})
+    _proc(monkeypatch, unix=_UNIX_HEADER + _unix_row("@/tmp/.X11-unix/X102"))
+    vd = _LinuxVirtualDisplay()
+    picks = {vd._pick_display(exclude={":103"}) for _ in range(200)}
+    assert len(picks) > 50, picks
+    assert picks.isdisjoint({":101", ":102", ":103"})
+    assert all(99 <= int(d[1:]) <= 399 for d in picks)
+
+
+@pytest.mark.unit
+def test_the_random_choice_is_over_exactly_the_free_numbers(monkeypatch):
+    _only_these_locks(monkeypatch, locks={"/tmp/.X100-lock"})
+    _proc(monkeypatch, unix=_UNIX_HEADER + _unix_row("@/tmp/.X11-unix/X101"))
+    offered = []
+    monkeypatch.setattr(headless.secrets, "choice",
+                        lambda seq: offered.append(list(seq)) or seq[-1])
+    assert _LinuxVirtualDisplay()._pick_display(exclude={":102"}) == ":399"
+    assert offered == [[99] + list(range(103, 400))]
+
+
+@pytest.mark.unit
 def test_an_abstract_x_socket_in_this_namespace_is_taken(monkeypatch):
     """The case that started this: a container sharing the host network
     namespace holds :100. Its lockfile and socket FILE are in its own /tmp,
     but its abstract socket is listed in this namespace's /proc/net/unix."""
+    _lowest_first(monkeypatch)
     _only_these_locks(monkeypatch, locks={"/tmp/.X99-lock"})
     _proc(monkeypatch, unix=_UNIX_HEADER + _unix_row("@/tmp/.X11-unix/X100"))
     assert _LinuxVirtualDisplay()._pick_display() == ":101"
@@ -416,6 +449,7 @@ def test_an_abstract_x_socket_in_this_namespace_is_taken(monkeypatch):
 
 @pytest.mark.unit
 def test_a_path_x_socket_that_is_listening_is_taken(monkeypatch):
+    _lowest_first(monkeypatch)
     _only_these_locks(monkeypatch)
     _proc(monkeypatch, unix=_UNIX_HEADER + _unix_row("/tmp/.X11-unix/X99"))
     assert _LinuxVirtualDisplay()._pick_display() == ":100"
@@ -423,7 +457,8 @@ def test_a_path_x_socket_that_is_listening_is_taken(monkeypatch):
 
 @pytest.mark.unit
 def test_a_tcp_listener_on_the_x_port_is_taken(monkeypatch):
-    """This Xvfb listens on TCP 6000+n, so a listener there collides."""
+    """This Xvfb listens on TCP 6000+n, so a listener there is counted."""
+    _lowest_first(monkeypatch)
     _only_these_locks(monkeypatch)
     _proc(monkeypatch, tcp=_TCP_HEADER + _tcp_row(6099),
           tcp6=_TCP_HEADER + _tcp6_row(6100, remote_port=6101))
@@ -432,6 +467,7 @@ def test_a_tcp_listener_on_the_x_port_is_taken(monkeypatch):
 
 @pytest.mark.unit
 def test_a_tcp_connection_that_is_not_listening_does_not_count(monkeypatch):
+    _lowest_first(monkeypatch)
     _only_these_locks(monkeypatch)
     _proc(monkeypatch, tcp=_TCP_HEADER + _tcp_row(6099, state="01"))
     assert _LinuxVirtualDisplay()._pick_display() == ":99"
@@ -441,6 +477,7 @@ def test_a_tcp_connection_that_is_not_listening_does_not_count(monkeypatch):
 def test_empty_proc_tables_leave_the_lockfile_check(monkeypatch):
     """Nothing listening: the lockfile check, the only one there was, still
     applies."""
+    _lowest_first(monkeypatch)
     _only_these_locks(monkeypatch, locks={"/tmp/.X99-lock"})
     _proc(monkeypatch)
     assert _LinuxVirtualDisplay()._pick_display() == ":100"
@@ -450,6 +487,7 @@ def test_empty_proc_tables_leave_the_lockfile_check(monkeypatch):
 def test_a_socket_name_with_an_x_looking_suffix_is_not_a_display(monkeypatch):
     """The path is everything after the seventh column and may contain spaces.
     Matching its last word would read these unrelated sockets as :99."""
+    _lowest_first(monkeypatch)
     _only_these_locks(monkeypatch)
     _proc(monkeypatch, unix=_UNIX_HEADER
           + _unix_row("@other /tmp/.X11-unix/X99")
@@ -462,6 +500,7 @@ def test_a_socket_name_with_an_x_looking_suffix_is_not_a_display(monkeypatch):
 def test_an_unreadable_proc_table_is_not_an_error(monkeypatch, error):
     """No /proc, or one this user cannot read: the real reader answers empty
     and the table that IS readable still counts."""
+    _lowest_first(monkeypatch)
     _only_these_locks(monkeypatch)
     real_open = open
 
@@ -478,3 +517,259 @@ def test_an_unreadable_proc_table_is_not_an_error(monkeypatch, error):
     monkeypatch.setattr("builtins.open", fake_open)
     assert headless._read_proc("/proc/net/unix") == ""
     assert _LinuxVirtualDisplay()._pick_display() == ":100"
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  start() against a fake Xvfb - WHEN a display counts as ready. The fake is
+#  a real child process found on PATH, so start() runs unmodified: spawn,
+#  readiness, retry, reaping. It behaves like the real server in each mode,
+#  with and without -displayfd, so the same tests run against a version that
+#  waits for the lockfile and show it wrong.
+# ──────────────────────────────────────────────────────────────────────
+
+_FAKE_XVFB = r'''
+import json, os, signal, sys, time
+args = sys.argv[1:]
+display = args[0]
+n = display[1:]
+fd = int(args[args.index("-displayfd") + 1]) if "-displayfd" in args else None
+mode = json.loads(os.environ["FAKE_XVFB_PLAN"]).get(display, "ready")
+with open(os.environ["FAKE_XVFB_LOG"], "a") as f:
+    f.write(f"{os.getpid()} {display}\n")
+lock = f"/tmp/.X{n}-lock"
+if mode == "exit-late":
+    # Another server holds the number: like the real loser, it lingers for
+    # a moment and exits without ever listening.
+    time.sleep(0.3)
+    sys.exit(1)
+if mode == "lock-then-exit":
+    # Made its lockfile, then could not open its sockets.
+    with open(lock, "w") as f:
+        f.write("%10d\n" % os.getpid())
+    time.sleep(0.3)
+    os.unlink(lock)
+    sys.exit(1)
+if mode == "hang":
+    time.sleep(120)
+    sys.exit(0)
+# ready, as the real server: with -displayfd it reports on the pipe and
+# writes no lockfile; without, it writes the lockfile.
+if fd is not None:
+    os.write(fd, f"{n}\n".encode())
+    os.close(fd)
+    signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
+else:
+    with open(lock, "w") as f:
+        f.write("%10d\n" % os.getpid())
+    def bye(*a):
+        os.unlink(lock)
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, bye)
+time.sleep(120)
+'''
+
+linux_only = pytest.mark.skipif(not sys.platform.startswith("linux"),
+                                reason="spawns a child with an inherited pipe")
+
+
+@pytest.fixture
+def fake_xvfb(tmp_path, monkeypatch):
+    """Put a fake ``Xvfb`` first on PATH. Returns ``run(plan, displays)``:
+    ``plan`` maps a display to a mode, ``displays`` is what _pick_display
+    offers, in order. Returns the (pid, display) of every spawn. Every fake
+    still alive at the end is killed, and every lockfile removed."""
+    import json
+    import signal
+
+    exe = tmp_path / "Xvfb"
+    exe.write_bytes(f"#!{sys.executable}\n{_FAKE_XVFB}".encode())
+    exe.chmod(0o755)
+    log = tmp_path / "spawns.log"
+    log.write_bytes(b"")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("FAKE_XVFB_LOG", str(log))
+    used = []
+
+    def spawns():
+        return [(int(p), d) for p, d in
+                (line.split() for line in log.read_text().splitlines())]
+
+    def run(plan, displays):
+        monkeypatch.setenv("FAKE_XVFB_PLAN", json.dumps(plan))
+        offered = iter(displays)
+        used.extend(displays)
+        monkeypatch.setattr(_LinuxVirtualDisplay, "_pick_display",
+                            lambda self, exclude=frozenset(): next(offered))
+        return spawns
+
+    yield run
+    for pid, _ in spawns():
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    for d in used:
+        try:
+            os.unlink(f"/tmp/.X{d[1:]}-lock")
+        except OSError:
+            pass
+
+
+def _gone(pid):
+    """Not running and not a zombie: someone waited for it."""
+    return not os.path.exists(f"/proc/{pid}")
+
+
+def _free_high_pair():
+    import random
+    n = random.randrange(5000, 6000, 2)
+    return f":{n}", f":{n + 1}"
+
+
+@pytest.mark.linux_only
+@linux_only
+@pytest.mark.parametrize("whose_lock", ["another process's", "its own"])
+def test_a_lockfile_is_not_a_listening_server(fake_xvfb, whose_lock):
+    """⛔ The defect under PR #85. Ready meant "/tmp/.X{n}-lock exists", and
+    a lockfile proves nothing about OUR server listening:
+
+    - another process's: two sessions race for one number, the loser's Xvfb
+      exits, and the loser read the WINNER's lockfile as its own - measured,
+      6 sessions at once, 3 or 4 of 6 ended on another session's Xvfb;
+    - its own: an Xvfb creates its lockfile BEFORE its sockets, so one that
+      then cannot open them (the number held from another /tmp) was taken
+      for live - measured, main reported :99 started and the server was
+      dead half a second later.
+
+    Against that version this fails: start() returns the first number and
+    its server is dead. Ready is now the server's own report on -displayfd,
+    and its exit before reporting moves start() to another number."""
+    first, second = _free_high_pair()
+    if whose_lock == "another process's":
+        with open(f"/tmp/.X{first[1:]}-lock", "w") as f:
+            f.write(f"{os.getpid():10d}\n")        # a live winner holds it
+        plan = {first: "exit-late"}
+    else:
+        plan = {first: "lock-then-exit"}
+    spawns = fake_xvfb(plan, [first, second])
+    vd = _LinuxVirtualDisplay()
+    vd.start()
+    try:
+        import time
+        time.sleep(0.6)
+        assert vd._proc is not None and vd._proc.poll() is None, (
+            "start() returned on a display whose own Xvfb is dead")
+        assert vd.launch_env()["DISPLAY"] == second
+        (loser, _), (winner, _) = spawns()
+        assert winner == vd._proc.pid
+        assert _gone(loser), "the Xvfb that exited was never waited for"
+    finally:
+        vd.stop()
+
+
+@pytest.mark.linux_only
+@linux_only
+def test_a_server_that_neither_reports_nor_exits_is_killed_reaped_and_not_retried(
+        fake_xvfb, monkeypatch):
+    """A hang is not a taken number: another number would hang the same way,
+    so start() stops at the first, kills it and waits for it."""
+    monkeypatch.setattr(headless, "_READY_TIMEOUT", 0.5, raising=False)
+    first, second = _free_high_pair()
+    spawns = fake_xvfb({first: "hang", second: "hang"}, [first, second])
+    vd = _LinuxVirtualDisplay()
+    with pytest.raises(RuntimeError, match="neither reported ready nor exited"):
+        vd.start()
+    assert [d for _, d in spawns()] == [first]
+    assert _gone(spawns()[0][0])
+    assert vd._proc is None and vd.launch_env() == {}
+
+
+@pytest.mark.linux_only
+@linux_only
+def test_no_descriptor_outlives_start_and_stop(fake_xvfb):
+    """Each attempt opens a pipe. Both ends are closed, on success, on a
+    server that exited, and on stop()."""
+    first, second = _free_high_pair()
+    fake_xvfb({first: "exit-late"}, [first, second])
+    before = sorted(os.listdir("/proc/self/fd"))
+    vd = _LinuxVirtualDisplay()
+    vd.start()
+    vd.stop()
+    assert sorted(os.listdir("/proc/self/fd")) == before
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  The real Xvfb, where there is one (e2e: not in the default selection).
+# ──────────────────────────────────────────────────────────────────────
+
+def _listener_pid(display):
+    """The pid that called listen() on the display's abstract socket, or
+    None when nothing listens there."""
+    import socket
+    import struct
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(f"\0/tmp/.X11-unix/X{display[1:]}")
+        return struct.unpack("3i", s.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
+real_xvfb = pytest.mark.skipif(
+    not sys.platform.startswith("linux") or not headless._binary_on_path("Xvfb"),
+    reason="needs a real Xvfb on Linux")
+
+
+@pytest.mark.e2e
+@pytest.mark.linux_only
+@real_xvfb
+def test_sessions_racing_each_get_their_own_live_server():
+    """The judge never asks the module: whoever LISTENS on the display a
+    session got must be that session's own Xvfb. Measured before this, 6
+    sessions at once: 3 or 4 of 6 on another session's server."""
+    import threading
+    vds = [_LinuxVirtualDisplay() for _ in range(6)]
+    barrier = threading.Barrier(len(vds))
+    errors = []
+
+    def go(vd):
+        barrier.wait()
+        try:
+            vd.start()
+        except RuntimeError as e:       # reported below, with the others
+            errors.append(e)
+
+    threads = [threading.Thread(target=go, args=(vd,)) for vd in vds]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    try:
+        assert not errors, errors
+        displays = [vd.launch_env()["DISPLAY"] for vd in vds]
+        assert len(set(displays)) == len(vds), displays
+        for vd, d in zip(vds, displays):
+            assert vd._proc.poll() is None, d
+            assert _listener_pid(d) == vd._proc.pid, d
+    finally:
+        for vd in vds:
+            vd.stop()
+
+
+@pytest.mark.e2e
+@pytest.mark.linux_only
+@real_xvfb
+def test_stop_right_after_start_leaves_nothing_behind():
+    """Measured before this: stop() right after start() left the lockfile
+    40 times out of 40, because ready came before the server's SIGTERM
+    handler. Every leftover lockfile is a number no picker offers again."""
+    for _ in range(10):
+        vd = _LinuxVirtualDisplay()
+        vd.start()
+        d = vd.launch_env()["DISPLAY"]
+        vd.stop()
+        assert not os.path.exists(f"/tmp/.X{d[1:]}-lock"), d
+        assert _listener_pid(d) is None, d
