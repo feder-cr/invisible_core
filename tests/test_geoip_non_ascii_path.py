@@ -31,11 +31,11 @@ def non_ascii_db(tmp_path):
 
 
 def test_the_timezone_is_read_from_a_database_under_a_non_ascii_path(non_ascii_db):
-    assert ip_to_timezone("8.8.8.8", non_ascii_db) == "Europe/Rome"
+    assert ip_to_timezone("10.8.8.8", non_ascii_db) == "Europe/Rome"
 
 
 def test_the_coordinates_are_read_from_the_same_database(non_ascii_db):
-    assert ip_to_coordinates("8.8.8.8", non_ascii_db) == (41.9, 12.5)
+    assert ip_to_coordinates("10.8.8.8", non_ascii_db) == (41.9, 12.5)
 
 
 def test_a_database_that_is_there_but_unreadable_is_said_as_such(tmp_path):
@@ -45,6 +45,6 @@ def test_a_database_that_is_there_but_unreadable_is_said_as_such(tmp_path):
     f.parent.mkdir(parents=True)
     f.write_bytes(b"this is not a MaxMind database")
     with pytest.raises(GeoTimezoneError) as e:
-        ip_to_timezone("8.8.8.8", f)
+        ip_to_timezone("10.8.8.8", f)
     assert e.value.kind == "geoip_unreadable", e.value.kind
     assert "could not be read" in str(e.value)
