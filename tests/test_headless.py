@@ -347,28 +347,18 @@ def _lowest_first(monkeypatch):
     monkeypatch.setattr(headless.secrets, "choice", lambda seq: seq[0])
 
 
-def _proc(monkeypatch, unix="", tcp="", tcp6=""):
-    files = {"/proc/net/unix": unix, "/proc/net/tcp": tcp, "/proc/net/tcp6": tcp6}
+def _proc(monkeypatch, unix=""):
+    files = {"/proc/net/unix": unix}
     # raising=False: the seam is new, so these tests also run against a
     # version without it and fail there on the behaviour, not on the mock.
     monkeypatch.setattr(headless, "_read_proc", lambda path: files.get(path, ""), raising=False)
 
 
 _UNIX_HEADER = "Num       RefCount Protocol Flags    Type St Inode Path\n"
-_TCP_HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
 
 
 def _unix_row(path):
     return f"0000000000000000: 00000002 00000000 00010000 0001 01 35038 {path}\n"
-
-
-def _tcp6_row(port, remote_port=0, state="0A"):
-    return (f"   0: 00000000000000000000000000000000:{port:04X} "
-            f"00000000000000000000000000000000:{remote_port:04X} {state} 00000000:00000000 00:00000000 00000000  1000        0 1\n")
-
-
-def _tcp_row(port, state="0A"):
-    return f"   0: 00000000:{port:04X} 00000000:0000 {state} 00000000:00000000 00:00000000 00000000  1000        0 1\n"
 
 
 def _stub_start(monkeypatch, failing):
@@ -456,24 +446,6 @@ def test_a_path_x_socket_that_is_listening_is_taken(monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_tcp_listener_on_the_x_port_is_taken(monkeypatch):
-    """This Xvfb listens on TCP 6000+n, so a listener there is counted."""
-    _lowest_first(monkeypatch)
-    _only_these_locks(monkeypatch)
-    _proc(monkeypatch, tcp=_TCP_HEADER + _tcp_row(6099),
-          tcp6=_TCP_HEADER + _tcp6_row(6100, remote_port=6101))
-    assert _LinuxVirtualDisplay()._pick_display() == ":101"
-
-
-@pytest.mark.unit
-def test_a_tcp_connection_that_is_not_listening_does_not_count(monkeypatch):
-    _lowest_first(monkeypatch)
-    _only_these_locks(monkeypatch)
-    _proc(monkeypatch, tcp=_TCP_HEADER + _tcp_row(6099, state="01"))
-    assert _LinuxVirtualDisplay()._pick_display() == ":99"
-
-
-@pytest.mark.unit
 def test_empty_proc_tables_leave_the_lockfile_check(monkeypatch):
     """Nothing listening: the lockfile check, the only one there was, still
     applies."""
@@ -499,19 +471,14 @@ def test_a_socket_name_with_an_x_looking_suffix_is_not_a_display(monkeypatch):
 @pytest.mark.parametrize("error", [FileNotFoundError, PermissionError])
 def test_an_unreadable_proc_table_is_not_an_error(monkeypatch, error):
     """No /proc, or one this user cannot read: the real reader answers empty
-    and the table that IS readable still counts."""
+    and the lockfile check still applies."""
     _lowest_first(monkeypatch)
-    _only_these_locks(monkeypatch)
+    _only_these_locks(monkeypatch, locks={"/tmp/.X99-lock"})
     real_open = open
 
     def fake_open(path, *args, **kwargs):
         if path == "/proc/net/unix":
             raise error(path)
-        if path == "/proc/net/tcp6":
-            raise error(path)
-        if path == "/proc/net/tcp":
-            import io
-            return io.StringIO(_TCP_HEADER + _tcp_row(6099))
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", fake_open)
@@ -773,3 +740,65 @@ def test_stop_right_after_start_leaves_nothing_behind():
         vd.stop()
         assert not os.path.exists(f"/tmp/.X{d[1:]}-lock"), d
         assert _listener_pid(d) is None, d
+
+
+def _tcp_listeners(port):
+    """Listening sockets on ``port`` in /proc/net/tcp and tcp6."""
+    found = 0
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        with open(path) as f:
+            for line in f.read().splitlines()[1:]:
+                cols = line.split()
+                if cols[3] == "0A" and int(cols[1].rsplit(":", 1)[1], 16) == port:
+                    found += 1
+    return found
+
+
+@pytest.mark.e2e
+@pytest.mark.linux_only
+@real_xvfb
+def test_the_display_is_not_on_the_network():
+    """⛔ Until this change the Xvfb listened on TCP 6000+n on every interface
+    with access control off: measured, an X client connected from the host's
+    LAN address with no credential. The browser never used it - it holds
+    one unix connection to the display and no TCP one."""
+    vd = _LinuxVirtualDisplay()
+    vd.start()
+    try:
+        d = vd.launch_env()["DISPLAY"]
+        assert _listener_pid(d) == vd._proc.pid
+        assert _tcp_listeners(6000 + int(d[1:])) == 0
+    finally:
+        vd.stop()
+
+
+@pytest.mark.e2e
+@pytest.mark.linux_only
+@real_xvfb
+def test_a_dual_stack_listener_on_the_x_port_does_not_stop_the_display(monkeypatch):
+    """With TCP on, a listener on [::]:6000+n made this Xvfb exit with "Cannot
+    establish any listening sockets" (one on IPv4 only did not). Without TCP
+    the port is no concern of the display at all."""
+    import random
+    import socket
+    for _ in range(50):
+        n = random.randrange(3000, 4000)
+        s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        try:
+            s.bind(("::", 6000 + n))
+            break
+        except OSError:
+            s.close()
+    s.listen()
+    try:
+        monkeypatch.setattr(_LinuxVirtualDisplay, "_pick_display",
+                            lambda self, exclude=frozenset(): f":{n}")
+        vd = _LinuxVirtualDisplay()
+        vd.start()
+        try:
+            assert vd.launch_env()["DISPLAY"] == f":{n}"
+            assert _listener_pid(f":{n}") == vd._proc.pid
+        finally:
+            vd.stop()
+    finally:
+        s.close()

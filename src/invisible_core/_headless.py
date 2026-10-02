@@ -69,14 +69,11 @@ _WAYLAND_LEAK_VARS = (
 DESKTOP_ENV = "INVPW_DESKTOP"
 
 
-#: Where Linux lists the sockets of this network namespace. Read, never
-#: written; a host without them (/proc not mounted, or unreadable) reports
+#: Where Linux lists the unix sockets of this network namespace. Read, never
+#: written; a host without it (/proc not mounted, or unreadable) reports
 #: nothing listening and the lockfile check stands alone.
 _PROC_UNIX = "/proc/net/unix"
-_PROC_TCP = ("/proc/net/tcp", "/proc/net/tcp6")
 _X_SOCKET = re.compile(r"@?/tmp/\.X11-unix/X(\d+)")
-_TCP_LISTEN = "0A"
-_X_TCP_BASE = 6000
 
 #: Numbers the picker offers: from :99, as xvfb-run does, so the low numbers a
 #: desktop session uses (:0, and WSLg's :0) are never even tried.
@@ -88,7 +85,8 @@ _ATTEMPTS = 10
 #: at once (end of file on the pipe), so this bounds only a server that
 #: neither reports nor exits, and that one is not retried. It is generous
 #: because a loaded host must not have a healthy server killed under it: 30
-#: sessions starting together on a 16-thread host took up to 4.75 s.
+#: sessions starting together on a 16-thread host took up to 0.36 s, and a
+#: small or busy CI runner can be many times slower than that.
 _READY_TIMEOUT = 30.0
 
 
@@ -103,12 +101,17 @@ def _read_proc(path: str) -> str:
 def _x_displays_listening() -> set:
     """Display numbers this network namespace already has an X server on.
 
-    Any unix socket named for a display in /proc/net/unix - abstract or path,
+    Any unix socket named for a display in /proc/net/unix, abstract or path,
     in any state, since an accepted connection also carries the name and
-    still means a live server - or a TCP listener on 6000+n. The table lists
-    live sockets only, so a stale socket file left in /tmp/.X11-unix does not
-    count, and it covers servers whose /tmp is not this one (a container
-    sharing the network namespace keeps its lockfile in its own /tmp).
+    still means a live server. The table lists live sockets only, so a stale
+    socket file left in /tmp/.X11-unix does not count, and it covers servers
+    whose /tmp is not this one (a container sharing the network namespace
+    keeps its lockfile in its own /tmp). A path socket counts although this
+    Xvfb opens none: a client of that server asking for :n tries the
+    abstract name first, and would reach ours.
+
+    TCP is not read: this Xvfb does not listen on it (see ``_spawn``), so a
+    listener on 6000+n is no concern of this display.
 
     A filter, never the judge: whether a number is free is decided by the
     Xvfb started on it (see ``_spawn``). But it is what keeps sessions of
@@ -125,21 +128,6 @@ def _x_displays_listening() -> set:
         m = _X_SOCKET.fullmatch(cols[7]) if len(cols) == 8 else None
         if m:
             busy.add(int(m.group(1)))
-    # This Xvfb listens on TCP 6000+n as well. A listener there on [::], the
-    # dual-stack wildcard most servers use, makes it exit with "Cannot
-    # establish any listening sockets"; one on an IPv4 address only does not
-    # (both measured on Xvfb 21.1.12). Every listener is counted.
-    for path in _PROC_TCP:
-        for line in _read_proc(path).splitlines()[1:]:
-            cols = line.split()
-            if len(cols) < 4 or cols[3] != _TCP_LISTEN:
-                continue
-            try:
-                port = int(cols[1].rsplit(":", 1)[1], 16)
-            except (IndexError, ValueError):
-                continue
-            if _X_TCP_BASE <= port < _X_TCP_BASE + 1000:
-                busy.add(port - _X_TCP_BASE)
     return busy
 
 
@@ -221,6 +209,16 @@ class _LinuxVirtualDisplay:
         since xorg-server 1.16 (2014). ``-displayfd`` also means the server
         writes no lockfile (``nolock``, in every version), which is why
         _pick_display reads the socket table.
+
+        The one socket it opens is the abstract ``@/tmp/.X11-unix/X{n}``,
+        which is what a client asking for ``:n`` reaches first: no socket
+        file in /tmp, and no TCP. Until this change it also listened on TCP
+        6000+n, on every interface, with access control off (``-ac``): any
+        host that could reach the port could read and drive the browser's
+        screen, and the browser never used it (measured: Firefox on the
+        display holds one unix connection and no TCP one, with TCP on or
+        off). It was also one more way to collide: a listener on [::]:6000+n
+        made this Xvfb exit.
         """
         read_end, write_end = os.pipe()
         try:
@@ -232,7 +230,7 @@ class _LinuxVirtualDisplay:
                     "+extension", "GLX",
                     "+extension", "RENDER",
                     "-nolisten", "unix",
-                    "-listen", "tcp",
+                    "-nolisten", "tcp",
                     "-ac",
                 ],
                 stdout=subprocess.DEVNULL,
