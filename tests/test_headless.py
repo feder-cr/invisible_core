@@ -548,8 +548,16 @@ def fake_xvfb(tmp_path, monkeypatch):
     import json
     import signal
 
+    import shlex
+
+    # A sh launcher rather than a shebang naming the interpreter: a shebang
+    # line has a length limit, and a virtualenv path can exceed it.
+    script = tmp_path / "fake_xvfb.py"
+    script.write_bytes(_FAKE_XVFB.encode())
     exe = tmp_path / "Xvfb"
-    exe.write_bytes(f"#!{sys.executable}\n{_FAKE_XVFB}".encode())
+    exe.write_bytes(
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} '
+        f'{shlex.quote(str(script))} "$@"\n'.encode())
     exe.chmod(0o755)
     log = tmp_path / "spawns.log"
     log.write_bytes(b"")
@@ -571,8 +579,13 @@ def fake_xvfb(tmp_path, monkeypatch):
 
     yield run
     for pid, _ in spawns():
+        # Only a fake that still runs: a pid already reaped may belong to
+        # someone else by now.
         try:
-            os.kill(pid, signal.SIGKILL)
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                ours = str(script).encode() in f.read()
+            if ours:
+                os.kill(pid, signal.SIGKILL)
         except OSError:
             pass
     for d in used:
