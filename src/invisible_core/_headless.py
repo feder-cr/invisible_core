@@ -38,10 +38,13 @@ pref is no longer emitted: the engine is stock on this surface again.
 from __future__ import annotations
 
 import os
+import re
 import secrets
+import select
 import subprocess
 import sys
 import time
+from collections.abc import Set as AbstractSet
 from typing import Optional
 
 
@@ -66,6 +69,91 @@ _WAYLAND_LEAK_VARS = (
 DESKTOP_ENV = "INVPW_DESKTOP"
 
 
+#: Where Linux lists the unix sockets of this network namespace. Read, never
+#: written; a host without it (/proc not mounted, or unreadable) reports
+#: nothing listening and the lockfile check stands alone.
+_PROC_UNIX = "/proc/net/unix"
+_X_SOCKET = re.compile(r"@?/tmp/\.X11-unix/X(\d+)")
+
+#: Numbers the picker offers: from :99, as xvfb-run does, so the low numbers a
+#: desktop session uses (:0, and WSLg's :0) are never even tried.
+_FIRST_DISPLAY = 99
+_LAST_DISPLAY = 399
+_ATTEMPTS = 10
+
+#: How long a spawned Xvfb has to report that it is listening. Death is seen
+#: at once (end of file on the pipe), so this bounds only a server that
+#: neither reports nor exits, and that one is not retried. It is generous
+#: because a loaded host must not have a healthy server killed under it: 30
+#: sessions starting together on a 16-thread host took up to 0.36 s, and a
+#: small or busy CI runner can be many times slower than that.
+_READY_TIMEOUT = 30.0
+
+
+def _read_proc(path: str) -> str:
+    try:
+        with open(path, encoding="ascii", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _x_displays_listening() -> set:
+    """Display numbers this network namespace already has an X server on.
+
+    Any unix socket named for a display in /proc/net/unix, abstract or path,
+    in any state, since an accepted connection also carries the name and
+    still means a live server. The table lists live sockets only, so a stale
+    socket file left in /tmp/.X11-unix does not count, and it covers servers
+    whose /tmp is not this one (a container sharing the network namespace
+    keeps its lockfile in its own /tmp). A path socket counts although this
+    Xvfb opens none: a client of that server asking for :n tries the
+    abstract name first, and would reach ours.
+
+    TCP is not read: this Xvfb does not listen on it (see ``_spawn``), so a
+    listener on 6000+n is no concern of this display.
+
+    A filter, never the judge: whether a number is free is decided by the
+    Xvfb started on it (see ``_spawn``). But it is what keeps sessions of
+    this package apart, because an Xvfb started with ``-displayfd`` writes no
+    lockfile, so the lockfile check cannot see them. Measured without it:
+    with 100 sessions alive, 11 of 51 attempts landed on a taken number, and
+    with 250 a start ran out of its ten attempts.
+    """
+    busy = set()
+    for line in _read_proc(_PROC_UNIX).splitlines()[1:]:
+        # Seven fixed columns, then the path, which may itself contain spaces:
+        # match the WHOLE path, never its last word.
+        cols = line.split(None, 7)
+        m = _X_SOCKET.fullmatch(cols[7]) if len(cols) == 8 else None
+        if m:
+            busy.add(int(m.group(1)))
+    return busy
+
+
+class _XvfbExited(RuntimeError):
+    """The Xvfb started on a number exited before it was listening: the
+    number was taken, by something the filters could not see. Another number
+    can succeed, so ``start()`` tries one."""
+
+
+def _read_ready_line(fd: int, timeout: float) -> str | None:
+    """The line Xvfb writes on ``-displayfd`` once its sockets are open, or
+    ``None`` at end of file: every copy of the write end is closed, which,
+    with ours closed after the spawn, means the server has exited."""
+    deadline = time.monotonic() + timeout
+    buf = b""
+    while not buf.endswith(b"\n"):
+        left = deadline - time.monotonic()
+        if left <= 0 or not select.select([fd], [], [], left)[0]:
+            raise TimeoutError
+        chunk = os.read(fd, 64)
+        if not chunk:
+            return None
+        buf += chunk
+    return buf.decode("ascii", errors="replace").strip()
+
+
 class _LinuxVirtualDisplay:
     """Standalone Xvfb instance owned by this InvisiblePlaywright session."""
 
@@ -80,59 +168,135 @@ class _LinuxVirtualDisplay:
                 "invisible_playwright headless=True requires Xvfb. "
                 "Install it: sudo apt install xvfb"
             )
-        # Retry: when many workers start in parallel they can pick the same
-        # display number before any has created its lockfile. Xvfb on the
-        # losing side exits immediately - try again with a fresh number.
+        # The filters in _pick_display cannot see everything: two sessions
+        # can pick the same number before either server has its sockets, and
+        # an X server can hold a number in a way no table here shows. Either
+        # way our Xvfb exits, _spawn sees it, and the next attempt takes
+        # another number. A number that failed is never offered again: two
+        # hidden holders must not be alternated between, and one must not be
+        # picked on every attempt.
         last_err: Optional[Exception] = None
-        for _ in range(10):
-            display = self._pick_display()
+        tried: set[str] = set()
+        for _ in range(_ATTEMPTS):
+            display = self._pick_display(exclude=tried)
+            tried.add(display)
             try:
-                self._spawn(display)
-                self._wait_until_ready(display)
-                self._display = display
+                self._display = self._spawn(display)
                 return
-            except RuntimeError as e:
+            except _XvfbExited as e:
                 last_err = e
-                if self._proc is not None and self._proc.poll() is None:
-                    self._proc.kill()
-                self._proc = None
-        raise RuntimeError(f"Xvfb failed to start after 10 attempts: {last_err}")
+        raise RuntimeError(
+            f"Xvfb failed to start after {_ATTEMPTS} attempts: {last_err}")
 
-    def _spawn(self, display: str) -> None:
-        self._proc = subprocess.Popen(
-            [
-                "Xvfb", display,
-                "-screen", "0", self._geometry,
-                "+extension", "GLX",
-                "+extension", "RENDER",
-                "-nolisten", "unix",
-                "-listen", "tcp",
-                "-ac",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+    def _spawn(self, display: str) -> str:
+        """Start Xvfb on ``display`` and return the display it is serving.
 
-    def _pick_display(self) -> str:
-        for n in range(99, 400):
-            if not os.path.exists(f"/tmp/.X{n}-lock"):
-                return f":{n}"
-        raise RuntimeError("no free X display number in :99-:399")
+        Ready means the SERVER says so: with ``-displayfd`` it writes its
+        display number on the pipe after its listening sockets are open and
+        its SIGTERM handler is installed, and if it exits first the pipe
+        reports end of file. Nothing a third party leaves in /tmp can stand
+        in for that. Until this change ready meant "/tmp/.X{n}-lock exists",
+        which an Xvfb creates BEFORE opening its sockets: one that then
+        failed to open them was taken for a live server, and the loser of a
+        race between two sessions read the winner's lockfile as its own -
+        both ended on one Xvfb, one of them with a dead one. And a stop()
+        right after that kind of ready reached the server before its SIGTERM
+        handler, so it died without removing its lockfile.
 
-    def _wait_until_ready(self, display: str) -> None:
-        # We start Xvfb with -nolisten unix → no /tmp/.X11-unix socket appears.
-        # Xvfb creates /tmp/.X{n}-lock immediately though - wait for that.
-        lockfile = f"/tmp/.X{display[1:]}-lock"
-        deadline = time.monotonic() + 3.0
-        assert self._proc is not None
-        while time.monotonic() < deadline:
-            if self._proc.poll() is not None:
-                raise RuntimeError(f"Xvfb {display} exited immediately")
-            if os.path.exists(lockfile):
-                return
-            time.sleep(0.02)
-        raise RuntimeError(f"Xvfb {display} did not become ready in 3s")
+        The number is passed explicitly: ``-displayfd`` alone makes the
+        server scan from :0, which under WSLg takes :0 in front of the
+        desktop's own display. Explicit number plus ``-displayfd`` is honoured
+        since xorg-server 1.16 (2014). ``-displayfd`` also means the server
+        writes no lockfile (``nolock``, in every version), which is why
+        _pick_display reads the socket table.
+
+        The one socket it opens is the abstract ``@/tmp/.X11-unix/X{n}``,
+        which is what a client asking for ``:n`` reaches first: no socket
+        file in /tmp, and no TCP. Until this change it also listened on TCP
+        6000+n, on every interface, with access control off (``-ac``): any
+        host that could reach the port could read and drive the browser's
+        screen, and the browser never used it (measured: Firefox on the
+        display holds one unix connection and no TCP one, with TCP on or
+        off). It was also one more way to collide: a listener on [::]:6000+n
+        made this Xvfb exit.
+        """
+        read_end, write_end = os.pipe()
+        try:
+            self._proc = subprocess.Popen(
+                [
+                    "Xvfb", display,
+                    "-displayfd", str(write_end),
+                    "-screen", "0", self._geometry,
+                    "+extension", "GLX",
+                    "+extension", "RENDER",
+                    "-nolisten", "unix",
+                    "-nolisten", "tcp",
+                    "-ac",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                pass_fds=(write_end,),
+            )
+        except BaseException:
+            os.close(read_end)
+            raise
+        finally:
+            # Ours must be closed, or end of file never comes: only the
+            # server's copy may keep the pipe open.
+            os.close(write_end)
+        try:
+            line = _read_ready_line(read_end, _READY_TIMEOUT)
+        except TimeoutError:
+            self._reap()
+            raise RuntimeError(
+                f"Xvfb {display} neither reported ready nor exited in "
+                f"{_READY_TIMEOUT:g}s") from None
+        except BaseException:
+            self._reap()            # an interrupt must not leave it running
+            raise
+        finally:
+            os.close(read_end)
+        if line is None:
+            self._reap()
+            raise _XvfbExited(f"Xvfb {display} exited before it was listening")
+        if not line.isdigit():
+            self._reap()
+            raise RuntimeError(f"Xvfb {display} reported {line!r} on -displayfd")
+        return f":{line}"
+
+    def _reap(self) -> None:
+        """Kill our Xvfb if it still runs, and wait for it: a child nobody
+        waits for stays a zombie for the life of this process."""
+        if self._proc is None:
+            return
+        if self._proc.poll() is None:
+            self._proc.kill()
+        self._proc.wait()
+        self._proc = None
+
+    def _pick_display(self, exclude: AbstractSet[str] = frozenset()) -> str:
+        # A candidate, not a verdict: _spawn decides. A number is skipped when
+        # it failed in this start(), when the socket table shows a server on
+        # it, or when its lockfile exists - the lockfile is how an X server
+        # in this /tmp announces a number, including one still starting up.
+        #
+        # The choice among the free ones is random, because sessions starting
+        # together see the same free set: taking the lowest, every loser of a
+        # collision moved to the same next number and collided again, so the
+        # k-th of N simultaneous sessions needed k attempts and the eleventh
+        # ran out of them (measured: 15 at once, 5 failed after 10 attempts).
+        busy = _x_displays_listening()
+        free = [
+            n for n in range(_FIRST_DISPLAY, _LAST_DISPLAY + 1)
+            if f":{n}" not in exclude
+            and n not in busy
+            and not os.path.exists(f"/tmp/.X{n}-lock")
+        ]
+        if not free:
+            raise RuntimeError(
+                f"no free X display number in :{_FIRST_DISPLAY}-:{_LAST_DISPLAY}")
+        return f":{secrets.choice(free)}"
 
     def launch_env(self) -> dict:
         """What the browser's environment must carry to draw on this Xvfb.
