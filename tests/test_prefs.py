@@ -17,7 +17,7 @@ import pytest
 
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import (
-    _accept_language,
+    accept_languages,
     _accept_language_header,
     _q_ladder,
     _WIN_LIGHT_COLORS,
@@ -72,21 +72,21 @@ def test_translate_has_stealth_baseline_constants():
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  _accept_language (platform-agnostic)
+#  accept_languages (platform-agnostic)
 # ──────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 def test_accept_language_with_region():
     # AL1
-    assert _accept_language("en-US") == "en-US, en"
+    assert accept_languages("en-US") == "en-US, en"
 
 
 @pytest.mark.unit
 def test_accept_language_no_region():
     """AL2. A language without a region does NOT stay a single tag.
 
-    ⛔ This test used to assert `_accept_language("fr") == "fr"` and encoded
+    ⛔ This test used to assert `accept_languages("fr") == "fr"` and encoded
     the defect corrected on 2026-08-19, not Firefox's behaviour. The expected
     value below is DERIVED from the engine's table, not from what our code
     returns - otherwise the test would assert nothing:
@@ -98,7 +98,7 @@ def test_accept_language_no_region():
     Note the first tag is the BARE language and not `fr-FR`: the table wants it
     that way, and it is the reason a requested region may not come first.
     """
-    assert _accept_language("fr") == "fr, fr-FR, en-US, en"
+    assert accept_languages("fr") == "fr, fr-FR, en-US, en"
 
 
 @pytest.mark.unit
@@ -109,7 +109,7 @@ def test_accept_language_no_region_when_the_table_has_no_row():
     (`lang.as_str()`), and then appends en-US. `ja` is the table row that is
     exactly "ja", so it exercises both roads to the same outcome.
     """
-    assert _accept_language("ja") == "ja, en-US, en"
+    assert accept_languages("ja") == "ja, en-US, en"
 
 
 @pytest.mark.unit
@@ -119,7 +119,7 @@ def test_accept_language_underscore_normalized():
     `pt` has no table row, so it falls into the `_` branch with a region present:
     `format!("{lang}-{region}, {lang}")` -> "pt-BR, pt", plus ", en-US, en".
     """
-    assert _accept_language("pt_BR") == "pt-BR, pt, en-US, en"
+    assert accept_languages("pt_BR") == "pt-BR, pt, en-US, en"
 
 
 @pytest.mark.unit
@@ -131,11 +131,11 @@ def test_accept_language_english_does_not_append_itself():
     on en-US alone let the defect through for months. The other two lines
     exercise the two explicit regional branches.
     """
-    assert _accept_language("en-US") == "en-US, en"
-    assert _accept_language("en-GB") == "en-GB, en"
-    assert _accept_language("en-CA") == "en-CA, en-US, en"
+    assert accept_languages("en-US") == "en-US, en"
+    assert accept_languages("en-GB") == "en-GB, en"
+    assert accept_languages("en-CA") == "en-CA, en-US, en"
     # E un caso NON inglese che pure rifiuta la coda: "sl" => add_en_us = false.
-    assert _accept_language("sl") == "sl, en-GB, en"
+    assert accept_languages("sl") == "sl, en-GB, en"
 
 
 @pytest.mark.unit

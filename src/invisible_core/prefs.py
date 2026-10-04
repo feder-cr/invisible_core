@@ -1077,7 +1077,7 @@ _ACCEPT_LANG_NO_EN = {
 }
 
 
-def _accept_language(locale: str) -> str:
+def accept_languages(locale: str) -> str:
     """`intl.accept_languages` exactly as Firefox 151 builds it.
 
     ⛔ THIS FUNCTION USED TO RETURN TWO ENTRIES FOR EVERY LOCALE, AND FOR 89
@@ -1153,7 +1153,7 @@ def _accept_language_header(locale: str) -> str:
     Replicated from that Rust code, not from its prose: for the token at index
     i, `q = max(10 - min(10, i), 1)`, and no q on the first token.
     """
-    return _q_ladder([t.strip() for t in _accept_language(locale).split(",")
+    return _q_ladder([t.strip() for t in accept_languages(locale).split(",")
                       if t.strip()])
 
 
@@ -1685,7 +1685,7 @@ def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
 def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
     locale = locale or "en-US"
     lang = locale.replace("_", "-")
-    prefs["intl.accept_languages"]     = _accept_language(locale)
+    prefs["intl.accept_languages"]     = accept_languages(locale)
     # The wire header, declared rather than synthesized. Juggler has to rewrite
     # Accept-Language because Playwright sets it from the `locale` option as a
     # single tag, which then disagrees with navigator.languages; it used to
@@ -1705,7 +1705,7 @@ def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
     #
     # A sentence here used to promise this keeps navigator.languages at 'the
     # desktop-default 2 elements'. THAT IS WRONG. It was written when
-    # _accept_language() still returned 2 tags for every non-English locale,
+    # accept_languages() still returned 2 tags for every non-English locale,
     # which was itself the defect corrected on 2026-08-19. Firefox DERIVES
     # navigator.languages from this list, so the count is whatever the list
     # holds, and looking like retail means matching the list, not a number.
@@ -1721,7 +1721,7 @@ def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
     # en-US is the single locale where 2 and 4 coincide (the table has no 'en'
     # row to append), which is why an en-US-only control kept the old sentence
     # looking true for as long as it did.
-    prefs["juggler.locale.override"]   = _accept_language(locale)
+    prefs["juggler.locale.override"]   = accept_languages(locale)
 
 
 def _apply_timezone(prefs: Dict[str, Any], timezone: str) -> None:

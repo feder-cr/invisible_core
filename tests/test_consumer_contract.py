@@ -82,6 +82,12 @@ CONTRACT = {
         # is: an older wrapper reading a renamed variable creates the browser
         # on the visible desktop with no error anywhere.
         "DESKTOP_ENV",
+        # The language list a context locale stands for, sent by the wrapper's
+        # server with Browser.setLocaleOverride: the list this package writes
+        # to intl.accept_languages for the launch locale, from the same table,
+        # so a context that asks for de-DE reports what a German Firefox
+        # reports instead of a one-tag list.
+        "accept_languages",
         "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
