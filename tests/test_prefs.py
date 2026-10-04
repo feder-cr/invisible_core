@@ -17,9 +17,6 @@ import pytest
 
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import (
-    _accept_language,
-    _accept_language_header,
-    _q_ladder,
     _WIN_LIGHT_COLORS,
     translate_profile_to_prefs,
 )
@@ -71,120 +68,20 @@ def test_translate_has_stealth_baseline_constants():
     assert "media.peerconnection.enabled" in prefs
 
 
-# ──────────────────────────────────────────────────────────────────────
-#  _accept_language (platform-agnostic)
-# ──────────────────────────────────────────────────────────────────────
+# The language-table tests (AL1-AL3) moved to test_session_locale.py in 36.x,
+# with the table: they go through decide_session_locale, its one caller.
 
 
 @pytest.mark.unit
-def test_accept_language_with_region():
-    # AL1
-    assert _accept_language("en-US") == "en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_no_region():
-    """AL2. A language without a region does NOT stay a single tag.
-
-    ⛔ This test used to assert `_accept_language("fr") == "fr"` and encoded
-    the defect corrected on 2026-08-19, not Firefox's behaviour. The expected
-    value below is DERIVED from the engine's table, not from what our code
-    returns - otherwise the test would assert nothing:
-
-        intl/locale/rust/locale_service_glue/src/lib.rs
-          "fr" => "fr, fr-FR",          <- the table's row
-          add_en_us stays true          <- so ", en-US, en" goes on the end
-
-    Note the first tag is the BARE language and not `fr-FR`: the table wants it
-    that way, and it is the reason a requested region may not come first.
-    """
-    assert _accept_language("fr") == "fr, fr-FR, en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_no_region_when_the_table_has_no_row():
-    """AL2-bis. The table's `_` branch, where almost every language ends up.
-
-    With no dedicated row and no region, the engine returns the language alone
-    (`lang.as_str()`), and then appends en-US. `ja` is the table row that is
-    exactly "ja", so it exercises both roads to the same outcome.
-    """
-    assert _accept_language("ja") == "ja, en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_underscore_normalized():
-    """AL3. The underscore normalised, and the en-US tail that was missing.
-
-    `pt` has no table row, so it falls into the `_` branch with a region present:
-    `format!("{lang}-{region}, {lang}")` -> "pt-BR, pt", plus ", en-US, en".
-    """
-    assert _accept_language("pt_BR") == "pt-BR, pt, en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_english_does_not_append_itself():
-    """AL3-bis. The branch that does NOT append en-US, and hides other errors.
-
-    For `en` the engine sets `add_en_us = false`. It is the only locale where the
-    old two-entry form coincided with the right one, and that is why a check made
-    on en-US alone let the defect through for months. The other two lines
-    exercise the two explicit regional branches.
-    """
-    assert _accept_language("en-US") == "en-US, en"
-    assert _accept_language("en-GB") == "en-GB, en"
-    assert _accept_language("en-CA") == "en-CA, en-US, en"
-    # E un caso NON inglese che pure rifiuta la coda: "sl" => add_en_us = false.
-    assert _accept_language("sl") == "sl, en-GB, en"
-
-
-@pytest.mark.unit
-def test_accept_language_header_uses_the_q_values_firefox_actually_sends():
-    """The wire header, and the whole point is the 9.
-
-    The engine synthesized this in JavaScript with a hardcoded ";q=0.5",
-    described in its own comment as "the Firefox-native q-valued form".
-    Measured 2026-08-09 against stock Firefox 151, which sends q=0.9 on every
-    request: the 0.5 was copied from the stale doc block above
-    PrepareAcceptLanguages in nsHttpHandler.cpp, while the code below it
-    forwards to rust_prepare_accept_languages, which does 1.0/0.9/0.8.
-
-    So this asserts the LITERAL string, not the shape. A test written as
-    `header.startswith(locale)` would have passed on the wrong value, which is
-    how the wrong value survived to begin with.
-    """
-    # The values are DERIVED from netwerk/base/rust-helper/src/lib.rs
-    # (rust_prepare_accept_languages): the first token carries no q, token n
-    # carries q = max(10 - n, 1)/10, that is 0.9, 0.8, 0.7 ... and never below
-    # 0.1. The starting list is the locale table's, so the ", en-US, en" tails
-    # show up here too.
-    assert _accept_language_header("en-US") == "en-US,en;q=0.9"
-    assert _accept_language_header("pt_BR") == "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-    # ⛔ This line used to say `== "fr"` with the comment "no region means
-    # one tag, and one tag carries no q". It was false twice over: the table
-    # gives "fr" TWO entries plus the English tail, so there are four tokens and
-    # three of them carry q.
-    assert _accept_language_header("fr") == "fr,fr-FR;q=0.9,en-US;q=0.8,en;q=0.7"
-    assert _accept_language_header("it-IT") == "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
-    assert ";q=0.5" not in _accept_language_header("it-IT")
-
-
-@pytest.mark.unit
-def test_accept_language_header_q_ladder_matches_the_rust_helper():
-    """q = max(10 - min(10, i), 1), replicated from the code and not the prose.
-
-    Firefox never ships more than a handful of tags, but the ladder is the part
-    that was wrong, so it is the part worth pinning. Built by hand here rather
-    than by calling the same expression the implementation uses, which would
-    assert nothing.
-    """
-    # Ten tags exercise the floor: the tenth would want q=0.0 and gets 0.1.
-    tags = ["en-US", "en", "fr", "de", "it", "es", "pt", "nl", "sv", "da"]
-    parts = _q_ladder(tags).split(",")
-    assert parts[0] == "en-US"
-    expected = ["en;q=0.9", "fr;q=0.8", "de;q=0.7", "it;q=0.6", "es;q=0.5",
-                "pt;q=0.4", "nl;q=0.3", "sv;q=0.2", "da;q=0.1"]
-    assert parts[1:] == expected
+def test_the_accept_language_header_has_no_second_copy_here():
+    """The header is Firefox's, derived from intl.accept_languages in
+    nsHttpHandler; the core declares the list, never the header. Known-bad:
+    zoom.stealth.http.accept_language back in the prefs, a hand-built copy of
+    the header that once went out with q=0.5 on every request."""
+    prefs = translate_profile_to_prefs(generate_profile(seed=7),
+                                       locale="it-IT")
+    assert "zoom.stealth.http.accept_language" not in prefs
+    assert prefs["intl.accept_languages"] == "it-IT, it, en-US, en"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -383,8 +280,9 @@ def test_locale_underscore_form_normalized():
 
     `de` has no row in the engine's table, so it falls into the `_` branch with
     the region: "de-DE, de", plus ", en-US, en" because add_en_us stays true.
-    The two locale prefs stay the requested TAG, not the list: they are two
-    different things and are asserted separately.
+    The two tag-shaped locale prefs carry the list's FIRST entry, not the list:
+    two shapes of one decision, asserted separately. Here that first entry is
+    the requested tag; for en-AU it is not, which test_session_locale.py pins.
     """
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, locale="de_DE")

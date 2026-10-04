@@ -132,13 +132,19 @@ def test_a_persona_suppresses_the_extension_clearing(profile):
                        "zoom.stealth.webgl2.extensions": ""}
 
 
-def test_the_locale_defaults_to_en_US_and_normalises_underscores():
-    prefs = {}
-    P._apply_locale(prefs, "")
-    assert prefs["general.useragent.locale"] == "en-US"
+def _locale_prefs(tag):
+    """`_apply_locale` takes the DECISION since 36.x, never a raw tag."""
+    from invisible_core._locale import decide_session_locale
 
     prefs = {}
-    P._apply_locale(prefs, "it_IT")
+    P._apply_locale(prefs, decide_session_locale(tag))
+    return prefs
+
+
+def test_the_locale_defaults_to_en_US_and_normalises_underscores():
+    assert _locale_prefs("")["general.useragent.locale"] == "en-US"
+
+    prefs = _locale_prefs("it_IT")
     assert prefs["general.useragent.locale"] == "it-IT"
     assert prefs["intl.locale.requested"] == "it-IT"
 
@@ -146,52 +152,55 @@ def test_the_locale_defaults_to_en_US_and_normalises_underscores():
 def test_the_locale_override_carries_the_whole_accept_language_list():
     """The override carries the WHOLE LIST, the same one as intl.accept_languages.
 
-    ⛔ This test used to assert `.startswith("fr-FR")` and the docstring promised
+    This test used to assert `.startswith("fr-FR")` and the docstring promised
     "navigator.languages stays the desktop's two default elements". Both were
     wrong, and for the same reason corrected on 2026-08-19: the engine's table
     maps the language `fr` to "fr, fr-FR", that is, it puts the BARE tag first,
     and then appends ", en-US, en". Asking for `fr-FR` does not produce a list
     starting with `fr-FR`.
 
-    The real invariant, and the only one this test has to defend, is that the
-    override and the pref are THE SAME STRING: they are two names for one value,
-    and the day they diverge navigator.languages and the header say different
-    things.
+    The invariant this test defends is that the override and the pref are THE
+    SAME STRING: two names for one value, and the day they diverge
+    navigator.languages and the header say different things.
+
+    ⛔ AND THE TAG-SHAPED PREFS ARE THE LIST'S FIRST ENTRY, since 36.x. Until
+    then this test asserted they stayed "fr-FR", the requested tag, which was
+    the contradiction itself: a page read "fr" from navigator.language while
+    the locale prefs said fr-FR. A French Firefox build's locale is "fr", so
+    the first entry is also the faithful value.
     """
-    prefs = {}
-    P._apply_locale(prefs, "fr-FR")
+    prefs = _locale_prefs("fr-FR")
     assert prefs["juggler.locale.override"] == prefs["intl.accept_languages"]
     assert prefs["juggler.locale.override"] == "fr, fr-FR, en-US, en"
-    # And the requested tag stays whole in the prefs that carry the LOCALE,
-    # which are a different thing from the accepted-languages list.
-    assert prefs["intl.locale.requested"] == "fr-FR"
-    assert prefs["general.useragent.locale"] == "fr-FR"
+    assert prefs["intl.locale.requested"] == "fr"
+    assert prefs["general.useragent.locale"] == "fr"
 
 
 @pytest.mark.unit
-def test_the_primary_tag_of_the_list_is_not_always_the_requested_locale():
-    """⛔ The consequence nobody had written down, isolated here on purpose.
+def test_the_primary_tag_of_the_list_is_what_every_tag_shaped_pref_says():
+    """The case this test pinned is now DECIDED, and the decision is read here.
 
     `BrowsingContext`'s DidSet takes the PRIMARY TAG of the override to fix
-    Intl's default locale. With the real table that tag does NOT always coincide
-    with the requested locale:
+    Intl's default locale, and with the real table that tag does not always
+    coincide with the requested locale:
 
-        requested it-IT -> list "it-IT, it, en-US, en" -> primary it-IT   same
-        requested fr-FR -> list "fr, fr-FR, en-US, en" -> primary fr      DIFFERENT
+        requested it-IT -> list "it-IT, it, en-US, en" -> primary it-IT
+        requested fr-FR -> list "fr, fr-FR, en-US, en" -> primary fr
+        requested en-AU -> list "en-US, en"            -> primary en-US
 
-    This test does not say that is a defect: it says the case EXISTS and pins it,
-    because until now no line of the project named it. If a measurement against
-    retail shows that Intl has to stay on the requested tag, the remedy will go
-    into the C++ or into _apply_locale, and this test will be where the decision
-    is read.
+    Until 36.x this test was named "the primary tag of the list is not always
+    the requested locale" and asserted that `intl.locale.requested` DIFFERED
+    from the primary for fr-FR, leaving the remedy open. The remedy went into
+    the core's one language decision (`decide_session_locale`): every
+    tag-shaped value is the primary, so navigator.language, Intl and the
+    locale prefs give one answer.
     """
-    it, fr = {}, {}
-    P._apply_locale(it, "it-IT")
-    P._apply_locale(fr, "fr-FR")
-    primario = lambda p: p["juggler.locale.override"].split(",")[0].strip()
-    assert primario(it) == "it-IT" == it["intl.locale.requested"]
-    assert primario(fr) == "fr"
-    assert primario(fr) != fr["intl.locale.requested"]
+    for tag, primary in (("it-IT", "it-IT"), ("fr-FR", "fr"), ("en-AU", "en-US")):
+        prefs = _locale_prefs(tag)
+        first = prefs["juggler.locale.override"].split(",")[0].strip()
+        assert first == primary, tag
+        assert prefs["intl.locale.requested"] == first, tag
+        assert prefs["general.useragent.locale"] == first, tag
 
 
 def test_no_timezone_writes_no_timezone_pref():

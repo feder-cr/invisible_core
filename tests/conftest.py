@@ -92,7 +92,9 @@ def _no_geoip_download(monkeypatch, request):
     """Stop the GeoIP database download from escaping a test that thinks it is
     hermetic.
 
-    `resolve_session_locale` ends in `ip_to_locale(ip, ensure_geoip_mmdb())`,
+    The "auto" language lookup (`_geo._egress_locale_tag`, the public
+    `resolve_session_locale` until 36.x) ends in
+    `ip_to_locale(ip, ensure_geoip_mmdb())`,
     and the ARGUMENT is evaluated before the call. A test that monkeypatches
     `ip_to_locale` has therefore protected nothing: `ensure_geoip_mmdb()` still
     runs first, still reaches the network, and when it fails the exception

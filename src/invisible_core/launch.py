@@ -346,7 +346,7 @@ def build_launch_plan(
     # the package (this module is imported near the end of invisible_core/__init__).
     from .download import ensure_binary
     from ._fpforge import generate_profile
-    from ._geo import prepare_session_geo, resolve_session_locale
+    from ._geo import prepare_session_geo
     from .prefs import compose_session_prefs
 
     # ⛔ THIS PATH HAS NO PROXY, AND IT SAYS SO BEFORE DOING ANYTHING ELSE. It
@@ -376,18 +376,17 @@ def build_launch_plan(
         binary = str(binary_path)
     else:
         binary = str(ensure_binary(binary_ver) if binary_ver else ensure_binary())
-    # Resolves timezone="auto" from the egress AND discovers the egress IP;
-    # raises behind a dead proxy (fail-early, by design).
-    geo = prepare_session_geo(timezone, proxy)
-    loc = locale
-    if (locale or "").strip().lower() == "auto":
-        loc = resolve_session_locale(geo.egress_ip, proxy)
+    # Resolves timezone="auto" from the egress, discovers the egress IP and
+    # decides the language, in one call; raises behind a dead proxy
+    # (fail-early, by design). No "auto" branch of its own here: the language
+    # is the geo decision's, like the timezone.
+    geo = prepare_session_geo(timezone, proxy, locale)
     fp = generate_profile(seed=seed, pin=pin)
     # One composition for all three entry points (prefs.py). This path takes the
     # proxy layer and the hard-kill layer; it does NOT write the humanize prefs,
     # which is what humanize=None means - see compose_session_prefs.
     prefs = compose_session_prefs(
-        fp, locale=loc, timezone=geo.timezone,
+        fp, locale=geo.locale, timezone=geo.timezone,
         proxy=proxy, survive_hard_kill=True,
         show_cursor=show_cursor,
     ).prefs

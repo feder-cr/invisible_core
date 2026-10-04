@@ -82,6 +82,19 @@ CONTRACT = {
         # is: an older wrapper reading a renamed variable creates the browser
         # on the visible desktop with no error anywhere.
         "DESKTOP_ENV",
+        # THE ONE LANGUAGE DECISION, since 36.x. `accept_languages` (the bare
+        # table, public for one unreleased commit for the wrapper's server),
+        # `resolve_session_locale` (a raw tag every consumer wrapped in its own
+        # "auto" branch) and `consent_region_lang` (the cookie's token, read
+        # from that raw tag) LEFT together: an Australian egress resolved
+        # "en-AU" while the table started its list with "en-US", and each
+        # consumer derived values from whichever of the two it held. The
+        # consumers now read `prepare_session_geo(...).locale`, convert a
+        # context's tag with `decide_session_locale(tag).accept_languages`,
+        # and take the cookie data from `persona_cookies`. BREAKING: the
+        # consumers' pins move with this core.
+        "decide_session_locale",
+        "persona_cookies",
         "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
@@ -111,7 +124,7 @@ CONTRACT = {
         # below: out of the contract, still in the package.
         "get_default_args", "get_default_stealth_prefs",
         "make_virtual_display", "prefs", "prepare_session_geo",
-        "resolve_session_locale", "resolve_session_timezone",
+        "resolve_session_timezone",
         "tz_env",
         # `LaunchPlan`, `build_launch_plan` and `generate_profile` left on
         # 2026-08-18 with the deletion of `invisible_firefox`, which was the only
@@ -142,14 +155,10 @@ CONTRACT = {
         # this contract exists to know. A contract that over-claims freezes
         # this package for nobody.
         "compose_session_prefs",
-        # consent_region_lang joined on 2026-08-09 and DELETED a table in the
-        # wrapper rather than adding one here: `_TZ_TO_REGION`, 22 IANA zones
-        # mapped to a country and a language for the Google CONSENT cookie,
-        # while the session locale is resolved in this package against 55
-        # countries. A Romanian session said `ro-RO` in navigator.language and
-        # `en+FX` in the cookie. Same ordering constraint as every new name:
-        # the core has to be on the index before a wrapper release uses it.
-        "consent_region_lang",
+        # consent_region_lang joined on 2026-08-09, when it DELETED a table in
+        # the wrapper (`_TZ_TO_REGION`, 22 IANA zones for the CONSENT cookie),
+        # and left in 36.x with the cookie builder itself: the token is now
+        # computed inside `persona_cookies`, from the decided language.
     },
     "invisible_core._fpforge": {
         "Profile", "_network", "_sampler", "generate_profile", "profile",
@@ -379,3 +388,24 @@ def test_every_name_the_package_exports_publicly_resolves():
         f"provide.\nThat is an ImportError for `from invisible_core import "
         f"<name>` and an AttributeError for anyone who wrote `import *`.\n"
         f"Either export the name or take it out of __all__.")
+
+
+def test_the_language_decision_is_exported_and_its_old_names_are_gone():
+    """The 36.x surface, asserted by name in both directions.
+
+    The new names are what every consumer switches to; the old ones are gone ON
+    PURPOSE, so a consumer still importing them fails at import time with the
+    name in the traceback, instead of reading a raw tag that disagrees with the
+    list the session declares. Known-bad: putting `resolve_session_locale` back
+    as an alias turns the second half red.
+    """
+    import invisible_core
+
+    for name in ("SessionLocale", "SessionGeo", "decide_session_locale",
+                 "persona_cookies", "prepare_session_geo"):
+        assert name in invisible_core.__all__, name
+        assert hasattr(invisible_core, name), name
+    for name in ("resolve_session_locale", "consent_region_lang", "accept_languages"):
+        assert name not in invisible_core.__all__, name
+        assert not hasattr(invisible_core, name), (
+            f"{name} is back: the language would have two answers again")

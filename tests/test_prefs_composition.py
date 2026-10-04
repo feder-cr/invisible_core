@@ -66,9 +66,13 @@ def no_network(monkeypatch):
     stubbing those would make this file compare two mocks.
     """
     monkeypatch.setattr(_dl, "ensure_binary", lambda ver=None: "/fake/firefox")
+    from invisible_core._locale import decide_session_locale
+
+    # The fake decides the language the way the real one does for an explicit
+    # tag (no network), so the direct path really declares LOCALE.
     monkeypatch.setattr(_geo, "prepare_session_geo",
-                        lambda tz, proxy: SessionGeo(TZ, "198.51.100.4"))
-    monkeypatch.setattr(_geo, "resolve_session_locale", lambda ip, proxy: LOCALE)
+                        lambda tz, proxy, locale="auto": SessionGeo(
+                            TZ, "198.51.100.4", locale=decide_session_locale(locale)))
 
 
 #: What the two paths are ALLOWED to differ by, and why. Asserted as an exact

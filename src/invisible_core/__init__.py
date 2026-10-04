@@ -34,13 +34,14 @@ from .prefs import (
 from .download import ensure_binary, ensure_geoip_mmdb
 from ._geo import (
     GeoTimezoneError,
-    consent_region_lang,
+    SessionGeo,
     discover_egress_ip,
     ip_to_timezone,
     prepare_session_geo,
-    resolve_session_locale,
     resolve_session_timezone,
 )
+from ._locale import SessionLocale, decide_session_locale
+from ._cookies import persona_cookies
 from ._headless import DESKTOP_ENV, make_virtual_display
 from ._proxy import configure_proxy, parse_proxy, ProxyEndpoint
 from .config import get_default_args, get_default_stealth_prefs
@@ -99,11 +100,15 @@ __all__ = [
     # binary + geoip
     "ensure_binary",
     "ensure_geoip_mmdb",
-    # geo / timezone
+    # geo / timezone / language: ONE decision, read by every consumer
     "resolve_session_timezone",
-    "consent_region_lang",
-    "resolve_session_locale",
     "prepare_session_geo",
+    "SessionGeo",
+    "SessionLocale",
+    "decide_session_locale",
+    # the cookies a persona already has, as data (the consumer hands them to
+    # its own driver)
+    "persona_cookies",
     "discover_egress_ip",
     "ip_to_timezone",
     "GeoTimezoneError",
