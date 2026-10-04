@@ -18,8 +18,6 @@ import pytest
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import (
     accept_languages,
-    _accept_language_header,
-    _q_ladder,
     _WIN_LIGHT_COLORS,
     translate_profile_to_prefs,
 )
@@ -139,52 +137,15 @@ def test_accept_language_english_does_not_append_itself():
 
 
 @pytest.mark.unit
-def test_accept_language_header_uses_the_q_values_firefox_actually_sends():
-    """The wire header, and the whole point is the 9.
-
-    The engine synthesized this in JavaScript with a hardcoded ";q=0.5",
-    described in its own comment as "the Firefox-native q-valued form".
-    Measured 2026-08-09 against stock Firefox 151, which sends q=0.9 on every
-    request: the 0.5 was copied from the stale doc block above
-    PrepareAcceptLanguages in nsHttpHandler.cpp, while the code below it
-    forwards to rust_prepare_accept_languages, which does 1.0/0.9/0.8.
-
-    So this asserts the LITERAL string, not the shape. A test written as
-    `header.startswith(locale)` would have passed on the wrong value, which is
-    how the wrong value survived to begin with.
-    """
-    # The values are DERIVED from netwerk/base/rust-helper/src/lib.rs
-    # (rust_prepare_accept_languages): the first token carries no q, token n
-    # carries q = max(10 - n, 1)/10, that is 0.9, 0.8, 0.7 ... and never below
-    # 0.1. The starting list is the locale table's, so the ", en-US, en" tails
-    # show up here too.
-    assert _accept_language_header("en-US") == "en-US,en;q=0.9"
-    assert _accept_language_header("pt_BR") == "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-    # ⛔ This line used to say `== "fr"` with the comment "no region means
-    # one tag, and one tag carries no q". It was false twice over: the table
-    # gives "fr" TWO entries plus the English tail, so there are four tokens and
-    # three of them carry q.
-    assert _accept_language_header("fr") == "fr,fr-FR;q=0.9,en-US;q=0.8,en;q=0.7"
-    assert _accept_language_header("it-IT") == "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
-    assert ";q=0.5" not in _accept_language_header("it-IT")
-
-
-@pytest.mark.unit
-def test_accept_language_header_q_ladder_matches_the_rust_helper():
-    """q = max(10 - min(10, i), 1), replicated from the code and not the prose.
-
-    Firefox never ships more than a handful of tags, but the ladder is the part
-    that was wrong, so it is the part worth pinning. Built by hand here rather
-    than by calling the same expression the implementation uses, which would
-    assert nothing.
-    """
-    # Ten tags exercise the floor: the tenth would want q=0.0 and gets 0.1.
-    tags = ["en-US", "en", "fr", "de", "it", "es", "pt", "nl", "sv", "da"]
-    parts = _q_ladder(tags).split(",")
-    assert parts[0] == "en-US"
-    expected = ["en;q=0.9", "fr;q=0.8", "de;q=0.7", "it;q=0.6", "es;q=0.5",
-                "pt;q=0.4", "nl;q=0.3", "sv;q=0.2", "da;q=0.1"]
-    assert parts[1:] == expected
+def test_the_accept_language_header_has_no_second_copy_here():
+    """The header is Firefox's, derived from intl.accept_languages in
+    nsHttpHandler; the core declares the list, never the header. Known-bad:
+    zoom.stealth.http.accept_language back in the prefs, a hand-built copy of
+    the header that once went out with q=0.5 on every request."""
+    prefs = translate_profile_to_prefs(generate_profile(seed=7),
+                                       locale="it-IT")
+    assert "zoom.stealth.http.accept_language" not in prefs
+    assert prefs["intl.accept_languages"] == "it-IT, it, en-US, en"
 
 
 # ──────────────────────────────────────────────────────────────────────

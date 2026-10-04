@@ -1133,44 +1133,6 @@ def accept_languages(locale: str) -> str:
     return f"{langs}, en-US, en"
 
 
-def _accept_language_header(locale: str) -> str:
-    """The Accept-Language header exactly as Firefox 151 puts it on the wire.
-
-    This is a DECLARATION and not a convenience: the engine used to synthesize
-    it, in JavaScript, from a hardcoded ";q=0.5" (juggler/NetworkObserver.js),
-    and the value was wrong. Measured 2026-08-09 against stock Firefox 151:
-    stock sends `en-US,en;q=0.9` on every request and we sent `q=0.5` on every
-    request, on both platforms - a constant, wire-visible difference that any
-    server sees without running a line of JavaScript.
-
-    The 0.5 came from writing the patch against a COMMENT. `PrepareAcceptLanguages`
-    in nsHttpHandler.cpp still carries a doc block promising `"en, ja"` ->
-    `"en,ja;q=0.5"`, which described the old C++ implementation; the function
-    below it now forwards to `rust_prepare_accept_languages`, whose own comment
-    says "we need to emulate chrome behavior i.e languages should get
-    q=1.0,0.9,0.8". The JS patch copied the stale sentence.
-
-    Replicated from that Rust code, not from its prose: for the token at index
-    i, `q = max(10 - min(10, i), 1)`, and no q on the first token.
-    """
-    return _q_ladder([t.strip() for t in accept_languages(locale).split(",")
-                      if t.strip()])
-
-
-def _q_ladder(tags: "list[str]") -> str:
-    """Attach q-values to an ordered tag list the way the engine does.
-
-    Split out from the caller so it can be tested on more than the one or two
-    tags a locale ever produces: the ladder is the part that was wrong, so it
-    is the part worth pinning against a list built by hand.
-    """
-    out = []
-    for i, tag in enumerate(tags):
-        q = max(10 - min(10, i), 1)
-        out.append(tag if i == 0 else "%s;q=0.%d" % (tag, q))
-    return ",".join(out)
-
-
 # ---------------------------------------------------------------------------
 #  One section of the prefs dict per function.
 #
@@ -1686,12 +1648,11 @@ def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
     locale = locale or "en-US"
     lang = locale.replace("_", "-")
     prefs["intl.accept_languages"]     = accept_languages(locale)
-    # The wire header, declared rather than synthesized. Juggler has to rewrite
-    # Accept-Language because Playwright sets it from the `locale` option as a
-    # single tag, which then disagrees with navigator.languages; it used to
-    # rebuild the q-values in JavaScript from a hardcoded 0.5. It reads this
-    # instead, so the header has one source and it is this file.
-    prefs["zoom.stealth.http.accept_language"] = _accept_language_header(locale)
+    # ⛔ NO SECOND COPY OF THE WIRE HEADER. Firefox derives Accept-Language
+    # from intl.accept_languages (and from a context's language override) in
+    # nsHttpHandler, with the q-values of rust_prepare_accept_languages. Until
+    # the firefox-36 engine this file also declared the header by hand in
+    # zoom.stealth.http.accept_language, for a Juggler rewrite that is gone.
     prefs["general.useragent.locale"]  = lang
     prefs["intl.locale.requested"]     = lang
     prefs["privacy.spoof_english"]     = 0
