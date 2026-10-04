@@ -29,7 +29,7 @@ import random
 import time
 from typing import Any, List, Optional
 
-from ._locale import SessionLocale, _coerce_session_locale
+from ._locale import SessionLocale
 
 # URL-safe base64 alphabet (no padding chars).
 _B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
@@ -326,7 +326,7 @@ def persona_cookies(profile: Any,
     list. Handing it to a browser is the consumer's part, and the only part
     it keeps.
     """
-    session_locale = _coerce_session_locale(locale)
+    session_locale = SessionLocale.of(locale)
     seed = int(getattr(profile, "seed"))
     history = list(getattr(profile, "browsing_history", None) or [])
     ts = now if now is not None else int(time.time())

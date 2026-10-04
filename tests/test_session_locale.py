@@ -149,6 +149,21 @@ def test_a_pure_builder_refuses_auto():
         translate_profile_to_prefs(generate_profile(seed=1), locale="auto")
 
 
+def test_a_context_locale_is_decided_without_the_network(monkeypatch):
+    """`SessionLocale.of` is what a browser context's own locale goes through.
+    Known-bad: "auto" resolved there, where the proxy is unknown, discovering
+    the HOST's address and giving the home country's language."""
+    def _no_network(*_a, **_k):
+        raise AssertionError("a context locale must not discover anything")
+    monkeypatch.setattr(_geo, "discover_egress_ip", _no_network)
+    with pytest.raises(ValueError, match="auto"):
+        SessionLocale.of("auto")
+    for tag in ("de-DE", "en-AU", "fr", "pt_BR", "zh-CN"):
+        assert SessionLocale.of(tag) == decide_session_locale(tag)
+    decided = decide_session_locale("it-IT")
+    assert SessionLocale.of(decided) is decided
+
+
 def test_an_empty_language_list_is_not_a_session_locale():
     with pytest.raises(ValueError):
         SessionLocale(())

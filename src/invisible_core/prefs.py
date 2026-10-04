@@ -23,7 +23,7 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
-from ._locale import SessionLocale, _coerce_session_locale
+from ._locale import SessionLocale
 from ._webgl_personas import persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
@@ -1702,7 +1702,7 @@ def translate_profile_to_prefs(
     _apply_rasterisation(prefs, profile)
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
-    _apply_locale(prefs, _coerce_session_locale(locale))
+    _apply_locale(prefs, SessionLocale.of(locale))
     _apply_timezone(prefs, timezone)
     _apply_render_seed(prefs, profile)
     _apply_webrtc_host_ip(prefs, profile)

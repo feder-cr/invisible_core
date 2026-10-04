@@ -76,6 +76,31 @@ class SessionLocale:
         """The list as Firefox's prefs take it: ``"en-US, en"``."""
         return ", ".join(self.languages)
 
+    @classmethod
+    def of(cls, value: Any) -> "SessionLocale":
+        """The decision for a value that needs no egress: a tag, or a decision.
+
+        A :class:`SessionLocale` passes through; a tag goes through the same
+        table :func:`decide_session_locale` applies, so a caller handing a tag
+        and a caller handing the decision get identical output. This is what a
+        PURE consumer uses: the prefs and cookie builders, and a browser
+        context that asks for its own locale (``new_context(locale="de-DE")``).
+
+        "auto" is REFUSED: resolving it needs the egress address, which only
+        the launch has (:func:`prepare_session_geo`). Resolved anywhere else it
+        would discover the HOST's address and give the home country's language
+        next to the proxy country's timezone; written verbatim it became the
+        language "auto".
+        """
+        if isinstance(value, cls):
+            return value
+        if _is_auto(value):
+            raise ValueError(
+                'locale="auto" is decided once, at launch, from the egress '
+                "address: pass the SessionLocale from prepare_session_geo() "
+                "(its .locale) or an explicit tag such as 'de-DE'.")
+        return _from_tag(value)
+
 
 # ──────────────────────────────────────────────────────────────────────
 #  The table: how Firefox turns a locale into its default language list
@@ -252,27 +277,8 @@ def decide_session_locale(
 
     A launch normally does not call this directly: :func:`prepare_session_geo`
     calls it with the egress it has already paid for and returns the result as
-    ``SessionGeo.locale``. Call it yourself for a value that needs no egress,
-    such as an explicit tag a browser context asks for.
+    ``SessionGeo.locale``. A value that needs no egress - an explicit tag a
+    browser context asks for - goes through :meth:`SessionLocale.of`, which
+    refuses "auto" instead of discovering the host's address.
     """
     return _decide(requested, egress_ip=egress_ip, proxy=proxy, may_discover=True)
-
-
-def _coerce_session_locale(value: Any) -> SessionLocale:
-    """What a PURE builder (prefs, cookies) accepts as a locale.
-
-    A :class:`SessionLocale` passes through; a tag is decided through
-    :func:`decide_session_locale`, the same derivation a launch uses, so a
-    caller handing a tag and a caller handing the decision get identical
-    output. "auto" is REFUSED: resolving it needs the egress and possibly the
-    network, which a pure builder must not reach for. It used to be written
-    into the prefs verbatim, as the language "auto".
-    """
-    if isinstance(value, SessionLocale):
-        return value
-    if _is_auto(value):
-        raise ValueError(
-            'locale="auto" cannot be resolved by a pure builder: it needs the '
-            "egress address. Pass the SessionLocale from prepare_session_geo() "
-            "(its .locale) or decide_session_locale(), or an explicit tag.")
-    return _from_tag(value)
