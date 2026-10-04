@@ -42,7 +42,7 @@ import time
 import pytest
 import requests
 
-from invisible_core import _geo
+from invisible_core import _geo, decide_session_locale
 
 pytestmark = pytest.mark.unit
 
@@ -628,7 +628,7 @@ def test_a_database_failure_with_no_proxy_does_not_mention_one(monkeypatch):
 def test_the_locale_warning_on_a_direct_run_does_not_blame_a_proxy(monkeypatch, capsys):
     """Where the direct-path message actually reaches a person.
 
-    `resolve_session_locale` swallows the failure and warns on stderr, printing
+    The "auto" language (`decide_session_locale`) swallows the failure and warns on stderr, printing
     the exception's own text inside a sentence that already says "with no
     proxy". Before the remedies were split by path, that single line read:
 
@@ -643,7 +643,7 @@ def test_the_locale_warning_on_a_direct_run_does_not_blame_a_proxy(monkeypatch, 
             "Caused by NameResolutionError('Failed to resolve')")
 
     monkeypatch.setattr(_geo.requests, "get", fake_get)
-    _geo.resolve_session_locale(None, None)
+    decide_session_locale("auto")
 
     printed = capsys.readouterr().err
     assert "with no proxy" in printed, "the warning itself must still be emitted"
@@ -666,7 +666,7 @@ def test_the_locale_warning_keeps_its_advice_on_its_own_line(monkeypatch, capsys
         raise requests.exceptions.ReadTimeout("Read timed out.")
 
     monkeypatch.setattr(_geo.requests, "get", fake_get)
-    _geo.resolve_session_locale(None, None)
+    decide_session_locale("auto")
 
     lines = capsys.readouterr().err.strip().split("\n")
     assert 'pass locale="xx-XX" to set it explicitly.' in lines[0], (

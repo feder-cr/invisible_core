@@ -27,7 +27,6 @@ from ._fpforge import (
 from ._webgl_personas import forced_gpu_class, select_persona, render_noise_seed
 from .prefs import (
     ComposedPrefs,
-    accept_languages,
     compose_session_prefs,
     humanize_prefs,
     translate_profile_to_prefs,
@@ -35,13 +34,14 @@ from .prefs import (
 from .download import ensure_binary, ensure_geoip_mmdb
 from ._geo import (
     GeoTimezoneError,
-    consent_region_lang,
+    SessionGeo,
     discover_egress_ip,
     ip_to_timezone,
     prepare_session_geo,
-    resolve_session_locale,
     resolve_session_timezone,
 )
+from ._locale import SessionLocale, decide_session_locale
+from ._cookies import persona_cookies
 from ._headless import DESKTOP_ENV, make_virtual_display
 from ._proxy import configure_proxy, parse_proxy, ProxyEndpoint
 from .config import get_default_args, get_default_stealth_prefs
@@ -95,19 +95,20 @@ __all__ = [
     "compose_session_prefs",
     "ComposedPrefs",
     "humanize_prefs",
-    # the language list Firefox derives from a locale, for a context that asks
-    # for its own (the wrapper's new_context(locale=...))
-    "accept_languages",
     "get_default_stealth_prefs",
     "get_default_args",
     # binary + geoip
     "ensure_binary",
     "ensure_geoip_mmdb",
-    # geo / timezone
+    # geo / timezone / language: ONE decision, read by every consumer
     "resolve_session_timezone",
-    "consent_region_lang",
-    "resolve_session_locale",
     "prepare_session_geo",
+    "SessionGeo",
+    "SessionLocale",
+    "decide_session_locale",
+    # the cookies a persona already has, as data (the consumer hands them to
+    # its own driver)
+    "persona_cookies",
     "discover_egress_ip",
     "ip_to_timezone",
     "GeoTimezoneError",

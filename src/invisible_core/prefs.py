@@ -23,6 +23,7 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
+from ._locale import SessionLocale, _coerce_session_locale
 from ._webgl_personas import persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
@@ -1022,115 +1023,10 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────
-#  Public helpers
-# ──────────────────────────────────────────────────────────────────────
-
-#: La tabella con cui Firefox costruisce `intl.accept_languages` di default,
-#: portata da `intl/locale/rust/locale_service_glue/src/lib.rs:89-222`
-#: (`locale_service_default_accept_languages`). Chiave = codice di LINGUA, non
-#: il locale intero.
-_ACCEPT_LANG_TABLE = {
-    "ace": "ace, id", "ach": "ach, en-GB", "af": "af, en-ZA, en-GB",
-    "ak": "ak, ak-GH", "an": "an, es-ES, es, ca", "ast": "ast, es-ES, es",
-    "az": "az-AZ, az", "bo": "bo-CN, bo-IN, bo", "br": "br, fr-FR, fr",
-    "brx": "brx, as", "bs": "bs-BA, bs", "cak": "cak, kaq, es",
-    "crh": "tr-TR, tr", "cs": "cs, sk", "csb": "csb, csb-PL, pl",
-    "cy": "cy-GB, cy", "dsb": "dsb, hsb, de", "el": "el-GR, el",
-    "et": "et, et-EE", "fa": "fa-IR, fa", "ff": "ff, fr-FR, fr, en-GB",
-    "fi": "fi-FI, fi", "fr": "fr, fr-FR", "frp": "frp, fr-FR, fr",
-    "fur": "fur-IT, fur, it-IT, it", "fy": "fy-NL, fy, nl",
-    "ga": "ga-IE, ga, en-IE, en-GB", "gd": "gd-GB, gd, en-GB",
-    "gl": "gl-ES, gl", "gn": "gn, es", "gv": "gv, en-GB", "he": "he, he-IL",
-    "hr": "hr, hr-HR", "hsb": "hsb, dsb, de",
-    "hto": "es-MX, es-ES, es, es-AR, es-CL", "hu": "hu-HU, hu",
-    "hye": "hye, hy", "ilo": "ilo-PH, ilo", "it": "it-IT, it",
-    "ixl": "ixl, es-MX, es", "ja": "ja", "ka": "ka-GE, ka",
-    "kab": "kab-DZ, kab, fr-FR, fr", "kk": "kk, ru, ru-RU", "kn": "kn-IN, kn",
-    "ko": "ko-KR, ko", "lb": "lb, de-DE, de", "lg": "lg, en-GB",
-    "lij": "lij, it", "lt": "lt, ru, pl", "ltg": "ltg, lv",
-    "mai": "mai, hi-IN, en", "meh": "meh, es-MX, es", "mix": "mix, es-MX, es",
-    "mk": "mk-MK, mk", "ml": "ml-IN, ml", "mr": "mr-IN, mr",
-    "nb": "nb-NO, nb, no-NO, no, nn-NO, nn",
-    "nn": "nn-NO, nn, no-NO, no, nb-NO, nb", "nr": "nr-ZA, nr, en-ZA, en-GB",
-    "nso": "nso-ZA, nso, en-ZA, en-GB", "oc": "oc, ca, fr, es, it",
-    "pa": "pa, pa-IN", "ppl": "ppl, es-MX, es", "rm": "rm, rm-CH, de-CH, de",
-    "ru": "ru-RU, ru", "sah": "sah, ru-RU, ru", "sc": "sc, it-IT, it",
-    "scn": "scn, it-IT, it", "si": "si-LK, si", "sk": "sk, cs",
-    "son": "son, son-ML, fr", "sq": "sq, sq-AL", "sr": "sr-RS, sr",
-    "st": "st-ZA, st, en-ZA, en-GB", "ta": "ta-IN, ta", "te": "te-IN, te",
-    "tl": "tl-PH, tl", "tr": "tr-TR, tr", "trs": "trs, es-MX, es",
-    "ts": "ts-ZA, ts, en-ZA, en-GB", "uk": "uk-UA, uk", "ur": "ur-PK, ur",
-    "uz": "uz, ru", "ve": "ve-ZA, ve, en-ZA, en-GB", "vi": "vi-VN, vi",
-    "xcl": "xcl, hy", "xh": "xh-ZA, xh", "zam": "zam, es-MX, es",
-}
-
-#: The SIX languages where Firefox does NOT append ", en-US, en"
-#: (`add_en_us = false` in the source cited above). Every other one appends it.
-_ACCEPT_LANG_NO_EN = {
-    "en": None,          # the `en` table depends on the region, see below
-    "my": "my, en-GB, en",
-    "ro": "ro-RO, ro-GB, en",
-    "sco": "sco, en-GB, en",
-    "sl": "sl, en-GB, en",
-    "szl": "szl, pl-PL, pl, en, de",
-}
-
-
-def accept_languages(locale: str) -> str:
-    """`intl.accept_languages` exactly as Firefox 151 builds it.
-
-    ⛔ THIS FUNCTION USED TO RETURN TWO ENTRIES FOR EVERY LOCALE, AND FOR 89
-    LANGUAGES OUT OF 95 THAT WAS WRONG. It returned `"<locale>, <base>"` with the
-    comment "the desktop default form (e.g. `en-US, en`)". That form is right
-    **only for English**, which is one of the six languages where Firefox does
-    not append the tail.
-
-    The source is `locale_service_default_accept_languages`
-    (`intl/locale/rust/locale_service_glue/src/lib.rs:82-234`) and it does two
-    things: a TABLE of per-language special cases, and then
-
-        if add_en_us { format!("{langs}, en-US, en") } else { langs }
-
-    with `add_en_us` TRUE by default and false only for en, my, ro, sco, sl, szl.
-    The table's default branch is `"{lang}-{region}, {lang}"`, that is, exactly
-    our old formula: only the tail was missing, which is the part that shows.
-
-    What it cost, measured: an Italian profile emitted
-        it-IT,it;q=0.9
-    where a real Italian Firefox emits
-        it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7
-    on EVERY HTTP request and in `navigator.languages`.
-
-    ⛔ AND WHY IT HAD NOT BEEN SEEN: the comparison against retail had been made
-    against an **en-US** build, that is, the one case where the old formula and
-    the real one coincide by construction. The control arm was badly chosen, not
-    the measurement wrong. When comparing a function that depends on a parameter,
-    the arm cannot sit on the value where the defect cancels itself out.
-    """
-    lang = locale.replace("_", "-")
-    parts = lang.split("-")
-    base = parts[0]
-    region = parts[1] if len(parts) > 1 else None
-
-    if base == "en":
-        # the only branch with per-region sub-cases, and with no tail
-        return {"CA": "en-CA, en-US, en", "GB": "en-GB, en",
-                "ZA": "en-ZA, en-GB, en-US, en"}.get(region, "en-US, en")
-    if base in _ACCEPT_LANG_NO_EN:
-        return _ACCEPT_LANG_NO_EN[base]
-
-    if base == "ca" and "valencia" in lang.lower():
-        langs = "ca-valencia, ca"
-    elif base == "zh" and region == "CN":
-        langs = "zh-CN, zh, zh-TW, zh-HK"
-    elif base in _ACCEPT_LANG_TABLE:
-        langs = _ACCEPT_LANG_TABLE[base]
-    elif region:
-        langs = f"{base}-{region}, {base}"
-    else:
-        langs = base
-    return f"{langs}, en-US, en"
+# The language table and its application moved to `_locale.py` in 36.x, with
+# the one decision that applies it (`decide_session_locale`): a table that
+# lives beside its only caller cannot be applied a second time somewhere
+# else, which is what had happened to it.
 
 
 # ---------------------------------------------------------------------------
@@ -1644,17 +1540,23 @@ def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
         prefs.update(_WIN_LIGHT_COLORS)
 
 
-def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
-    locale = locale or "en-US"
-    lang = locale.replace("_", "-")
-    prefs["intl.accept_languages"]     = accept_languages(locale)
+def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
+    # ⛔ ONE DECISION, TWO SHAPES, AND EACH PREF READS THE SHAPE IT TAKES. A
+    # pref shaped like ONE tag gets `primary`, the first entry of the list; a
+    # pref shaped like a list gets the whole list. Neither is derived from the
+    # tag the caller asked for. Until 36.x the tag-shaped ones were written
+    # from that tag, and an Australian egress showed what that does: the
+    # country maps to "en-AU", Firefox's table (keyed by language, there is no
+    # en-AU build) maps that to "en-US, en", and the session declared en-AU
+    # here while navigator.language said en-US.
+    prefs["intl.accept_languages"]     = locale.accept_languages
     # ⛔ NO SECOND COPY OF THE WIRE HEADER. Firefox derives Accept-Language
     # from intl.accept_languages (and from a context's language override) in
     # nsHttpHandler, with the q-values of rust_prepare_accept_languages. Until
     # the firefox-36 engine this file also declared the header by hand in
     # zoom.stealth.http.accept_language, for a Juggler rewrite that is gone.
-    prefs["general.useragent.locale"]  = lang
-    prefs["intl.locale.requested"]     = lang
+    prefs["general.useragent.locale"]  = locale.primary
+    prefs["intl.locale.requested"]     = locale.primary
     prefs["privacy.spoof_english"]     = 0
     # juggler.locale.override seeds the BrowsingContext LanguageOverride FIELD in
     # the parent process (BrowsingContext::Attach), whose DidSet drives BOTH
@@ -1682,7 +1584,7 @@ def _apply_locale(prefs: Dict[str, Any], locale: str) -> None:
     # en-US is the single locale where 2 and 4 coincide (the table has no 'en'
     # row to append), which is why an en-US-only control kept the old sentence
     # looking true for as long as it did.
-    prefs["juggler.locale.override"]   = accept_languages(locale)
+    prefs["juggler.locale.override"]   = locale.accept_languages
 
 
 def _apply_timezone(prefs: Dict[str, Any], timezone: str) -> None:
@@ -1762,7 +1664,7 @@ def _apply_caller_overlay(prefs: Dict[str, Any],
 def translate_profile_to_prefs(
     profile: Profile,
     *,
-    locale: str = "en-US",
+    locale: "SessionLocale | str | None" = "en-US",
     timezone: str = "",
     extra_prefs: Optional[Dict[str, Any]] = None,
     virtual_display: bool = False,
@@ -1771,7 +1673,13 @@ def translate_profile_to_prefs(
 
     Args:
         profile:         Bayesian-sampled fingerprint (from ``generate_profile``).
-        locale:          BCP-47 tag, e.g. ``"en-US"``.
+        locale:          The session language: the ``SessionLocale`` a launch
+                         decided (``prepare_session_geo(...).locale``), or a
+                         BCP-47 tag such as ``"en-US"``, which is decided
+                         through ``decide_session_locale`` - the same
+                         derivation, so both give identical prefs. None or ""
+                         is en-US; "auto" is refused, since resolving it needs
+                         the egress.
         timezone:        IANA timezone name, e.g. ``"America/New_York"``.
         extra_prefs:     Optional overlay applied LAST.
         virtual_display: When True on Windows, apply GPU-disabling workarounds
@@ -1794,7 +1702,7 @@ def translate_profile_to_prefs(
     _apply_rasterisation(prefs, profile)
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
-    _apply_locale(prefs, locale)
+    _apply_locale(prefs, _coerce_session_locale(locale))
     _apply_timezone(prefs, timezone)
     _apply_render_seed(prefs, profile)
     _apply_webrtc_host_ip(prefs, profile)
@@ -1955,7 +1863,7 @@ def show_cursor_prefs(show_cursor: Any) -> Dict[str, Any]:
 def compose_session_prefs(
     profile: Profile,
     *,
-    locale: Optional[str] = None,
+    locale: "SessionLocale | str | None" = None,
     timezone: Optional[str] = None,
     extra_prefs: Optional[Dict[str, Any]] = None,
     virtual_display: bool = False,

@@ -45,7 +45,7 @@ def get_default_stealth_prefs(
     seed: Optional[int] = None,
     *,
     pin: Optional[Dict[str, Any]] = None,
-    locale: str = "en-US",
+    locale: Any = "en-US",
     timezone: str = "",
     extra_prefs: Optional[Dict[str, Any]] = None,
     humanize: Union[bool, float] = True,
@@ -65,8 +65,11 @@ def get_default_stealth_prefs(
             random int31 (matches ``InvisiblePlaywright`` default).
         pin: Optional dict forcing specific fingerprint fields while the
             rest stays seed-derived. See ``docs/pinning.md``.
-        locale: BCP-47 tag (e.g. ``"en-US"``). Drives ``Accept-Language``
-            and ``navigator.language``.
+        locale: BCP-47 tag (e.g. ``"en-US"``) or a ``SessionLocale``. Drives
+            ``Accept-Language`` and ``navigator.language``, through the same
+            decision a launch makes (``decide_session_locale``). Like the
+            timezone, ``"auto"`` is not resolved here: pass
+            ``prepare_session_geo(timezone, proxy, "auto").locale``.
         timezone: IANA timezone (e.g. ``"America/New_York"``). Empty means
             use the host TZ. This pure pref builder does NOT resolve
             ``"auto"`` (that needs the proxy + a network lookup at launch

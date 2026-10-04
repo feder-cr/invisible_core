@@ -29,6 +29,8 @@ from urllib.parse import quote
 
 import requests
 
+from ._locale import SessionLocale, _decide
+
 
 class GeoTimezoneError(RuntimeError):
     """Raised when ``timezone="auto"`` cannot resolve a valid IANA zone.
@@ -574,45 +576,6 @@ _COUNTRY_LOCALE = {
 }
 
 
-#: The EEA plus the UK and Switzerland, i.e. every country where a real Google
-#: CONSENT cookie carries `<lang>+<COUNTRY>` rather than the `en+FX` a non-EU
-#: visitor gets. A finite, knowable set; the alternative was a 22-row timezone
-#: table in the wrapper that silently answered "non-EU English" for every
-#: country it did not list.
-CONSENT_REGION_COUNTRIES = frozenset({
-    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
-    "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
-    "SI", "ES", "SE",            # EU 27
-    "IS", "LI", "NO",            # EEA
-    "GB", "CH",                  # UK and Switzerland behave the same way here
-})
-
-
-def consent_region_lang(locale: str) -> "tuple[str, str]":
-    """`(region_token, lang)` for a Google CONSENT cookie, from the LOCALE.
-
-    WHY IT TAKES A LOCALE. This used to live in the wrapper as a 22-row IANA
-    timezone table (`_TZ_TO_REGION`), while the locale a session actually runs
-    with is resolved HERE, from the egress country, against a 55-row table. Two
-    tables for one fact, and they drifted exactly the way two tables do: a
-    Romanian session resolved `ro-RO` for `navigator.language` and fell through
-    to `("FX", "en")` for the cookie, because `Europe/Bucharest` was not one of
-    the 22. A page that reads the cookie and the language sees a Romanian
-    browser claiming to be a non-EU English one.
-
-    Deriving from the locale removes the second table rather than extending it:
-    every locale this package can produce is covered by construction, including
-    the ones nobody has added to a list yet.
-    """
-    tag = (locale or "en-US").replace("_", "-")
-    parts = tag.split("-")
-    lang = parts[0].lower()
-    country = parts[-1].upper() if len(parts) > 1 else ""
-    if country in CONSENT_REGION_COUNTRIES:
-        return (country, lang)
-    return ("FX", lang if country else "en")
-
-
 def ip_to_locale(ip: str, mmdb_path: Any) -> str:
     """Map ``ip`` -> a BCP-47 locale via the MaxMind ``country.iso_code`` field, so the
     browser language stays consistent with the proxy egress country. Falls back to
@@ -622,11 +585,25 @@ def ip_to_locale(ip: str, mmdb_path: Any) -> str:
     return _COUNTRY_LOCALE.get(cc.upper(), "en-US")
 
 
-def resolve_session_locale(egress_ip: Optional[str], proxy: Optional[Dict[str, str]]) -> str:
-    """Resolve ``locale="auto"`` to a BCP-47 locale from the egress country. Behind a proxy
-    it reuses the already-discovered ``egress_ip`` (no extra round-trip); without a proxy it
-    discovers the host's public IP. On any failure it returns ``en-US`` (never breaks launch
-    - locale is cosmetic, unlike timezone which traps a foreign-proxy mismatch)."""
+def _egress_locale_tag(egress_ip: Optional[str], proxy: Optional[Dict[str, str]],
+                       *, may_discover: bool = True,
+                       discovery_failure: Optional[BaseException] = None) -> str:
+    """The BCP-47 tag the egress country stands for, for ``locale="auto"``.
+
+    PRIVATE, and only :func:`invisible_core._locale.decide_session_locale`
+    calls it: the tag it returns is an INPUT to the decision, not a value any
+    consumer may read. Until 36.x this was the public `resolve_session_locale`,
+    and every consumer that read its raw tag derived values from it that the
+    table then contradicted (an Australian egress: "en-AU" here, "en-US"
+    first in the list navigator.languages is split from).
+
+    Behind a proxy it reuses the already-discovered ``egress_ip`` (no extra
+    round-trip); without a proxy it discovers the host's public IP when it was
+    not handed one and ``may_discover`` allows it. On any failure it returns
+    ``en-US`` and says so on stderr (never breaks launch - locale is cosmetic,
+    unlike timezone which traps a foreign-proxy mismatch).
+    """
+    from ._locale import DEFAULT_LOCALE
     from .download import ensure_geoip_mmdb
 
     try:
@@ -634,22 +611,26 @@ def resolve_session_locale(egress_ip: Optional[str], proxy: Optional[Dict[str, s
         # already paid this round trip and now carries the result even without a
         # proxy. Discovery happens only when there is nothing to reuse - the case
         # of an explicit timezone, where nobody has asked the network anything
-        # yet.
+        # yet - and never a second time after `prepare_session_geo` already
+        # failed to discover (``may_discover=False``).
         #
         # And discovery stays FORBIDDEN behind a proxy: if `egress_ip` is missing
         # there, discovery has failed, and falling back to the direct address
         # would derive the language from the HOME country while the timezone says
         # the proxy's. `en-US` is better than a contradiction between two fields.
         ip = egress_ip
-        if ip is None and not _proxy_is_set(proxy):
+        if ip is None and may_discover and not _proxy_is_set(proxy):
             ip = discover_egress_ip(None)
         if ip is None:
-            _warn_locale_fallback(proxy, "no egress IP was resolved")
-            return "en-US"
+            why = (f"{type(discovery_failure).__name__}: {discovery_failure}"
+                   if discovery_failure is not None
+                   else "no egress IP was resolved")
+            _warn_locale_fallback(proxy, why)
+            return DEFAULT_LOCALE
         return ip_to_locale(ip, ensure_geoip_mmdb())
     except Exception as exc:  # noqa: BLE001
         _warn_locale_fallback(proxy, f"{type(exc).__name__}: {exc}")
-        return "en-US"
+        return DEFAULT_LOCALE
 
 
 def _warn_locale_fallback(proxy: Optional[Dict[str, str]], why: str) -> None:
@@ -733,6 +714,14 @@ class SessionGeo(NamedTuple):
     #: already born with the right address and declaring one would add a
     #: candidate with no matching allocation.
     srflx_suppressed: bool = False
+    #: The session language, decided from the SAME egress as the timezone, by
+    #: the one decision (`invisible_core._locale.decide_session_locale`).
+    #: :func:`prepare_session_geo` always fills it; a consumer reads it and
+    #: passes it on (to the prefs, to the cookie builder) and never derives a
+    #: language of its own. ``None`` only on a SessionGeo built by hand, which
+    #: is why it has a default at all: the type is built positionally in
+    #: tests, and a field without one would have broken every such call.
+    locale: Optional["SessionLocale"] = None
 
     def srflx_to_declare(self) -> Optional[str]:
         """The address the engine must announce as its srflx, or ``None``.
@@ -837,16 +826,24 @@ def _geoip_database(ip: str, proxied: bool) -> Any:
 
 
 def prepare_session_geo(
-    timezone: str, proxy: Optional[Dict[str, str]]
+    timezone: str, proxy: Optional[Dict[str, str]], locale: Optional[str] = "auto",
 ) -> SessionGeo:
-    """Resolve the session timezone AND the proxy egress IP in ONE round-trip.
+    """Resolve the session timezone, egress IP AND language in ONE round-trip.
 
-    The egress IP is discovered once and reused for both the timezone mapping
-    (when ``timezone`` is ``""``/``"auto"``) and the WebRTC public-IP override.
-    Timezone precedence is identical to :func:`resolve_session_timezone`; the
-    egress IP is best-effort for the WebRTC side (a discovery failure that the
-    timezone path doesn't need won't break the launch - but if the timezone
-    path *does* need it behind a proxy, that path still fails loudly).
+    The egress IP is discovered once and reused for the timezone mapping (when
+    ``timezone`` is ``""``/``"auto"``), the WebRTC public-IP override and the
+    language. Timezone precedence is identical to
+    :func:`resolve_session_timezone`; the egress IP is best-effort for the
+    WebRTC side (a discovery failure that the timezone path doesn't need won't
+    break the launch - but if the timezone path *does* need it behind a proxy,
+    that path still fails loudly).
+
+    ``locale`` is what the caller asked for, a tag or "auto", and the returned
+    ``SessionGeo.locale`` is the decision (`decide_session_locale`). It is
+    decided HERE so that a consumer makes one call and gets the three facts
+    that must agree with one another, instead of repeating an
+    ``if locale == "auto"`` branch of its own: until 36.x every consumer did,
+    five copies across four packages.
     """
     from .download import ensure_geoip_mmdb
 
@@ -882,23 +879,35 @@ def prepare_session_geo(
 
     if tz and tz.lower() != "auto":
         lat, lon = _coordinate(egress_ip)
+        # An explicit zone asked the network nothing without a proxy, so an
+        # "auto" language may still discover here: it is the first ask, not a
+        # repeat. Behind a proxy `_decide` never discovers on its own.
         return SessionGeo(tz, egress_ip, lat, lon,
-                          _srflx_suppressed(proxy, egress_ip))  # explicit IANA wins
+                          _srflx_suppressed(proxy, egress_ip),  # explicit IANA wins
+                          _decide(locale, egress_ip=egress_ip, proxy=proxy,
+                                  may_discover=True, discovery_failure=egress_err))
+    ip: Optional[str] = None
     try:
         ip = egress_ip if proxy_set else discover_egress_ip(None)
         if ip is None:  # proxy set but discovery failed above
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
         lat, lon = _coordinate(ip)
-        # ⛔ IT CARRIES `ip`, NOT `egress_ip`. Behind a proxy they are the same
-        # value; without one, `ip` is the fact this round-trip has just paid for
-        # and `egress_ip` is `None`. Carrying the second meant throwing the
-        # discovery away and making `resolve_session_locale` do it again.
-        return SessionGeo(ip_to_timezone(ip, _geoip_database(ip, proxy_set)), ip, lat, lon,
-                          _srflx_suppressed(proxy, ip))
-    except Exception:
+        zone = ip_to_timezone(ip, _geoip_database(ip, proxy_set))
+    except Exception as exc:
         if proxy_set:
             raise  # fail-early behind a proxy (timezone_mismatch trap)
-        return SessionGeo("", None)  # no proxy: host TZ is a safe fallback
+        # No proxy: host TZ is a safe fallback. The language reuses the address
+        # if discovery got that far, and otherwise does NOT ask the network a
+        # second time for the same answer: it falls back, naming this failure.
+        return SessionGeo("", None, locale=_decide(
+            locale, egress_ip=ip, proxy=proxy, may_discover=False,
+            discovery_failure=exc))
+    # ⛔ IT CARRIES `ip`, NOT `egress_ip`. Behind a proxy they are the same
+    # value; without one, `ip` is the fact this round-trip has just paid for
+    # and `egress_ip` is `None`. Carrying the second meant throwing the
+    # discovery away and making the language lookup do it again.
+    return SessionGeo(zone, ip, lat, lon, _srflx_suppressed(proxy, ip),
+                      _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False))
 
 
 def resolve_session_timezone(

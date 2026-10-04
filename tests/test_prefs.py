@@ -17,7 +17,6 @@ import pytest
 
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import (
-    accept_languages,
     _WIN_LIGHT_COLORS,
     translate_profile_to_prefs,
 )
@@ -69,71 +68,8 @@ def test_translate_has_stealth_baseline_constants():
     assert "media.peerconnection.enabled" in prefs
 
 
-# ──────────────────────────────────────────────────────────────────────
-#  accept_languages (platform-agnostic)
-# ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-def test_accept_language_with_region():
-    # AL1
-    assert accept_languages("en-US") == "en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_no_region():
-    """AL2. A language without a region does NOT stay a single tag.
-
-    ⛔ This test used to assert `accept_languages("fr") == "fr"` and encoded
-    the defect corrected on 2026-08-19, not Firefox's behaviour. The expected
-    value below is DERIVED from the engine's table, not from what our code
-    returns - otherwise the test would assert nothing:
-
-        intl/locale/rust/locale_service_glue/src/lib.rs
-          "fr" => "fr, fr-FR",          <- the table's row
-          add_en_us stays true          <- so ", en-US, en" goes on the end
-
-    Note the first tag is the BARE language and not `fr-FR`: the table wants it
-    that way, and it is the reason a requested region may not come first.
-    """
-    assert accept_languages("fr") == "fr, fr-FR, en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_no_region_when_the_table_has_no_row():
-    """AL2-bis. The table's `_` branch, where almost every language ends up.
-
-    With no dedicated row and no region, the engine returns the language alone
-    (`lang.as_str()`), and then appends en-US. `ja` is the table row that is
-    exactly "ja", so it exercises both roads to the same outcome.
-    """
-    assert accept_languages("ja") == "ja, en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_underscore_normalized():
-    """AL3. The underscore normalised, and the en-US tail that was missing.
-
-    `pt` has no table row, so it falls into the `_` branch with a region present:
-    `format!("{lang}-{region}, {lang}")` -> "pt-BR, pt", plus ", en-US, en".
-    """
-    assert accept_languages("pt_BR") == "pt-BR, pt, en-US, en"
-
-
-@pytest.mark.unit
-def test_accept_language_english_does_not_append_itself():
-    """AL3-bis. The branch that does NOT append en-US, and hides other errors.
-
-    For `en` the engine sets `add_en_us = false`. It is the only locale where the
-    old two-entry form coincided with the right one, and that is why a check made
-    on en-US alone let the defect through for months. The other two lines
-    exercise the two explicit regional branches.
-    """
-    assert accept_languages("en-US") == "en-US, en"
-    assert accept_languages("en-GB") == "en-GB, en"
-    assert accept_languages("en-CA") == "en-CA, en-US, en"
-    # E un caso NON inglese che pure rifiuta la coda: "sl" => add_en_us = false.
-    assert accept_languages("sl") == "sl, en-GB, en"
+# The language-table tests (AL1-AL3) moved to test_session_locale.py in 36.x,
+# with the table: they go through decide_session_locale, its one caller.
 
 
 @pytest.mark.unit
@@ -344,8 +280,9 @@ def test_locale_underscore_form_normalized():
 
     `de` has no row in the engine's table, so it falls into the `_` branch with
     the region: "de-DE, de", plus ", en-US, en" because add_en_us stays true.
-    The two locale prefs stay the requested TAG, not the list: they are two
-    different things and are asserted separately.
+    The two tag-shaped locale prefs carry the list's FIRST entry, not the list:
+    two shapes of one decision, asserted separately. Here that first entry is
+    the requested tag; for en-AU it is not, which test_session_locale.py pins.
     """
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, locale="de_DE")

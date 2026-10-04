@@ -18,11 +18,19 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
     import invisible_core.prefs as _prefs
     import invisible_core._proxy as _proxy
     from invisible_core._geo import SessionGeo
+    from invisible_core._locale import decide_session_locale
+
+    asked = []
+
+    def fake_geo(tz, proxy, locale="auto"):
+        # The language is the geo decision's: build_launch_plan hands it what
+        # the caller asked for and keeps no "auto" branch of its own.
+        asked.append(locale)
+        return SessionGeo("America/New_York", "198.51.100.4",
+                          locale=decide_session_locale("en-US"))
 
     monkeypatch.setattr(_dl, "ensure_binary", lambda ver=None: "/fake/firefox")
-    monkeypatch.setattr(_geo, "prepare_session_geo",
-                        lambda tz, proxy: SessionGeo("America/New_York", "198.51.100.4"))
-    monkeypatch.setattr(_geo, "resolve_session_locale", lambda ip, proxy: "en-US")
+    monkeypatch.setattr(_geo, "prepare_session_geo", fake_geo)
     monkeypatch.setattr(_fp, "generate_profile", lambda seed, pin=None: object())
     # include a float pref to exercise the serialization end to end
     monkeypatch.setattr(_prefs, "translate_profile_to_prefs",
@@ -33,6 +41,7 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
     plan = build_launch_plan(42, profile_dir=pdir, timezone="auto", locale="auto")
 
     assert plan.binary == "/fake/firefox"
+    assert asked == ["auto"], "the requested language must reach the geo decision"
     # ⛔ NO URL AT THE END, and it is the class that matters, not the string: a
     # URL on the command line takes precedence over the startup page, so the
     # "about:blank" default that used to sit here suppressed about:home

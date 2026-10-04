@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from invisible_core import _geo
+from invisible_core import _geo, decide_session_locale
 
 pytestmark = pytest.mark.unit
 
@@ -202,8 +202,8 @@ def test_a_failed_locale_lookup_says_so_instead_of_returning_en_US_quietly(
         raise RuntimeError("geoip unavailable")
 
     monkeypatch.setattr(_geo, "discover_egress_ip", boom)
-    got = _geo.resolve_session_locale(None, None)
-    assert got == "en-US", "the fallback outcome must not change"
+    got = decide_session_locale("auto")
+    assert got.primary == "en-US", "the fallback outcome must not change"
 
     err = capsys.readouterr().err
     assert "could not resolve the session locale" in err
@@ -218,7 +218,8 @@ def test_the_warning_distinguishes_the_proxy_case(monkeypatch, capsys):
     monkeypatch.setattr(_geo, "ip_to_locale",
                         lambda *a, **kw: (_ for _ in ()).throw(ValueError("no record")))
     monkeypatch.setattr(_geo, "_proxy_is_set", lambda proxy: True)
-    _geo.resolve_session_locale("203.0.113.7", {"server": "socks5://x:1"})
+    decide_session_locale("auto", egress_ip="203.0.113.7",
+                          proxy={"server": "socks5://x:1"})
     assert "behind a proxy" in capsys.readouterr().err
 
 
@@ -226,5 +227,6 @@ def test_a_resolved_locale_stays_quiet(monkeypatch, capsys):
     """A warning on the happy path would train people to ignore it."""
     monkeypatch.setattr(_geo, "_proxy_is_set", lambda proxy: True)
     monkeypatch.setattr(_geo, "ip_to_locale", lambda *a, **kw: "it-IT")
-    assert _geo.resolve_session_locale("203.0.113.7", {"server": "s"}) == "it-IT"
+    got = decide_session_locale("auto", egress_ip="203.0.113.7", proxy={"server": "s"})
+    assert got.primary == "it-IT"
     assert capsys.readouterr().err == ""

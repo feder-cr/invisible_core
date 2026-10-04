@@ -410,8 +410,8 @@ def test_prepare_geo_no_webrtc_override_without_proxy(stub_egress):
         "with no proxy the engine must receive no srflx to declare: the real "
         "one is born with the right address and with its own allocation")
     assert geo.egress_ip == "203.0.113.7", (
-        "il giro di rete e' stato fatto per il fuso: buttarne il risultato "
-        "obbliga resolve_session_locale a rifarlo")
+        "the round trip was paid for the timezone: throwing its result away "
+        "makes the language lookup pay it again")
 
 
 @pytest.mark.unit
@@ -765,10 +765,11 @@ def test_without_a_proxy_the_address_is_discovered_ONCE_only(monkeypatch):
     from invisible_core import _geo
 
     count = _count_probes(monkeypatch)
+    # Since 36.x the language is decided INSIDE the geo decision, so the two
+    # steps are one call - and the count still has to be one.
     geo = _geo.prepare_session_geo("auto", None)
-    loc = _geo.resolve_session_locale(geo.egress_ip, None)
 
-    assert loc == "en-GB", "the language must still resolve from the address"
+    assert geo.locale.primary == "en-GB", "the language must still resolve from the address"
     assert count["n"] == 1, (
         "the address was asked of the network %d times instead of once: the "
         "fact is still being thrown away between one step and the next"
@@ -819,8 +820,9 @@ def test_behind_a_proxy_a_failed_discovery_does_NOT_fall_to_the_direct_address(m
     """The language is never derived from the home country while the timezone
     says another one.
 
-    This is the risk in the other half of the fix: `resolve_session_locale` now
-    reuses what it receives instead of rediscovering it, and the shorter form -
+    This is the risk in the other half of the fix: the "auto" language (since
+    36.x `decide_session_locale`, before it `resolve_session_locale`) reuses
+    what it receives instead of rediscovering it, and the shorter form -
     `ip = egress_ip or discover_egress_ip(None)` - would have dropped the case
     "proxy alive, discovery failed" onto the DIRECT address. The session would
     have declared the home country's language and the proxy country's timezone:
@@ -831,9 +833,11 @@ def test_behind_a_proxy_a_failed_discovery_does_NOT_fall_to_the_direct_address(m
 
     count = _count_probes(monkeypatch)
     count["n"] = 0
-    loc = _geo.resolve_session_locale(None, {"server": "socks5://g:1"})
+    from invisible_core import decide_session_locale
 
-    assert loc == "en-US", "behind a proxy with no address it falls back, it does not guess"
+    loc = decide_session_locale("auto", proxy={"server": "socks5://g:1"})
+
+    assert loc.primary == "en-US", "behind a proxy with no address it falls back, it does not guess"
     assert count["n"] == 0, (
         "it went out on the DIRECT network to derive the language while a proxy "
         "was configured: that address is the one at home")
