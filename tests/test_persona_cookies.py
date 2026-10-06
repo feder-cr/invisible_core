@@ -278,12 +278,13 @@ def test_the_consent_language_is_the_one_navigator_reports():
 
 
 def test_every_country_the_core_maps_reads_its_own_language():
-    from invisible_core._geo import _COUNTRY_LOCALE
-    for cc, tag in _COUNTRY_LOCALE.items():
-        loc = decide_session_locale(tag)
-        lang = loc.primary.split("-")[0].lower()
-        region = cc if cc in CONSENT_REGION_COUNTRIES else "FX"
-        assert f".{lang}+{region}+" in _consent(_build(locale=loc)), cc
+    from invisible_core._locale import _COUNTRY_FIREFOX_BUILDS
+    for cc, shares in _COUNTRY_FIREFOX_BUILDS.items():
+        for build, _ in shares:
+            loc = SessionLocale(SessionLocale.of(build).languages, cc)
+            lang = loc.primary.split("-")[0].lower()
+            region = cc if cc in CONSENT_REGION_COUNTRIES else "FX"
+            assert f".{lang}+{region}+" in _consent(_build(locale=loc)), (cc, build)
 
 
 def test_auto_is_refused_by_the_pure_builder():

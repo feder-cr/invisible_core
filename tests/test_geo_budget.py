@@ -215,7 +215,7 @@ def test_the_warning_distinguishes_the_proxy_case(monkeypatch, capsys):
     """Behind a proxy the mismatch is worse - the timezone follows the exit
     country while the language does not - so the message has to say which
     situation the reader is in."""
-    monkeypatch.setattr(_geo, "ip_to_locale",
+    monkeypatch.setattr(_geo, "ip_to_country",
                         lambda *a, **kw: (_ for _ in ()).throw(ValueError("no record")))
     monkeypatch.setattr(_geo, "_proxy_is_set", lambda proxy: True)
     decide_session_locale("auto", egress_ip="203.0.113.7",
@@ -226,7 +226,7 @@ def test_the_warning_distinguishes_the_proxy_case(monkeypatch, capsys):
 def test_a_resolved_locale_stays_quiet(monkeypatch, capsys):
     """A warning on the happy path would train people to ignore it."""
     monkeypatch.setattr(_geo, "_proxy_is_set", lambda proxy: True)
-    monkeypatch.setattr(_geo, "ip_to_locale", lambda *a, **kw: "it-IT")
+    monkeypatch.setattr(_geo, "ip_to_country", lambda *a, **kw: "IT")
     got = decide_session_locale("auto", egress_ip="203.0.113.7", proxy={"server": "s"})
-    assert got.primary == "it-IT"
+    assert got.region == "IT"
     assert capsys.readouterr().err == ""

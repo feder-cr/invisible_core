@@ -28,7 +28,7 @@ from invisible_core._geo import (
     _proxies_for_requests,
     _proxy_is_set,
     discover_egress_ip,
-    ip_to_locale,
+    ip_to_country,
     ip_to_coordinates,
     ip_to_timezone,
     prepare_session_geo,
@@ -422,69 +422,41 @@ def test_prepare_geo_timezone_matches_resolve_session_timezone(stub_egress):
 
 
 # ---------------------------------------------------------------------------
-#  ip_to_locale - the country table
+#  ip_to_country - the egress country, and only the country
 #
-#  ADDED 2026-07-27. It had no test anywhere: making `ip_to_locale` return
-#  "en-US" unconditionally survived the core's whole suite AND every file moved
-#  into it that day. It is the function that decides the browser's language, so
-#  the failure it hides is a US-English browser behind a proxy egressing from
-#  Milan - a mismatch a consistency check reads straight off the page.
+#  Until 36.32.0 this function returned a language TAG from a country table,
+#  and the table held tags no Firefox build has ("DE": "de-DE"). The language
+#  is now a Firefox question answered in `_locale._COUNTRY_FIREFOX_BUILDS`
+#  (tests in test_session_locale.py); this function only reads the DB.
 # ---------------------------------------------------------------------------
 
 def _country(monkeypatch, code):
     _install_fake_maxminddb(monkeypatch, {"country": {"iso_code": code}})
 
 
-@pytest.mark.parametrize("cc,locale", [
-    ("IT", "it-IT"), ("DE", "de-DE"), ("JP", "ja-JP"), ("BR", "pt-BR"),
-    # Same language, different country: the table is not a language map, and
-    # collapsing these would put en-US on a British egress.
-    ("GB", "en-GB"), ("CA", "en-CA"),
-    # Multi-language countries take the majority language, by design.
-    ("CH", "de-CH"), ("BE", "fr-BE"),
-])
+@pytest.mark.parametrize("cc", ["IT", "DE", "JP", "BR", "GB", "CA", "CH", "BE", "ZZ"])
 @pytest.mark.unit
-def test_ip_to_locale_follows_the_egress_country(monkeypatch, cc, locale):
+def test_ip_to_country_reads_the_egress_country(monkeypatch, cc):
     _country(monkeypatch, cc)
-    assert ip_to_locale("198.51.100.4", "x.mmdb") == locale
+    assert ip_to_country("198.51.100.4", "x.mmdb") == cc
 
 
 @pytest.mark.unit
-def test_ip_to_locale_is_case_insensitive_about_the_country_code(monkeypatch):
+def test_ip_to_country_is_case_insensitive_about_the_country_code(monkeypatch):
     """MaxMind returns upper case; nothing guarantees a future DB will."""
     _country(monkeypatch, "it")
-    assert ip_to_locale("198.51.100.4", "x.mmdb") == "it-IT"
+    assert ip_to_country("198.51.100.4", "x.mmdb") == "IT"
 
 
 @pytest.mark.parametrize("record", [
-    {"country": {"iso_code": "ZZ"}},        # a country we do not map
     {"country": {}},                        # a record with no code
     {},                                     # a record with no country
     None,                                   # an IP the DB does not know
 ])
 @pytest.mark.unit
-def test_ip_to_locale_falls_back_to_en_US(monkeypatch, record):
-    """The fallback is correct, and it is also what an always-wrong
-    implementation looks like - which is why it is asserted separately from the
-    cases above rather than being the only thing asserted."""
+def test_ip_to_country_says_None_when_the_DB_cannot_tell(monkeypatch, record):
     _install_fake_maxminddb(monkeypatch, record)
-    assert ip_to_locale("198.51.100.4", "x.mmdb") == "en-US"
-
-
-@pytest.mark.unit
-def test_the_country_table_is_well_formed():
-    """Every value a real BCP-47 tag whose region half is the key.
-
-    `"PT": "pt-BR"` would be a plausible typo, invisible in every test above
-    that does not name PT, and it would hand a Portuguese egress a Brazilian
-    browser.
-    """
-    from invisible_core._geo import _COUNTRY_LOCALE
-
-    for cc, tag in _COUNTRY_LOCALE.items():
-        assert re.fullmatch(r"[a-z]{2}-[A-Z]{2}", tag), f"{cc}: {tag!r}"
-        assert tag.split("-")[1] == cc, (
-            f"{cc} maps to {tag}, whose region is {tag.split('-')[1]}")
+    assert ip_to_country("198.51.100.4", "x.mmdb") is None
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -741,7 +713,7 @@ def _count_probes(monkeypatch):
 
     monkeypatch.setattr(_geo, "discover_egress_ip", fake)
     monkeypatch.setattr(_geo, "ip_to_timezone", lambda ip, mmdb: "America/New_York")
-    monkeypatch.setattr(_geo, "ip_to_locale", lambda ip, mmdb: "en-GB")
+    monkeypatch.setattr(_geo, "ip_to_country", lambda ip, mmdb: "GB")
     monkeypatch.setattr(_geo, "ip_to_coordinates", lambda ip, mmdb: (1.0, 2.0))
     monkeypatch.setattr(dl, "ensure_geoip_mmdb", lambda *a, **k: "fake.mmdb")
     return count
@@ -769,7 +741,7 @@ def test_without_a_proxy_the_address_is_discovered_ONCE_only(monkeypatch):
     # steps are one call - and the count still has to be one.
     geo = _geo.prepare_session_geo("auto", None)
 
-    assert geo.locale.primary == "en-GB", "the language must still resolve from the address"
+    assert geo.locale.region == "GB", "the language must still resolve from the address"
     assert count["n"] == 1, (
         "the address was asked of the network %d times instead of once: the "
         "fact is still being thrown away between one step and the next"

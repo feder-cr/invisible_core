@@ -159,6 +159,66 @@ def _test_trees():
     return [t for t in trees if t.is_dir()], bool(sorgente)
 
 
+def _test_files():
+    """(file name, text) of every test file a doc may cite, and source_present.
+
+    ⛔ THE WORKING COPIES ARE NOT ENOUGH, AND THE SHARED ONES ARE BEHIND BY
+    DESIGN. The sibling checkouts under `release/` are shared between sessions
+    and no session may move them (CLAUDE.md, rule 17), so they sit on whatever
+    commit they last landed on. Measured 2026-10-06: seven tests the docs cite
+    existed on the wrapper's `main` and not in its shared checkout, and the
+    phantom gate called all seven missing. The only offered way out was to drop
+    the backticks, which by this gate's own convention declares a name
+    HISTORICAL: a true citation rewritten as a false one to quiet the gate.
+
+    So each sibling repo is read twice: its working copy (what is on this
+    machine, possibly ahead) and the tree of its `origin/main` (what is
+    published), straight from git objects, without touching the checkout. It is
+    as fresh as the last `git fetch`; a repo with no `origin/main` simply adds
+    nothing.
+    """
+    trees, source_present = _test_trees()
+    files = []
+    for tree in trees:
+        for path in tree.rglob("test_*.py"):
+            files.append((path.name, path.read_text(encoding="utf-8", errors="replace")))
+    for repo in sorted(_RELEASE.iterdir()):
+        if repo.name != _SELF.name and (repo / ".git").exists():
+            files += _test_files_on_origin_main(repo)
+    return files, source_present
+
+
+def _test_files_on_origin_main(repo: Path):
+    """(file name, text) of the test files in the tree of ``repo``'s origin/main."""
+    listed = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", "origin/main"],
+        capture_output=True, text=True)
+    if listed.returncode != 0:
+        return []
+    paths = [p for p in listed.stdout.splitlines()
+             if p.rsplit("/", 1)[-1].startswith("test_") and p.endswith(".py")]
+    if not paths:
+        return []
+    batch = subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "--batch"],
+        input="".join(f"origin/main:{p}\n" for p in paths).encode("utf-8"),
+        capture_output=True)
+    if batch.returncode != 0:
+        return []
+    out, pos, files = batch.stdout, 0, []
+    for p in paths:
+        end = out.index(b"\n", pos)
+        header = out[pos:end].split()
+        pos = end + 1
+        if len(header) != 3 or header[1] != b"blob":
+            continue                     # "<name> missing": nothing to read
+        size = int(header[2])
+        files.append((p.rsplit("/", 1)[-1],
+                      out[pos:pos + size].decode("utf-8", errors="replace")))
+        pos += size + 1
+    return files
+
+
 def _is_vendored(rel: str) -> bool:
     """Does the file belong to the vendored Playwright fork (``_pw``/``_driver``)?
 
@@ -1021,7 +1081,6 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
         pytest.skip("not the workbench - the architecture docs are not here")
 
     defined = set()
-    trees = []
     for repo in _DEFAULT_SUITE_WORKFLOW:
         if not (_RELEASE / repo / "tests").is_dir():
             pytest.skip("not the workbench - the sibling repos are not here")
@@ -1043,19 +1102,17 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
     # had been invisible only because the name class was narrower than the names.
     # A gate that is red for a false positive is worse than a stale doc: it
     # teaches the next reader to ignore it.
-    more, source_present = _test_trees()
-    trees.extend(more)
+    # ⛔ AND THE FILES COME FROM `_test_files()`, which adds each sibling's
+    # origin/main to its working copy: the shared checkouts are behind by
+    # design, and reading only them called seven true citations phantoms.
+    files, source_present = _test_files()
     if not source_present:
         pytest.skip("the Firefox source tree is not on this machine, so the "
                     "names the docs cite from it cannot be judged")
 
-    for tree in trees:
-        if not tree.is_dir():
-            continue
-        for path in tree.rglob("test_*.py"):
-            defined.update(re.findall(r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")",
-                                      path.read_text(encoding="utf-8", errors="replace")))
-            defined.add(path.stem)          # docs cite files by name too
+    for name, text in files:
+        defined.update(re.findall(r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")", text))
+        defined.add(name[:-3])              # docs cite files by name too
 
     phantom = {}
     for doc in sorted(docs.glob("*.md")):
@@ -1161,18 +1218,13 @@ def test_a_doc_that_names_a_test_function_names_the_file_holding_it():
     # ⛔ THE SAME TREES AS THE PHANTOM GATE, from one helper. This list used to
     # be the hand-written pair whose staleness is recorded up there, so the two
     # gates asking the same question read two different worlds.
-    trees, _ = _test_trees()
+    files, _ = _test_files()
     defined = {}
     stem = set()
-    for tree in trees:
-        if not tree.is_dir():
-            continue
-        for path in tree.rglob("test_*.py"):
-            stem.add(path.stem)
-            for name in re.findall(
-                    r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")",
-                    path.read_text(encoding="utf-8", errors="replace")):
-                defined.setdefault(name, set()).add(path.name)
+    for file_name, text in files:
+        stem.add(file_name[:-3])
+        for name in re.findall(r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")", text):
+            defined.setdefault(name, set()).add(file_name)
     if not defined:
         pytest.skip("not the workbench - the sibling repos are not here")
 

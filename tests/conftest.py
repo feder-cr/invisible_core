@@ -92,13 +92,13 @@ def _no_geoip_download(monkeypatch, request):
     """Stop the GeoIP database download from escaping a test that thinks it is
     hermetic.
 
-    The "auto" language lookup (`_geo._egress_locale_tag`, the public
+    The "auto" language lookup (`_geo._egress_country`, the public
     `resolve_session_locale` until 36.x) ends in
-    `ip_to_locale(ip, ensure_geoip_mmdb())`,
+    `ip_to_country(ip, ensure_geoip_mmdb())`,
     and the ARGUMENT is evaluated before the call. A test that monkeypatches
-    `ip_to_locale` has therefore protected nothing: `ensure_geoip_mmdb()` still
+    `ip_to_country` has therefore protected nothing: `ensure_geoip_mmdb()` still
     runs first, still reaches the network, and when it fails the exception
-    lands in the `except` clause that returns `en-US`.
+    lands in the `except` clause that falls back to en-US.
 
     Measured 2026-08-12, CI run 31644820165 on the core: one job out of eight -
     windows-latest / 3.13, while windows 3.12 and 3.14 and every ubuntu passed -
@@ -111,7 +111,7 @@ def _no_geoip_download(monkeypatch, request):
     push people are about to trust is exactly when nobody wants to investigate.
 
     THREE tests reach `resolve_session_locale` and none neutralised the
-    download. One of the three is worse than red - it patches `ip_to_locale` to
+    download. One of the three is worse than red - it patches `ip_to_country` to
     raise and asserts on the warning text, and the network failure produces a
     warning that satisfies the same assertion, so it passes for the wrong
     reason either way.
@@ -134,7 +134,7 @@ def _no_geoip_download(monkeypatch, request):
     It STUBS rather than refuses, and that is the second decision. Raising
     makes the defect loud but hands every future test a rule to remember, which
     is the same shape as the bug. Returning a path that no hermetic test ever
-    opens - the three that reach here have all monkeypatched `ip_to_locale`, so
+    opens - the three that reach here have all monkeypatched `ip_to_country`, so
     the value is passed and dropped - makes the suite hermetic by construction
     and needs nobody to know. A test that really wants the database is `e2e` by
     the vocabulary's own definition and gets the real function back.

@@ -556,54 +556,47 @@ def ip_to_timezone(ip: str, mmdb_path: Any) -> str:
     return tz
 
 
-# ISO 3166 country code -> the primary BCP-47 locale a real Windows machine in that
-# country most commonly runs. Multi-language countries use the majority language; the
-# user can always force a specific locale instead of "auto". Unknown -> en-US.
-_COUNTRY_LOCALE = {
-    "US": "en-US", "GB": "en-GB", "CA": "en-CA", "AU": "en-AU", "NZ": "en-NZ", "IE": "en-IE",
-    "ZA": "en-ZA", "IN": "en-IN", "SG": "en-SG", "PH": "en-PH",
-    "FR": "fr-FR", "BE": "fr-BE", "LU": "fr-LU",
-    "DE": "de-DE", "AT": "de-AT", "CH": "de-CH",
-    "IT": "it-IT", "ES": "es-ES", "PT": "pt-PT", "NL": "nl-NL",
-    "SE": "sv-SE", "NO": "nb-NO", "DK": "da-DK", "FI": "fi-FI", "IS": "is-IS",
-    "PL": "pl-PL", "CZ": "cs-CZ", "SK": "sk-SK", "HU": "hu-HU", "RO": "ro-RO",
-    "GR": "el-GR", "BG": "bg-BG", "HR": "hr-HR", "RS": "sr-RS", "SI": "sl-SI",
-    "RU": "ru-RU", "UA": "uk-UA", "TR": "tr-TR", "IL": "he-IL",
-    "BR": "pt-BR", "MX": "es-MX", "AR": "es-AR", "CL": "es-CL", "CO": "es-CO", "PE": "es-PE",
-    "JP": "ja-JP", "KR": "ko-KR", "CN": "zh-CN", "TW": "zh-TW", "HK": "zh-HK",
-    "ID": "id-ID", "TH": "th-TH", "VN": "vi-VN", "MY": "ms-MY",
-    "SA": "ar-SA", "AE": "ar-AE", "EG": "ar-EG",
-}
+def ip_to_country(ip: str, mmdb_path: Any) -> Optional[str]:
+    """The ISO 3166 country of ``ip`` (MaxMind ``country.iso_code``), upper case,
+    or None when the DB does not know the IP or the record has no code.
 
-
-def ip_to_locale(ip: str, mmdb_path: Any) -> str:
-    """Map ``ip`` -> a BCP-47 locale via the MaxMind ``country.iso_code`` field, so the
-    browser language stays consistent with the proxy egress country. Falls back to
-    ``en-US`` for IPs absent from the DB or countries we don't map."""
+    Only the COUNTRY: which language a browser there reports is not a geo
+    question but a Firefox one (which build people there install), and it is
+    answered in one place, `_locale._COUNTRY_FIREFOX_BUILDS`.
+    """
     record = _geo_record(ip, mmdb_path)
     cc = ((record.get("country") or {}).get("iso_code") or "") if record else ""
-    return _COUNTRY_LOCALE.get(cc.upper(), "en-US")
+    return cc.upper() or None
 
 
-def _egress_locale_tag(egress_ip: Optional[str], proxy: Optional[Dict[str, str]],
-                       *, may_discover: bool = True,
-                       discovery_failure: Optional[BaseException] = None) -> str:
-    """The BCP-47 tag the egress country stands for, for ``locale="auto"``.
+class _Egress(NamedTuple):
+    """Where a session comes from: the address and its country, together,
+    because the language decision needs both (the country picks the builds,
+    the address picks one of them)."""
+
+    ip: str
+    country: str
+
+
+def _egress_country(egress_ip: Optional[str], proxy: Optional[Dict[str, str]],
+                    *, may_discover: bool = True,
+                    discovery_failure: Optional[BaseException] = None) -> Optional[_Egress]:
+    """The egress address and country, for ``locale="auto"``; None when the
+    country cannot be known.
 
     PRIVATE, and only :func:`invisible_core._locale.decide_session_locale`
-    calls it: the tag it returns is an INPUT to the decision, not a value any
-    consumer may read. Until 36.x this was the public `resolve_session_locale`,
-    and every consumer that read its raw tag derived values from it that the
-    table then contradicted (an Australian egress: "en-AU" here, "en-US"
-    first in the list navigator.languages is split from).
+    calls it: the country is an INPUT to the decision, not a value any consumer
+    may read. Until 36.x a tag took its place (the public
+    `resolve_session_locale`), and every consumer that read the raw tag derived
+    values the table then contradicted.
 
     Behind a proxy it reuses the already-discovered ``egress_ip`` (no extra
     round-trip); without a proxy it discovers the host's public IP when it was
     not handed one and ``may_discover`` allows it. On any failure it returns
-    ``en-US`` and says so on stderr (never breaks launch - locale is cosmetic,
-    unlike timezone which traps a foreign-proxy mismatch).
+    None and says so on stderr; the decision then takes en-US (never breaks
+    launch - locale is cosmetic, unlike timezone which traps a foreign-proxy
+    mismatch).
     """
-    from ._locale import DEFAULT_LOCALE
     from .download import ensure_geoip_mmdb
 
     try:
@@ -626,11 +619,15 @@ def _egress_locale_tag(egress_ip: Optional[str], proxy: Optional[Dict[str, str]]
                    if discovery_failure is not None
                    else "no egress IP was resolved")
             _warn_locale_fallback(proxy, why)
-            return DEFAULT_LOCALE
-        return ip_to_locale(ip, ensure_geoip_mmdb())
+            return None
+        country = ip_to_country(ip, ensure_geoip_mmdb())
+        if country is None:
+            _warn_locale_fallback(proxy, f"the geo DB has no country for {ip}")
+            return None
+        return _Egress(ip, country)
     except Exception as exc:  # noqa: BLE001
         _warn_locale_fallback(proxy, f"{type(exc).__name__}: {exc}")
-        return DEFAULT_LOCALE
+        return None
 
 
 def _warn_locale_fallback(proxy: Optional[Dict[str, str]], why: str) -> None:
