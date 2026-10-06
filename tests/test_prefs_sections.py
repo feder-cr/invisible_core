@@ -168,12 +168,17 @@ def test_the_locale_override_carries_the_whole_accept_language_list():
     the contradiction itself: a page read "fr" from navigator.language while
     the locale prefs said fr-FR. A French Firefox build's locale is "fr", so
     the first entry is also the faithful value.
+
+    ⛔ AND SINCE 36.33.0 AN EXPLICIT TAG IS THAT FIRST ENTRY: Playwright's
+    contract is that ``locale`` IS navigator.language, so "fr-FR" goes first
+    and the table gives the tail ("fr-FR, fr, en-US, en"). The invariant above
+    is untouched: one value, every name.
     """
     prefs = _locale_prefs("fr-FR")
     assert prefs["juggler.locale.override"] == prefs["intl.accept_languages"]
-    assert prefs["juggler.locale.override"] == "fr, fr-FR, en-US, en"
-    assert prefs["intl.locale.requested"] == "fr"
-    assert prefs["general.useragent.locale"] == "fr"
+    assert prefs["juggler.locale.override"] == "fr-FR, fr, en-US, en"
+    assert prefs["intl.locale.requested"] == "fr-FR"
+    assert prefs["general.useragent.locale"] == "fr-FR"
 
 
 @pytest.mark.unit
@@ -188,6 +193,10 @@ def test_the_primary_tag_of_the_list_is_what_every_tag_shaped_pref_says():
         requested fr-FR -> list "fr, fr-FR, en-US, en" -> primary fr
         requested en-AU -> list "en-US, en"            -> primary en-US
 
+    (that was the table taken whole, until 36.32.x; since 36.33.0 the
+    requested tag goes first and the table gives the tail, so the primary IS
+    the requested tag)
+
     Until 36.x this test was named "the primary tag of the list is not always
     the requested locale" and asserted that `intl.locale.requested` DIFFERED
     from the primary for fr-FR, leaving the remedy open. The remedy went into
@@ -195,7 +204,7 @@ def test_the_primary_tag_of_the_list_is_what_every_tag_shaped_pref_says():
     tag-shaped value is the primary, so navigator.language, Intl and the
     locale prefs give one answer.
     """
-    for tag, primary in (("it-IT", "it-IT"), ("fr-FR", "fr"), ("en-AU", "en-US")):
+    for tag, primary in (("it-IT", "it-IT"), ("fr-FR", "fr-FR"), ("en-AU", "en-AU")):
         prefs = _locale_prefs(tag)
         first = prefs["juggler.locale.override"].split(",")[0].strip()
         assert first == primary, tag
