@@ -60,6 +60,38 @@ class ScreenProfile:
     window_x: int = 0
     window_y: int = 0
 
+    # ⛔ `width` AND `height` ARE THE PANEL, IN DEVICE PIXELS: the screen table
+    # samples real displays (a 1920x1080 laptop at 125%, a 3840x2160 monitor at
+    # 150%). A page reads CSS pixels, and Windows Firefox divides the panel by
+    # the scale: measured on retail 151 on 2026-10-08, a 2048x1280 panel reports
+    # 2048x1280 at 100%, 1638x1024 at 125%, 1365x853 at 150%, 1024x640 at 200%.
+    # Until 37.33.0 the panel itself went out as CSS, so a DPR 1.25 persona
+    # reported screen.width 1920 beside devicePixelRatio 1.25 - a 2400x1350
+    # display, which no machine has - in about 8% of seeds. Every CSS size is
+    # derived HERE and nowhere else (rule 16): the engine's screen and the
+    # browser context's screen and viewport all read these.
+    def _css(self, device: int) -> int:
+        """Device pixels to CSS pixels, rounded as Gecko rounds them."""
+        return int(device / self.dpr + 0.5)
+
+    @property
+    def css_width(self) -> int:
+        """`screen.width` as a page reads it."""
+        return self._css(self.width)
+
+    @property
+    def css_height(self) -> int:
+        """`screen.height` as a page reads it."""
+        return self._css(self.height)
+
+    @property
+    def viewport(self) -> tuple:
+        """The content area of the maximized window: the screen minus the
+        taskbar and the window chrome, all in CSS pixels (the taskbar is 48 CSS
+        at every scale, measured on retail 151)."""
+        return (self.css_width - self.chrome_w,
+                self.css_height - self.taskbar_px - self.chrome_h)
+
 
 @dataclass(frozen=True)
 class HardwareProfile:

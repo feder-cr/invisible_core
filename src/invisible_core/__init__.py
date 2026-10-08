@@ -26,6 +26,7 @@ from ._fpforge import (
 )
 from ._webgl_personas import forced_gpu_class, select_persona, render_noise_seed
 from .prefs import (
+    context_geometry,
     ComposedPrefs,
     compose_session_prefs,
     humanize_prefs,
@@ -93,6 +94,7 @@ __all__ = [
     # prefs
     "translate_profile_to_prefs",
     "compose_session_prefs",
+    "context_geometry",
     "ComposedPrefs",
     "humanize_prefs",
     "get_default_stealth_prefs",

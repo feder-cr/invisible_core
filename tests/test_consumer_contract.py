@@ -155,6 +155,10 @@ CONTRACT = {
         # this contract exists to know. A contract that over-claims freezes
         # this package for nobody.
         "compose_session_prefs",
+        # context_geometry joined in 37.33.0, replacing the same three lines in
+        # each client that computed the default context's screen and viewport
+        # from the panel's device pixels.
+        "context_geometry",
         # consent_region_lang joined on 2026-08-09, when it DELETED a table in
         # the wrapper (`_TZ_TO_REGION`, 22 IANA zones for the CONSENT cookie),
         # and left in 36.x with the cookie builder itself: the token is now
