@@ -42,8 +42,34 @@ def test_translate_includes_gpu_renderer_windows(monkeypatch):
 def test_translate_includes_screen():
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p)
-    assert prefs["zoom.stealth.screen.width"] == p.screen.width
-    assert prefs["zoom.stealth.screen.height"] == p.screen.height
+    assert prefs["zoom.stealth.screen.width"] == p.screen.css_width
+    assert prefs["zoom.stealth.screen.height"] == p.screen.css_height
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("panel,dpr,css", [
+    # measured on retail Firefox 151, Windows 11, 2026-10-08: a 2048x1280 panel
+    ((2048, 1280), 1.0, (2048, 1280)), ((2048, 1280), 1.25, (1638, 1024)),
+    ((2048, 1280), 1.5, (1365, 853)), ((2048, 1280), 2.0, (1024, 640)),
+    # the panels the screen table samples at a scale above 100%
+    ((1920, 1080), 1.25, (1536, 864)), ((2560, 1440), 1.25, (2048, 1152)),
+    ((3840, 2160), 1.5, (2560, 1440)),
+])
+def test_the_screen_a_page_reads_is_the_panel_divided_by_the_scale(panel, dpr, css):
+    """Known-bad until 37.33.0: the panel went out as CSS, so a 1920x1080 panel
+    at 125% reported screen.width 1920 beside devicePixelRatio 1.25 - a
+    2400x1350 display no machine has."""
+    from invisible_core import context_geometry
+
+    p = generate_profile(seed=7, pin={"screen.width": panel[0], "screen.height": panel[1],
+                                      "screen.dpr": dpr})
+    prefs = translate_profile_to_prefs(p)
+    assert (prefs["zoom.stealth.screen.width"], prefs["zoom.stealth.screen.height"]) == css
+    geometry = context_geometry(p)
+    assert geometry["screen"] == {"width": css[0], "height": css[1]}
+    assert geometry["viewport"] == {
+        "width": css[0] - p.screen.chrome_w,
+        "height": css[1] - p.screen.taskbar_px - p.screen.chrome_h}
 
 
 @pytest.mark.unit

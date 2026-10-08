@@ -1196,8 +1196,11 @@ def _apply_canvas_and_msaa(prefs: Dict[str, Any], profile: Profile) -> None:
 
 
 def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
-    prefs["zoom.stealth.screen.width"]        = profile.screen.width
-    prefs["zoom.stealth.screen.height"]       = profile.screen.height
+    # CSS pixels: the engine returns these to the page as they are (nsScreen),
+    # and derives the available rect and the window from them. The profile's
+    # width/height are the PANEL; see ScreenProfile.css_width.
+    prefs["zoom.stealth.screen.width"]        = profile.screen.css_width
+    prefs["zoom.stealth.screen.height"]       = profile.screen.css_height
     prefs["zoom.stealth.screen.color_depth"]  = profile.screen.color_depth
     prefs["zoom.stealth.screen.taskbar_px"]   = profile.screen.taskbar_px
     # The window geometry. Four values because three getters read them in
@@ -1221,6 +1224,22 @@ def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
     # DEAD: appears in NO file of the engine source; the DPR that reaches a page comes from layout.css.devPixelsPerPx on the line below.
     # prefs["zoom.stealth.screen.dpr"]          = profile.screen.dpr
     prefs["layout.css.devPixelsPerPx"]        = str(profile.screen.dpr)
+
+
+def context_geometry(profile: Profile) -> Dict[str, Dict[str, int]]:
+    """The screen and viewport a browser context declares for this persona, in
+    CSS pixels: ``{"viewport": {...}, "screen": {...}}``.
+
+    The one derivation, read by every client for its default context. Until
+    37.33.0 invisible_playwright, invisible_selenium and invisible_puppeteer
+    each computed it from ``profile.screen`` with the same three lines - and
+    all three took the PANEL's device pixels for CSS, which is
+    ScreenProfile.css_width's story.
+    """
+    width, height = profile.screen.viewport
+    return {"viewport": {"width": width, "height": height},
+            "screen": {"width": profile.screen.css_width,
+                       "height": profile.screen.css_height}}
 
 
 def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
