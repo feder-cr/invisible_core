@@ -43,6 +43,7 @@ import secrets
 import select
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Set as AbstractSet
 from typing import Optional
@@ -80,6 +81,34 @@ _X_SOCKET = re.compile(r"@?/tmp/\.X11-unix/X(\d+)")
 _FIRST_DISPLAY = 99
 _LAST_DISPLAY = 399
 _ATTEMPTS = 10
+
+#: The one authorization protocol Xvfb and every X client share.
+_COOKIE_NAME = b"MIT-MAGIC-COOKIE-1"
+#: libXau's FamilyWild: the entry matches any address. With an empty display
+#: number it also matches any display, so one entry serves whatever number the
+#: picker lands on.
+_FAMILY_WILD = 0xFFFF
+
+
+def _write_xauthority(path: str, cookie: bytes) -> None:
+    """Write a one-entry Xauthority file, readable by its owner only.
+
+    The format is libXau's: family, then address, display number, auth name
+    and auth data, each a 16-bit big-endian length and its bytes. Written here
+    instead of with the ``xauth`` tool, which would be one more package to
+    install for nothing.
+    """
+    def field(b: bytes) -> bytes:
+        return len(b).to_bytes(2, "big") + b
+
+    record = (_FAMILY_WILD.to_bytes(2, "big") + field(b"") + field(b"")
+              + field(_COOKIE_NAME) + field(cookie))
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(fd, record)
+    finally:
+        os.close(fd)
+
 
 #: How long a spawned Xvfb has to report that it is listening. Death is seen
 #: at once (end of file on the pipe), so this bounds only a server that
@@ -161,6 +190,8 @@ class _LinuxVirtualDisplay:
         self._geometry = f"{width}x{height}x24"
         self._proc: Optional[subprocess.Popen] = None
         self._display: Optional[str] = None
+        self._auth_dir: Optional[str] = None
+        self._auth_file: Optional[str] = None
 
     def start(self) -> None:
         if not _binary_on_path("Xvfb"):
@@ -168,6 +199,22 @@ class _LinuxVirtualDisplay:
                 "invisible_playwright headless=True requires Xvfb. "
                 "Install it: sudo apt install xvfb"
             )
+        # ⛔ ACCESS CONTROL STAYS ON. The server used to run with ``-ac``: any
+        # process in this network namespace, of any user, could connect to
+        # the abstract socket (abstract sockets have no file permissions) and
+        # read or drive the browser's screen. Now the server loads a random
+        # cookie from a file only this user can read, and only the browser,
+        # whose environment names that file, presents it.
+        self._auth_dir = tempfile.mkdtemp(prefix="invpw-xauth-")
+        self._auth_file = os.path.join(self._auth_dir, "Xauthority")
+        _write_xauthority(self._auth_file, secrets.token_bytes(16))
+        try:
+            self._start_server()
+        except BaseException:
+            self._remove_auth()
+            raise
+
+    def _start_server(self) -> None:
         # The filters in _pick_display cannot see everything: two sessions
         # can pick the same number before either server has its sockets, and
         # an X server can hold a number in a way no table here shows. Either
@@ -219,6 +266,10 @@ class _LinuxVirtualDisplay:
         display holds one unix connection and no TCP one, with TCP on or
         off). It was also one more way to collide: a listener on [::]:6000+n
         made this Xvfb exit.
+
+        Access control is on: ``-auth`` loads the session's cookie (see
+        ``start``). Until 37.33.0 it was ``-ac``, so with TCP gone the abstract
+        socket was still open, without credentials, to every local process.
         """
         read_end, write_end = os.pipe()
         try:
@@ -231,7 +282,7 @@ class _LinuxVirtualDisplay:
                     "+extension", "RENDER",
                     "-nolisten", "unix",
                     "-nolisten", "tcp",
-                    "-ac",
+                    "-auth", self._auth_file,
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -301,7 +352,8 @@ class _LinuxVirtualDisplay:
     def launch_env(self) -> dict:
         """What the browser's environment must carry to draw on this Xvfb.
 
-        ``DISPLAY`` names the display, the two GTK/Firefox switches keep the
+        ``DISPLAY`` names the display, ``XAUTHORITY`` the file holding the
+        cookie the server asks for, the two GTK/Firefox switches keep the
         toolkit on X11, and the five Wayland variables are named with ``None``
         so the launcher REMOVES them: inherited from WSLg or GNOME they make
         Firefox prefer the compositor over the display we set, and the window
@@ -312,6 +364,7 @@ class _LinuxVirtualDisplay:
             return {}
         env: dict = {
             "DISPLAY": self._display,
+            "XAUTHORITY": self._auth_file,
             "MOZ_ENABLE_WAYLAND": "0",
             "GDK_BACKEND": "x11",
         }
@@ -329,6 +382,23 @@ class _LinuxVirtualDisplay:
                 self._proc.wait(timeout=2)
         self._proc = None
         self._display = None
+        self._remove_auth()
+
+    def _remove_auth(self) -> None:
+        """Delete the cookie file and its private directory: the cookie is
+        this server's, and dies with it."""
+        if self._auth_file is not None:
+            try:
+                os.remove(self._auth_file)
+            except OSError:
+                pass
+            self._auth_file = None
+        if self._auth_dir is not None:
+            try:
+                os.rmdir(self._auth_dir)
+            except OSError:
+                pass
+            self._auth_dir = None
 
 
 class _WindowsVirtualDesktop:

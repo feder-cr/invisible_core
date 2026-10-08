@@ -787,6 +787,138 @@ def test_the_display_is_not_on_the_network():
         vd.stop()
 
 
+def _x_setup_status(display: str, cookie: bytes = b"") -> int:
+    """Open the display's abstract socket and send the X11 connection setup,
+    with ``cookie`` as MIT-MAGIC-COOKIE-1 or no authorization at all. Returns
+    the server's first reply byte: 1 accepted, 0 refused, 2 authenticate.
+    Spoken by hand so the test needs no X client package on the host."""
+    import socket
+    import struct
+
+    def padded(b):
+        return b + b"\0" * (-len(b) % 4)
+
+    name = b"MIT-MAGIC-COOKIE-1" if cookie else b""
+    request = (struct.pack("<BxHHHHxx", ord("l"), 11, 0, len(name), len(cookie))
+               + padded(name) + padded(cookie))
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect("\0/tmp/.X11-unix/X" + display[1:])
+        s.sendall(request)
+        return s.recv(1)[0]
+    finally:
+        s.close()
+
+
+@pytest.mark.e2e
+@pytest.mark.linux_only
+@real_xvfb
+def test_the_display_refuses_a_client_without_the_session_cookie():
+    """⛔ Known-bad until 37.33.0: the server ran with ``-ac``, so with TCP gone
+    the abstract socket still let every local process, of any user, read and
+    drive the browser's screen with no credential. Now only the cookie in the
+    session's Xauthority file opens it."""
+    vd = _LinuxVirtualDisplay()
+    vd.start()
+    try:
+        env = vd.launch_env()
+        d = env["DISPLAY"]
+        with open(env["XAUTHORITY"], "rb") as f:
+            cookie = f.read()[-16:]
+        assert _x_setup_status(d) == 0, "a client with no cookie was let in"
+        assert _x_setup_status(d, b"\x00" * 16) == 0, "a wrong cookie was let in"
+        assert _x_setup_status(d, cookie) == 1, "the session's own cookie was refused"
+    finally:
+        vd.stop()
+
+
+def _xvfb_argv(monkeypatch, vd):
+    """The argv ``_spawn`` hands to Popen, captured without starting anything."""
+    seen = {}
+
+    class Captured(Exception):
+        pass
+
+    def popen(argv, **kw):
+        seen["argv"] = argv
+        raise Captured
+
+    monkeypatch.setattr(headless.subprocess, "Popen", popen)
+    with pytest.raises(Captured):
+        vd._spawn(":123")
+    return seen["argv"]
+
+
+@pytest.mark.unit
+def test_xvfb_is_started_off_the_network_and_with_access_control(monkeypatch):
+    """The unit half of the two e2e tests above, which need a real Xvfb and so
+    never run in CI: put ``-listen tcp`` or ``-ac`` back and this goes red on
+    any host."""
+    vd = _LinuxVirtualDisplay()
+    vd._auth_file = "/run/invpw-test/Xauthority"
+    argv = _xvfb_argv(monkeypatch, vd)
+    pairs = list(zip(argv, argv[1:]))
+    assert ("-nolisten", "tcp") in pairs, argv
+    assert "-ac" not in argv, "access control is off again"
+    assert ("-auth", vd._auth_file) in pairs, argv
+    assert "-listen" not in argv, argv
+
+
+def _stub_one_start(monkeypatch):
+    monkeypatch.setattr(headless, "_binary_on_path", lambda name: True)
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_pick_display",
+                        lambda self, exclude=frozenset(): ":123")
+    fake_proc = type("P", (), {"poll": lambda self: 0})()
+
+    def spawn(self, display):
+        self._proc = fake_proc
+        return display
+
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_spawn", spawn)
+
+
+@pytest.mark.unit
+def test_each_session_gets_its_own_private_cookie_and_loses_it_at_stop(monkeypatch):
+    _stub_one_start(monkeypatch)
+    cookies = []
+    for _ in range(2):
+        vd = _LinuxVirtualDisplay()
+        vd.start()
+        path = vd.launch_env()["XAUTHORITY"]
+        data = open(path, "rb").read()
+        # libXau record: family, address, number, name, data; each 16-bit BE length
+        assert data[:2] == b"\xff\xff", "not a FamilyWild entry"
+        assert data[2:6] == b"\0\0\0\0", "address and display number must be empty"
+        assert data[6:8] == (18).to_bytes(2, "big") and data[8:26] == b"MIT-MAGIC-COOKIE-1"
+        assert data[26:28] == (16).to_bytes(2, "big") and len(data) == 44
+        cookies.append(data[28:])
+        if os.name == "posix":
+            assert os.stat(path).st_mode & 0o077 == 0, "the cookie is readable by others"
+        folder = os.path.dirname(path)
+        vd.stop()
+        assert not os.path.exists(path) and not os.path.exists(folder)
+        assert vd.launch_env() == {}
+    assert cookies[0] != cookies[1], "two sessions share a cookie"
+
+
+@pytest.mark.unit
+def test_a_display_that_never_starts_leaves_no_cookie_behind(monkeypatch):
+    made = []
+    real_mkdtemp = headless.tempfile.mkdtemp
+
+    def mkdtemp(**kw):
+        made.append(real_mkdtemp(**kw))
+        return made[-1]
+
+    monkeypatch.setattr(headless.tempfile, "mkdtemp", mkdtemp)
+    _only_these_locks(monkeypatch)
+    _proc(monkeypatch)
+    _stub_start(monkeypatch, failing={f":{n}" for n in range(99, 400)})
+    with pytest.raises(RuntimeError, match="after 10 attempts"):
+        _LinuxVirtualDisplay().start()
+    assert made and not os.path.exists(made[0])
+
+
 @pytest.mark.e2e
 @pytest.mark.linux_only
 @real_xvfb
