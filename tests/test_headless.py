@@ -902,6 +902,22 @@ def test_each_session_gets_its_own_private_cookie_and_loses_it_at_stop(monkeypat
 
 
 @pytest.mark.unit
+def test_a_cookie_with_newline_bytes_is_written_byte_for_byte(tmp_path):
+    """The file holds exactly the record, whatever bytes the cookie has.
+
+    A random cookie containing 0x0a was written through a text-mode
+    descriptor on Windows and came out one byte longer ("\\r\\n"), so the
+    length field lied. It showed up as a Windows CI red one run in eight;
+    this cookie carries the two bytes every time."""
+    cookie = b"\n\r" + bytes(range(14))
+    path = tmp_path / "Xauthority"
+    headless._write_xauthority(str(path), cookie)
+    data = path.read_bytes()
+    assert len(data) == 2 + 2 + 2 + 2 + 18 + 2 + 16
+    assert data[-18:] == (16).to_bytes(2, "big") + cookie
+
+
+@pytest.mark.unit
 def test_a_display_that_never_starts_leaves_no_cookie_behind(monkeypatch):
     made = []
     real_mkdtemp = headless.tempfile.mkdtemp

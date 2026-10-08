@@ -103,7 +103,11 @@ def _write_xauthority(path: str, cookie: bytes) -> None:
 
     record = (_FAMILY_WILD.to_bytes(2, "big") + field(b"") + field(b"")
               + field(_COOKIE_NAME) + field(cookie))
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    # O_BINARY: on Windows `os.open` is a TEXT-mode descriptor by default, and a
+    # random cookie byte 0x0a went out as "\r\n", one byte longer than the
+    # length field says (Windows CI, one run in eight, 2026-10-08). It exists
+    # only on Windows; elsewhere the flag is 0 and changes nothing.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
     try:
         os.write(fd, record)
     finally:
