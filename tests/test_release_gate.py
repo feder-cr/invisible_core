@@ -148,8 +148,15 @@ def set_core_revision(root: Path, value: int) -> None:
 
 def _copy_repo(dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("pyproject.toml", "README.md", "LICENSE"):
-        shutil.copy2(REPO_ROOT / name, dest / name)
+    # The root files are the ones the sdist ships, read from pyproject: a
+    # second list here went stale the day a license file was added, and the
+    # build in the copy then died on a `license-files` entry it could not find.
+    import tomllib
+    with open(REPO_ROOT / "pyproject.toml", "rb") as f:
+        shipped = tomllib.load(f)["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+    for name in shipped:
+        if (REPO_ROOT / name).is_file():
+            shutil.copy2(REPO_ROOT / name, dest / name)
     shutil.copytree(REPO_ROOT / "src", dest / "src", ignore=_IGNORE)
     shutil.copytree(REPO_ROOT / "tests", dest / "tests", ignore=_IGNORE)
     # The ledger is never copied from the real repo (it would make these tests

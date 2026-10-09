@@ -16,7 +16,8 @@ import types
 import pytest
 
 from invisible_core import SessionLocale, decide_session_locale, persona_cookies
-from invisible_core._cookies import CONSENT_REGION_COUNTRIES, _sub_seed
+from invisible_core._cookies import CONSENT_REGION_COUNTRIES
+from invisible_core.seedmix import sub_seed
 
 pytestmark = pytest.mark.unit
 
@@ -135,9 +136,9 @@ def test_history_order_does_not_affect_domain_specific_cookies():
 
 
 def test_sub_seed_distinct_tags_distinct_streams():
-    assert _sub_seed(42, "google") != _sub_seed(42, "dom:github.com")
-    assert _sub_seed(42, "dom:github.com") != _sub_seed(42, "dom:amazon.com")
-    assert _sub_seed(0, "any") != 0  # seed=0 still produces a non-zero sub-seed
+    assert sub_seed(42, "google") != sub_seed(42, "dom:github.com")
+    assert sub_seed(42, "dom:github.com") != sub_seed(42, "dom:amazon.com")
+    assert sub_seed(0, "any") != 0  # seed=0 still produces a non-zero sub-seed
 
 
 def test_the_sub_seed_values_the_consumers_shipped_are_unchanged():
@@ -147,7 +148,7 @@ def test_the_sub_seed_values_the_consumers_shipped_are_unchanged():
     h = 0xCBF29CE484222325 ^ 42
     for c in b"google":
         h = ((h ^ c) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    assert _sub_seed(42, "google") == h
+    assert sub_seed(42, "google") == h
 
 
 # ===========================================================================

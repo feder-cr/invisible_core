@@ -68,7 +68,14 @@ _RELEASE = pathlib.Path(__file__).resolve().parents[2]
 #: keeping it: every one of them pins `invisible-core==` to an exact version, so
 #: they resolve the core they were released against and cannot be broken by a
 #: name leaving this package now.
-_CONSUMERS = ("invisible_playwright",)
+#:
+#: THREE again since 38.34.0, when the Juggler client moved here from
+#: invisible-playwright, invisible-selenium and invisible-puppeteer (decision
+#: D85). The two siblings pin `invisible-core==` exactly, the same way, and from
+#: that release on they import the client from this package: a name leaving
+#: `invisible_core.juggler` breaks all three at import time, so all three are
+#: read.
+_CONSUMERS = ("invisible_playwright", "invisible_selenium", "invisible_puppeteer")
 
 #: Frozen 2026-07-27 from the two consumers' sources. Every name here is imported
 #: at least once by shipped consumer code - not by their tests, which may reach
@@ -76,12 +83,24 @@ _CONSUMERS = ("invisible_playwright",)
 CONTRACT = {
     "invisible_core": {
         "BINARY_VERSION", "FIREFOX_UPSTREAM_VERSION", "GeoTimezoneError",
-        # ⛔ The name of the desktop the browser is created on, read by the
-        # wrapper's spawner since 2026-09-20 (`_juggler/connection.py`). It is
-        # a contract between the two packages the way `INVPW_SESSION_TOKEN`
-        # is: an older wrapper reading a renamed variable creates the browser
-        # on the visible desktop with no error anywhere.
-        "DESKTOP_ENV",
+        # `DESKTOP_ENV` LEFT in 38.34.0. It was here because the wrapper's
+        # spawner read it (`_juggler/connection.py`), and the spawner moved
+        # into this package with the rest of the Juggler client: the name and
+        # the variable it names are now read on both sides from here, so no
+        # consumer imports it. Still exported, still `_headless.DESKTOP_ENV`.
+        #
+        # `SessionLocale` JOINED in 38.34.0, and it was late: all three
+        # consumers had imported it since 36.x (the type of
+        # `prepare_session_geo(...).locale`), and the frozen list never said
+        # so, because the live cross-check below had been reading one consumer
+        # and nobody ran it against that one.
+        "SessionLocale",
+        # The Juggler client's package and the one `user.js` writer, both
+        # since 38.34.0. `juggler` is imported as a module by the wrapper's
+        # cursor, which looks the motion generator up on it by name;
+        # `write_user_js` replaced the client's own `_write_user_js`, which
+        # wrote the same lines with different line endings.
+        "juggler", "write_user_js",
         # THE ONE LANGUAGE DECISION, since 36.x. `accept_languages` (the bare
         # table, public for one unreleased commit for the wrapper's server),
         # `resolve_session_locale` (a raw tag every consumer wrapped in its own
@@ -93,7 +112,9 @@ CONTRACT = {
         # context's tag with `decide_session_locale(tag).accept_languages`,
         # and take the cookie data from `persona_cookies`. BREAKING: the
         # consumers' pins move with this core.
-        "decide_session_locale",
+        # `decide_session_locale` LEFT in 38.34.0: no consumer's shipped code
+        # names it any more (they read `prepare_session_geo(...).locale`).
+        # Still exported and tested here; out of the contract only.
         "persona_cookies",
         "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
@@ -256,6 +277,36 @@ CONTRACT = {
         "TOKEN_VAR", "alive", "find_processes", "guard_for", "psutil",
         "terminate", "wait_until_gone",
     },
+    # ── the Juggler client, since 38.34.0 (decision D85) ───────────────────
+    # What the three wrappers load from the client they used to carry each.
+    # ⛔ ONLY PUBLIC NAMES, and that was a choice made before the first
+    # release that shipped them: the wrappers' copies imported four private
+    # modules (`_behaviour`, `_motion`, `_pacing`, `_profile`) and six
+    # underscore functions, and listing those here would have made a refactor
+    # that looks internal break three published packages. The modules keep
+    # their underscore; the package re-exports the names, and the six
+    # functions lost theirs (`write_user_js` became the core's existing one).
+    "invisible_core.juggler": {
+        "connection",
+        "PageActs", "PointerPersona", "Step", "initial_pointer",
+        "landing_point", "plan_aimless_move", "plan_approach", "plan_idle",
+        "plan_scroll", "popup_number", "steps_from_waypoints", "tail_within",
+        "CursorMotion",
+        "DONE", "MIN_EVENT_INTERVAL_MS", "SLEEP", "Ev", "Pacer",
+        "clamp_to_viewport", "fine_timer", "fit_timeline",
+        "domain_matches", "host_of", "only_set", "read_version",
+        "remove_profile",
+    },
+    "invisible_core.juggler.actions": {"Actions"},
+    "invisible_core.juggler.connection": {"ProtocolError", "TargetClosedError"},
+    "invisible_core.juggler.injected": {
+        "EvaluationError", "InjectedScript", "UTILITY_WORLD",
+    },
+    "invisible_core.juggler.keyboard": {"BUTTON_MASK", "MODIFIER_MASK"},
+    "invisible_core.juggler.lifecycle": {"Lifecycle", "NavigationError"},
+    # The one seed mixer: the wrapper's cursor seeds its per-action streams
+    # with it, as it did with the pointer planner's copy before 38.34.0.
+    "invisible_core.seedmix": {"sub_seed"},
     "invisible_core.seal": {
         # engine_problems joined on 2026-08-01, with iter_cached_engines above:
         # the wrapper's `fetch` checks every cached tree against the seal on
@@ -289,8 +340,9 @@ def test_every_name_a_consumer_imports_still_exists(module, names):
     missing = sorted(n for n in names if not hasattr(mod, n))
     assert not missing, (
         f"{module} no longer provides {missing}, and shipped code in "
-        f"invisible-playwright imports it at module level.\n"
-        f"That package pins invisible-core to an exact version, so this is not "
+        f"one of the consumers (invisible-playwright, invisible-selenium, "
+        f"invisible-puppeteer) imports it.\n"
+        f"They pin invisible-core to an exact version, so this is not "
         f"a build failure for it - it is an ImportError naming a symbol, on "
         f"the machine of whoever upgrades next.\n"
         f"Put it back, or delete its row from CONTRACT in the same commit as the "

@@ -13,34 +13,66 @@ from typing import Any, Dict, List, Optional
 from ._headless import DESKTOP_ENV
 
 
-def _pref_literal(v: Any) -> str:
+def _pref_literal(name: str, v: Any) -> str:
     """Serialize a pref value the way Firefox's prefs parser accepts it.
 
     Firefox prefs are int / bool / string only - there is no float pref type;
     a fractional value (e.g. device-pixel-ratio) is stored as a STRING and the
     float pref parses it back. ``json.dumps`` would emit a bare ``1.25``, which
     Firefox rejects with ``prefs parse error: unexpected character`` and which
-    invalidates every ``user_pref`` line after it. (bool is a subclass of int
-    but ``json.dumps`` already maps it to ``true``/``false``, so it is handled
-    before the float check matters.)
+    invalidates every ``user_pref`` line after it. That is not hypothetical:
+    ``ui.textScaleFactor`` written as a number once killed the browser on the
+    second context, and the failure looked nothing like a prefs problem.
+
+    ⛔ ANY OTHER TYPE IS REFUSED HERE, not written. ``None`` or a list came out
+    as ``null`` / ``[...]``, the same parse error, and the Juggler client's own
+    writer turned them into the string ``"None"`` instead - a pref that exists
+    with a value nobody asked for. Neither occurs in what the core composes
+    (bool, int and str over 300 seeds, measured when the writers became one);
+    a caller's pref of another type is a mistake to say, at its birth.
     """
-    if isinstance(v, float):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, (float, str)):
         return json.dumps(str(v))
-    return json.dumps(v)
+    raise TypeError("pref %r is a %s; Firefox prefs are bool, int or string "
+                    "(a fraction is written as a string)" % (name, type(v).__name__))
 
 
 def write_user_js(profile_dir: "str | os.PathLike[str]", prefs: Dict[str, Any]) -> Path:
     """Write ``prefs`` as ``user_pref(...)`` lines into ``<profile_dir>/user.js``.
 
     Creates ``profile_dir`` if missing; overwrites any existing ``user.js``.
-    Values are serialized so Python ``True``/strings/ints/floats map to what
-    Firefox expects (``true``/quoted-strings/numbers, floats as strings).
+
+    ⛔ THE ONE WRITER, since 38.34.0. The Juggler client carried its own
+    (`_write_user_js`), which every wrapper's launch went through, while this
+    one served the direct launch: they agreed on the lines and differed on the
+    bytes, because this one wrote in text mode and Windows turned every newline
+    into CRLF. They became one when the client moved here (decision D85).
+
+    ⛔ THE PREFS ARE WRITTEN, NOT SENT, and BEFORE the browser starts. Our fork
+    removed prefs from the protocol - `Browser.enable` does not accept them -
+    because a browser configured on the second launch was wrong on the first.
+    The Python path once threw `firefoxUserPrefs` away and started Firefox on
+    an empty profile: everything worked, every test was green, and every
+    stealth declaration was absent. A closed shadow root made it visible, since
+    the patch that reaches inside one is gated on a pref.
+
+    ⛔ INSERTION ORDER, NO HEADER, LF ONLY, and the reason is one: the file has
+    to match what Playwright's driver writes BYTE FOR BYTE (its `defaultArgs`
+    uses `Object.keys()` and writes no comment), and the wrapper's
+    `tests/gates/prefs_byte_parity.py` is the judge. Sorting produces a file
+    that is equally correct and not identical, which that gate caught on its
+    first real run. Bytes, not text: a text-mode write on Windows translates
+    every newline, and a prefs file is read by the browser, not by git.
     """
     d = Path(profile_dir)
     d.mkdir(parents=True, exist_ok=True)
     out = d / "user.js"
-    lines = [f"user_pref({json.dumps(k)}, {_pref_literal(v)});" for k, v in prefs.items()]
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines = [f"user_pref({json.dumps(k)}, {_pref_literal(k, v)});" for k, v in prefs.items()]
+    out.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
     return out
 
 

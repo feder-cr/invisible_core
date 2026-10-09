@@ -3,7 +3,9 @@
 Pure config for a patched Firefox stealth profile - **zero Playwright dependency**.
 
 `seed → fingerprint profile → Firefox prefs`, plus patched-binary download,
-proxy config, and geo/timezone resolution. Importing it does not start a browser,
+proxy config, geo/timezone resolution, and `invisible_core.juggler`: the client
+that drives the engine over its own protocol, with the human input rhythm, which
+every wrapper below shares instead of carrying a copy. Importing it does not start a browser,
 which is the point: the same fingerprint config backs an automation wrapper and,
 through it, an MCP server, without either depending on the other.
 
@@ -13,7 +15,10 @@ through it, an MCP server, without either depending on the other.
 The shared foundation used by:
 
 - **[invisible_playwright](https://github.com/feder-cr/invisible_playwright)** - the
-  Playwright automation wrapper (`InvisiblePlaywright`). The only direct consumer.
+  Playwright automation wrapper (`InvisiblePlaywright`).
+- **[invisible_selenium](https://github.com/feder-cr/invisible_selenium)** and
+  **[invisible_puppeteer](https://github.com/feder-cr/invisible_puppeteer)** - the
+  Selenium and pyppeteer APIs on the same engine.
 
 And through it, for anyone who would rather prompt than script:
 
