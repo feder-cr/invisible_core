@@ -30,7 +30,6 @@ import time
 from typing import Optional
 
 from . import _pacing
-from .connection import Interrupted
 from .injected import EvaluationError
 from .keyboard import BUTTON_MASK, Keyboard, UnknownKey
 
@@ -114,10 +113,11 @@ class Actions:
     #: draws it, for a client with no cursor of its own (Selenium, Puppeteer).
     engine_approach = False
 
-    #: Whether a dialog has opened on this page. A client that listens for
-    #: `Page.dialogOpened` replaces it (Selenium's WebDriver does); the default
-    #: says never. See `_act_on_target`.
-    dialog_opened = staticmethod(lambda: False)
+    #: While an action commits on an element, that element as (frame id,
+    #: object id): every mouse event the commit sends asks the engine where it
+    #: LANDED, and the answers are kept in `_landings` by event type. None
+    #: outside a commit. See `_act_on_target`.
+    _landing_target = None
 
     def __init__(self, connection, session: str, lifecycle, injected, *,
                  acts, session_seed=None, motion_budget_s=None,
@@ -545,34 +545,34 @@ class Actions:
             verdict = self.hit_target(f, element, point)
             if verdict != "done":
                 raise WrongHitTarget(verdict)
-        result = commit()
-        if not force and lands:
-            # The answer is about THIS commit because the engine answers
-            # `Page.dispatchMouseEvent` only once the page has handled the
-            # event (firefox-39, [B230]): the record the question reads is
-            # complete when it is sent. Until then this question carried the
-            # id of the commit's last event and the engine waited for its ack
-            # here - which covered the element actions and none of the pointer
-            # primitives.
-            #
-            # ⛔ AND A DIALOG THE ACTION OPENED ENDS THE WAIT: a click that
-            # opens `alert()` suspends the page's process inside the dialog,
-            # and this question would wait ten seconds for an answer that
-            # cannot come. The dialog is proof that the action landed.
-            try:
-                answer = self.c.send("Page.pointerLanded",
-                                     {"frameId": f, "objectId": element,
-                                      "types": list(lands)},
-                                     session=self.session, timeout=10,
-                                     abort=self.dialog_opened)
-            except Interrupted:
-                return result
-            missed = [l for l in answer["landings"] if not l["landed"]]
-            if missed:
-                raise ActionMissed(
-                    "the action went out but did not reach the element: "
-                    + "; ".join("%s landed on %s" % (l["type"], l["on"])
-                                for l in missed))
+        if force or not lands:
+            return commit()
+        # ⛔ WHERE EACH EVENT LANDED COMES BACK WITH ITS DISPATCH. While the
+        # commit runs, every mouse event it sends names this element
+        # (`landsOn`): the engine holds the element before the event is sent
+        # and judges the landing when the page handled the event, in the same
+        # turn. A question asked afterwards (`Page.pointerLanded`, until
+        # firefox-39) met whatever the page had become by then - a submit that
+        # navigated had already taken the element away. [B230]
+        self._landing_target, self._landings = (f, element), {}
+        try:
+            result = commit()
+        finally:
+            self._landing_target = None
+        landings = self._landings
+        # ⛔ A DIALOG THE ACTION OPENED ENDS THE ENGINE'S WAIT with no verdict:
+        # the page's process is inside the dialog, and the dialog is the proof
+        # that the action landed.
+        if any(landings.get(kind, False) is None for kind in lands):
+            return result
+        missed = ["%s was never sent" % kind if kind not in landings
+                  else "%s landed on %s" % (kind, landings[kind]["on"])
+                  for kind in lands
+                  if kind not in landings or not landings[kind]["landed"]]
+        if missed:
+            raise ActionMissed(
+                "the action went out but did not reach the element: "
+                + "; ".join(missed))
         return result
 
     # ── waiting ─────────────────────────────────────────────────────────────
@@ -1308,8 +1308,14 @@ class Actions:
         # client sends next is behind it. The engine guarantees it since
         # firefox-39; before, a press could be hit-tested after a scroll sent
         # later on another channel, and a drag never started. [B230]
-        self.c.send("Page.dispatchMouseEvent", p,
-                    session=self.session, timeout=10)
+        if self._landing_target is not None:
+            frame_id, element = self._landing_target
+            p["landsOn"] = {"frameId": frame_id, "objectId": element}
+        answer = self.c.send("Page.dispatchMouseEvent", p,
+                             session=self.session, timeout=10) or {}
+        if self._landing_target is not None:
+            # None when a dialog the event opened ended the engine's wait.
+            self._landings[event_type] = answer.get("landing")
         self.position = (point[0], point[1])
 
     def _type(self, text: str):

@@ -62,7 +62,7 @@ class _Connection:
         # How many mouse events the engine has dispatched.
         self.dispatched = 0
 
-    def send(self, method, params=None, session=None, timeout=None, abort=None):
+    def send(self, method, params=None, session=None, timeout=None):
         # ⛔ CLOSED WORLD, like the engine's `checkScheme`: a field the
         # protocol mirror does not declare is a rejected command, not an
         # ignored field.
@@ -76,8 +76,9 @@ class _Connection:
             self.dispatched += 1
             kind = (params or {}).get("type")
             # ⛔ WHERE AN EVENT LANDS IS DECIDED WHEN IT IS DISPATCHED, and
-            # the engine remembers it: that is what `Page.pointerLanded` reads
-            # back. A page that moves while the pointer travels changes where
+            # the engine says so in the dispatch's own answer when the event
+            # names its element (`landsOn`). A page that moves while the
+            # pointer travels changes where
             # the MOVE lands; a handler on the press changes where the RELEASE
             # lands; a handler on the release changes nothing about the
             # release itself, which is why a button that hides on click is
@@ -91,13 +92,11 @@ class _Connection:
             # handler runs - if the release reached the button at all.
             if kind == "mouseup" and self.page.landed["mouseup"]:
                 self.page.press()
-            return {}
-        if method == "Page.pointerLanded":
-            return {"landings": [
-                {"type": t, "landed": self.page.landed.get(t, False),
-                 "on": "" if self.page.landed.get(t, False)
-                 else "<div id='something-else'>"}
-                for t in (params or {}).get("types", [])]}
+            if "landsOn" not in (params or {}):
+                return {}
+            landed = self.page.landed[kind]
+            return {"landing": {"type": kind, "landed": landed, "seen": 1,
+                                "on": "" if landed else "<div id='something-else'>"}}
         if method == "Page.getContentQuads":
             x, y = POINT
             return {"quads": [{"p1": {"x": x - 10, "y": y - 5},
@@ -294,14 +293,20 @@ def test_every_command_the_click_sends_declares_only_the_engines_fields():
     declare is not ignored, the command is REJECTED, at runtime, in a browser.
     The fake connection of this file refuses the same way (`_Connection.send`), so a
     field the protocol mirror does not declare - `afterEventId`, which left
-    the landing question in firefox-39 when the dispatch itself became ordered
-    [B230] - fails here instead of on the first click of a session."""
+    with `Page.pointerLanded` in firefox-39 [B230] - fails here instead of on
+    the first click of a session.
+
+    And the landing is asked of the events of the COMMIT, in their own
+    dispatch: the press and the release name the element, the approach does
+    not - it is not the action, and it lands wherever the path goes."""
     page = _Page()
     actions = _actions(page)
     actions.click("#b", timeout=2.0)
-    sent = [m for m, _ in actions.c.sent]
-    assert sent.count("Page.dispatchMouseEvent") == 3, "approach, press, release"
-    assert sent[-1] == "Page.pointerLanded", "the question follows the release"
+    mouse = [p for m, p in actions.c.sent if m == "Page.dispatchMouseEvent"]
+    assert [p["type"] for p in mouse] == ["mousemove", "mousedown", "mouseup"]
+    assert "landsOn" not in mouse[0]
+    assert mouse[1]["landsOn"] == mouse[2]["landsOn"] and mouse[1]["landsOn"]["objectId"]
+    assert "Page.pointerLanded" not in [m for m, _ in actions.c.sent]
 
 
 def test_force_makes_a_landing_elsewhere_the_request_and_not_a_miss():

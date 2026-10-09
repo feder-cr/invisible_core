@@ -52,10 +52,6 @@ class ProtocolError(RuntimeError):
     """
 
 
-class Interrupted(ProtocolError):
-    """A wait for a reply ended by the caller's `abort` condition."""
-
-
 class TargetClosedError(Exception):
     """The thing a call was aimed at is gone: a disposed object, or the
     browser itself, whose pipe has closed.
@@ -358,15 +354,13 @@ class Connection(EventListeners):
 
     # ── writing ─────────────────────────────────────────────────────────────
     def send(self, method: str, params: Optional[dict] = None,
-             session: Optional[str] = None, timeout: float = 30.0,
-             abort=None) -> Any:
+             session: Optional[str] = None, timeout: float = 30.0) -> Any:
         """Send a command and wait for its reply.
 
-        `abort` is a callable polled while waiting: when it answers True the
-        wait ends with `Interrupted`. It exists for one case - a command whose
-        reply cannot come because the page's process is suspended inside a
-        modal `alert()` it just opened (Selenium's WebDriver passes it; the
-        Playwright server does not).
+        (Until firefox-39 it also took `abort`, polled while waiting, for one
+        case: the landing question asked after a click whose `alert()` held
+        the page's process. The engine now ends that wait itself, inside the
+        dispatch. [B230])
         """
         if self._closed:
             raise TargetClosedError("the pipe is closed: %s%s"
@@ -397,19 +391,7 @@ class Connection(EventListeners):
             msg["sessionId"] = session
         self._write(msg)
 
-        if abort is None:
-            arrived = ready.wait(timeout)
-        else:
-            deadline = time.monotonic() + timeout
-            arrived = False
-            while not arrived:
-                arrived = ready.wait(min(0.05, max(0.0, deadline - time.monotonic())))
-                if arrived or time.monotonic() >= deadline:
-                    break
-                if abort():
-                    with self._lock:
-                        self._pending.pop(msg_id, None)
-                    raise Interrupted("%s: interrupted while waiting" % method)
+        arrived = ready.wait(timeout)
         if not arrived:
             with self._lock:
                 self._pending.pop(msg_id, None)

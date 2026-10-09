@@ -1,21 +1,23 @@
 """What each client does its own way is an OPTION of the one Juggler client.
 
 Until 38.34.0 these lived in two different copies of the client: the
-Playwright wrapper's had no `abort`, no engine-drawn approach and no
-`glide_to`; Selenium's and Puppeteer's had them and lacked five remedies of the
-wrapper's. One module now carries both halves, so each half is pinned here
-against the module, not against a client.
+Playwright wrapper's had no engine-drawn approach and no `glide_to`; Selenium's
+and Puppeteer's had them and lacked five remedies of the wrapper's. One module
+now carries both halves, so each half is pinned here against the module, not
+against a client. (`Connection.send(abort=...)` was a third option, for the
+landing question after a click whose `alert()` held the page; it left with
+that question in firefox-39, when the engine started ending the wait itself.
+[B230])
 """
 from __future__ import annotations
 
 import os
-import time
 
 import pytest
 
 from invisible_core.juggler._behaviour import PageActs
 from invisible_core.juggler.actions import Actions
-from invisible_core.juggler.connection import Connection, Interrupted, ProtocolError
+from invisible_core.juggler.connection import Connection, ProtocolError
 
 POINT = (300.0, 200.0)
 
@@ -30,16 +32,15 @@ class _Injected:
 
 
 class _Engine:
-    """Answers every mouse event with an id and remembers where it went."""
+    """Answers every mouse event and remembers where it went."""
 
     def __init__(self):
         self.moves: list = []
 
-    def send(self, method, params=None, session=None, timeout=None, abort=None):
+    def send(self, method, params=None, session=None, timeout=None):
         if method == "Page.dispatchMouseEvent":
             if params["type"] == "mousemove":
                 self.moves.append((params["x"], params["y"]))
-            return {"eventId": len(self.moves)}
         return {}
 
 
@@ -99,19 +100,7 @@ def _pipe_connection():
 
 
 @pytest.mark.unit
-def test_an_abort_condition_ends_the_wait_with_Interrupted():
-    """A click that opened `alert()` suspends the page's process: the reply
-    cannot come, and the caller says so with `abort`."""
+def test_a_reply_that_never_comes_is_the_timeout():
     c, keep = _pipe_connection()
-    t0 = time.monotonic()
-    with pytest.raises(Interrupted):
-        c.send("Page.pointerLanded", {}, timeout=10, abort=lambda: True)
-    assert time.monotonic() - t0 < 2
-
-
-@pytest.mark.unit
-def test_without_abort_the_wait_is_the_timeout():
-    c, keep = _pipe_connection()
-    with pytest.raises(ProtocolError) as e:
-        c.send("Page.pointerLanded", {}, timeout=0.2)
-    assert not isinstance(e.value, Interrupted)
+    with pytest.raises(ProtocolError, match="no response"):
+        c.send("Page.dispatchMouseEvent", {}, timeout=0.2)
