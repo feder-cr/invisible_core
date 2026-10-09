@@ -31,6 +31,8 @@ from typing import Any, List, Optional
 
 from ._locale import SessionLocale
 
+from .seedmix import sub_seed
+
 # URL-safe base64 alphabet (no padding chars).
 _B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 _HEX_ALPHABET = "0123456789abcdef"
@@ -91,20 +93,6 @@ def _utc_from(ts: float) -> "datetime.datetime":
     string - the point is that the CI matrix now runs 3.14.
     """
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
-
-
-def _sub_seed(seed: int, tag: str) -> int:
-    """FNV-1a mix -> independent PRNG streams per logical bucket from one seed.
-
-    Its outputs are baked into the seed -> cookie reproducibility the consumers
-    have shipped since the copies were written, so it must not change: the
-    wrapper's cursor tests treat this function as the authoritative FNV mix.
-    """
-    h = 0xcbf29ce484222325 ^ (seed & 0xFFFFFFFF)
-    for c in tag.encode("ascii"):
-        h ^= c
-        h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
-    return h or 0xdeadbeef
 
 
 def _b64_rand(rng: random.Random, length: int) -> str:
@@ -333,12 +321,12 @@ def persona_cookies(profile: Any,
     cookies: List[dict] = []
 
     # 5 .google.com cookies (always) - CONSENT lang from the decided language
-    rng_g = random.Random(_sub_seed(seed, "google"))
+    rng_g = random.Random(sub_seed(seed, "google"))
     cookies.extend(_google_cookies(rng_g, ts, session_locale))
 
     # Per-site cookies (deterministic from seed x domain)
     for site in history:
-        rng_d = random.Random(_sub_seed(seed, f"dom:{site['name']}"))
+        rng_d = random.Random(sub_seed(seed, f"dom:{site['name']}"))
         cookies.extend(_cookies_for_profile(
             site.get("cookie_profile", "minimal"), rng_d, ts, site["name"]
         ))

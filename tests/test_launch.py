@@ -68,6 +68,23 @@ def test_write_user_js_emits_user_pref_lines(tmp_path):
     assert 'user_pref("stealthfox.humanize", true);' in lines
 
 
+def test_write_user_js_writes_lf_bytes_in_insertion_order(tmp_path):
+    """The one writer since 38.34.0: the Juggler client's own wrote bytes, this
+    one wrote text and got CRLF on Windows. The file has to match Playwright's
+    driver byte for byte, which writes LF and keeps the caller's order."""
+    out = write_user_js(tmp_path / "p", {"z.last": 1, "a.first": "x", "m.mid": False})
+    assert out.read_bytes() == (b'user_pref("z.last", 1);\nuser_pref("a.first", "x");\n'
+                                b'user_pref("m.mid", false);\n')
+
+
+def test_write_user_js_refuses_a_type_firefox_has_no_pref_for(tmp_path):
+    """`None` came out as `null`, which Firefox cannot parse - and a parse
+    error drops every line after it. Refused at its birth, naming the pref."""
+    import pytest
+    with pytest.raises(TypeError, match="'some.pref'"):
+        write_user_js(tmp_path / "p", {"ok": 1, "some.pref": None})
+
+
 def test_write_user_js_creates_dir_and_overwrites(tmp_path):
     d = tmp_path / "nested" / "prof"
     write_user_js(d, {"a": 1})

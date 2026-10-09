@@ -110,7 +110,7 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 # Root entries a build backend injects into the sdist whatever the include list
 # says. Measured on hatchling: .gitignore ships even though sdist `include`
-# names only src/invisible_core, tests, README.md, LICENSE and pyproject.toml.
+# names only the package, tests, README, licenses, THIRD_PARTY and pyproject.
 # They describe the checkout, not the package, and treating them as content made
 # the gate refuse a release over a newly added .gitignore. Kept deliberately
 # short and root-only: a file with one of these names further down the tree is

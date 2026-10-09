@@ -11,11 +11,15 @@ name = "invisible_core"
 # scripts/version_gate.py refuses to publish content that changed under a
 # version string that did not.
 dynamic = ["version"]
-description = "Pure config for a stealth Firefox profile: seed -> fingerprint -> prefs, engine download, proxy, geo. Zero Playwright."
+description = "Pure config for a stealth Firefox profile: seed -> fingerprint -> prefs, engine download, proxy, geo, and the Juggler client the wrappers drive it with. Zero Playwright."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
-license-files = ["LICENSE"]
+# TWO LICENSES since 38.34.0, when the Juggler client moved here from the
+# three wrappers (decision D85): `juggler/injected.js` and
+# `juggler/keylayout.py` were extracted from Playwright's driver bundle,
+# which is Apache-2.0. Everything else is MIT. See THIRD_PARTY.md.
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "LICENSE-APACHE"]
 authors = [{ name = "feder-cr", email = "85809106+feder-cr@users.noreply.github.com" }]
 keywords = [
     "firefox",
@@ -128,7 +132,7 @@ exclude = ["*.bak", "*-bak"]
 # ledger records a digest of what ships, so it must never be part of what ships:
 # a self-referential ledger would invalidate its own digest on every release.
 [tool.hatch.build.targets.sdist]
-include = ["src/invisible_core", "tests", "README.md", "LICENSE", "pyproject.toml"]
+include = ["src/invisible_core", "tests", "README.md", "LICENSE", "LICENSE-APACHE", "THIRD_PARTY.md", "pyproject.toml"]
 
 # Which pre-push gates this repository wants. `.githooks/pre-push` is a stub;
 # the policy is invisible_core.hooks, and this block is the only per-repo part
@@ -147,3 +151,13 @@ include = ["src/invisible_core", "tests", "README.md", "LICENSE", "pyproject.tom
 pytest = true
 pin = false
 release_tags = ["v", "release-"]
+
+# What this repository declares about ITSELF to the shared language gate
+# (`python -m invisible_core.english`). `injected.js` came with the Juggler
+# client from invisible-playwright, where it was excluded the same way: it is
+# extracted from the upstream Playwright bundle. Named file by file, never by
+# folder: an exclusion that names nothing is refused by the gate.
+[tool.invisible.english]
+excluded = [
+    "src/invisible_core/juggler/injected.js",
+]
