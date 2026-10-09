@@ -44,6 +44,9 @@ class _Lifecycle:
     main_frame = MAIN
 
 
+from invisible_core.juggler.protocol import COMMANDS  # noqa: E402
+
+
 class _Connection:
     """The engine: records what the driver sends, answers the geometry, and
     DELIVERS the events to the page.
@@ -56,13 +59,18 @@ class _Connection:
     def __init__(self, page=None):
         self.sent: list = []
         self.page = page
-        # The engine numbers every mouse event it dispatches and acks it by
-        # that number once the renderer has handled it. The number is what
-        # the landing question must carry, or it is asked about the wrong
-        # moment.
+        # How many mouse events the engine has dispatched.
         self.dispatched = 0
 
     def send(self, method, params=None, session=None, timeout=None, abort=None):
+        # ⛔ CLOSED WORLD, like the engine's `checkScheme`: a field the
+        # protocol mirror does not declare is a rejected command, not an
+        # ignored field.
+        declared = set(COMMANDS[method]["params"].get("fields", {}))
+        undeclared = sorted(set(params or {}) - declared)
+        if undeclared:
+            raise AssertionError("%s carries fields the engine does not declare: %s"
+                                 % (method, undeclared))
         self.sent.append((method, params))
         if method == "Page.dispatchMouseEvent" and self.page is not None:
             self.dispatched += 1
@@ -83,7 +91,7 @@ class _Connection:
             # handler runs - if the release reached the button at all.
             if kind == "mouseup" and self.page.landed["mouseup"]:
                 self.page.press()
-            return {"eventId": self.dispatched}
+            return {}
         if method == "Page.pointerLanded":
             return {"landings": [
                 {"type": t, "landed": self.page.landed.get(t, False),
@@ -281,25 +289,19 @@ def test_a_hover_whose_target_left_during_the_travel_is_REPORTED():
         actions.hover("#b", timeout=2.0)
 
 
-def test_the_landing_question_names_the_LAST_event_the_commit_sent():
-    """⛔ THE QUESTION AND THE INPUT DO NOT SHARE A QUEUE. A `mousemove` is
-    coalesced and dispatched at the next refresh tick, so a question sent
-    right after it can be answered first - measured two times in four, from an
-    empty record, while the page had already seen the very move it was asked
-    about. The engine acks each event by the id it returned; the question
-    carries the id of the LAST event this commit sent, and the engine waits
-    for that ack before it looks. Here a click sends approach, press and
-    release: the question must name the release, not the approach.
-    """
+def test_every_command_the_click_sends_declares_only_the_engines_fields():
+    """⛔ THE ENGINE CHECKS EVERY COMMAND AS A CLOSED WORLD: a field it does not
+    declare is not ignored, the command is REJECTED, at runtime, in a browser.
+    The fake connection of this file refuses the same way (`_Connection.send`), so a
+    field the protocol mirror does not declare - `afterEventId`, which left
+    the landing question in firefox-39 when the dispatch itself became ordered
+    [B230] - fails here instead of on the first click of a session."""
     page = _Page()
     actions = _actions(page)
-
     actions.click("#b", timeout=2.0)
-
-    asked = [p for m, p in actions.c.sent if m == "Page.pointerLanded"]
-    assert len(asked) == 1
-    assert asked[0]["afterEventId"] == actions.c.dispatched
-    assert actions.c.dispatched == 3, "approach, press, release"
+    sent = [m for m, _ in actions.c.sent]
+    assert sent.count("Page.dispatchMouseEvent") == 3, "approach, press, release"
+    assert sent[-1] == "Page.pointerLanded", "the question follows the release"
 
 
 def test_force_makes_a_landing_elsewhere_the_request_and_not_a_miss():

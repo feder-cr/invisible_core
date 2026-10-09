@@ -100,14 +100,9 @@ def _normalize_options(options) -> list:
 
 
 class Actions:
-    #: The id of the last mouse event dispatched, as `Page.dispatchMouseEvent`
-    #: returned it. A class default so that a bench which builds this object
-    #: without `__init__` still has one, and so that "no event sent yet" reads
-    #: as 0 - the value that also means "the engine returned no id".
-    _last_event_id = 0
-    #: The session's typing hand, or None when humanising is off. Class
-    #: defaults for the same reason as above: a bench that builds this object
-    #: without `__init__` gets "no rhythm", which is what None means.
+    #: The session's typing hand, or None when humanising is off. A class
+    #: default so that a bench which builds this object without `__init__`
+    #: gets "no rhythm", which is what None means.
     typing_persona = None
     #: No generator means every approach is one event, and no budget: class
     #: defaults for a bench that builds this object without `__init__`.
@@ -552,11 +547,13 @@ class Actions:
                 raise WrongHitTarget(verdict)
         result = commit()
         if not force and lands:
-            # `afterEventId` is what makes the answer about THIS commit: the
-            # input and the question do not share a queue - a `mousemove` is
-            # coalesced and dispatched at the next refresh tick - and without
-            # it the engine answered from an empty record two times in four
-            # while the page had already seen the very move it was asked about.
+            # The answer is about THIS commit because the engine answers
+            # `Page.dispatchMouseEvent` only once the page has handled the
+            # event (firefox-39, [B230]): the record the question reads is
+            # complete when it is sent. Until then this question carried the
+            # id of the commit's last event and the engine waited for its ack
+            # here - which covered the element actions and none of the pointer
+            # primitives.
             #
             # ⛔ AND A DIALOG THE ACTION OPENED ENDS THE WAIT: a click that
             # opens `alert()` suspends the page's process inside the dialog,
@@ -565,8 +562,7 @@ class Actions:
             try:
                 answer = self.c.send("Page.pointerLanded",
                                      {"frameId": f, "objectId": element,
-                                      "types": list(lands),
-                                      "afterEventId": self._last_event_id},
+                                      "types": list(lands)},
                                      session=self.session, timeout=10,
                                      abort=self.dialog_opened)
             except Interrupted:
@@ -1307,13 +1303,13 @@ class Actions:
              "modifiers": modifiers or self.keyboard.modifier_mask()}
         if click_count is not None:
             p["clickCount"] = click_count
-        answer = self.c.send("Page.dispatchMouseEvent", p,
-                             session=self.session, timeout=10)
-        # The id the renderer will ack once it has handled this event. Kept so
-        # that the landing question after a commit waits for exactly the last
-        # event the commit sent; 0 from an engine that does not return one, in
-        # which case the question is asked without waiting. [B217]
-        self._last_event_id = (answer or {}).get("eventId", 0)
+        # ⛔ When this returns, the page has HANDLED the event - its listeners
+        # ran, its hit test used the layout of that moment - so whatever this
+        # client sends next is behind it. The engine guarantees it since
+        # firefox-39; before, a press could be hit-tested after a scroll sent
+        # later on another channel, and a drag never started. [B230]
+        self.c.send("Page.dispatchMouseEvent", p,
+                    session=self.session, timeout=10)
         self.position = (point[0], point[1])
 
     def _type(self, text: str):
