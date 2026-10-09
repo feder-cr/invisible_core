@@ -31,17 +31,18 @@ with its own imports and running it here would prove nothing about it.
 from __future__ import annotations
 
 import ast
-import os
-import pathlib
 
 import pytest
 
+from _engine_source import EngineSource
 from invisible_core import seal
 
 pytestmark = pytest.mark.unit
 
-_FF_SRC = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", "C:/ff/source"))
-_PRODUCER = _FF_SRC / "scripts" / "validate_release.py"
+#: The producer that released the PINNED engine, read at the seal's commit and
+#: not in whatever the source checkout holds now (`tests/_engine_source.py`).
+_SOURCE = EngineSource.pinned()
+_PRODUCER = "scripts/validate_release.py"
 
 #: The names that must agree. `JUGGLER_MIN_MARKED` is deliberately NOT here: the
 #: producer requires all four and the runtime two, which is the asymmetry the
@@ -49,9 +50,9 @@ _PRODUCER = _FF_SRC / "scripts" / "validate_release.py"
 _SHARED = ("JUGGLER_ENTRIES", "JUGGLER_DIR_REL", "JUGGLER_MARKERS")
 
 
-def _module_constants(path: pathlib.Path, names) -> dict:
+def _module_constants(source: str, names) -> dict:
     """Read module-level assignments by parsing. No import, no execution."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(source)
     found: dict = {}
     for node in tree.body:
         if not isinstance(node, ast.Assign):
@@ -62,18 +63,19 @@ def _module_constants(path: pathlib.Path, names) -> dict:
                     found[target.id] = ast.literal_eval(node.value)
                 except ValueError:
                     pytest.fail(
-                        f"{path.name}: {target.id} is not a literal any more, so "
+                        f"{_PRODUCER}: {target.id} is not a literal any more, so "
                         f"this comparison cannot see it. If it became computed, "
                         f"compare the computed value instead of deleting this test")
     return found
 
 
-@pytest.mark.skipif(not _PRODUCER.is_file(),
-                    reason="no Firefox source checkout beside this one - set "
-                           "STEALTH_FIREFOX_SRC to point at one")
+@pytest.mark.skipif(_SOURCE.unavailable() is not None,
+                    reason=_SOURCE.unavailable() or "")
 def test_the_two_copies_of_the_juggler_contract_agree():
     ours = {name: getattr(seal, name) for name in _SHARED}
-    theirs = _module_constants(_PRODUCER, set(_SHARED))
+    text = _SOURCE.show(_PRODUCER)
+    assert text is not None, f"{_PRODUCER} is not in {_SOURCE.commit}"
+    theirs = _module_constants(text, set(_SHARED))
 
     absent = sorted(set(_SHARED) - set(theirs))
     assert not absent, (
@@ -87,7 +89,7 @@ def test_the_two_copies_of_the_juggler_contract_agree():
         f"ours:\n  " +
         "\n  ".join(f"{n}: core={o!r} producer={t!r}" for n, (o, t) in differing.items()) +
         f"\n\nOne of them will refuse a good build or accept an unproven tree. "
-        f"Both copies exist on purpose ({_PRODUCER.name} runs inside a Firefox "
+        f"Both copies exist on purpose ({_PRODUCER} runs inside a Firefox "
         f"checkout and cannot import this package); keeping them equal is what "
         f"was missing.")
 
@@ -122,7 +124,8 @@ def test_the_two_thresholds_are_different_on_purpose_and_stay_where_they_are():
         "reason it existed is in its docstring")
 
 
-@pytest.mark.skipif(not _PRODUCER.is_file(), reason="no Firefox source checkout")
+@pytest.mark.skipif(_SOURCE.unavailable() is not None,
+                    reason=_SOURCE.unavailable() or "")
 def test_the_comparison_would_notice_a_changed_path():
     """Its known-bad input: the check must fail on a difference it is handed.
 
@@ -130,7 +133,7 @@ def test_the_comparison_would_notice_a_changed_path():
     would make the comparison above pass on any two files - the empty-set shape
     that has been the recurring defect in this codebase's gates.
     """
-    theirs = _module_constants(_PRODUCER, set(_SHARED))
+    theirs = _module_constants(_SOURCE.show(_PRODUCER) or "", set(_SHARED))
     assert theirs, "parsed nothing out of the producer; every comparison is vacuous"
     tampered = dict(theirs)
     tampered["JUGGLER_DIR_REL"] = "chrome/juggler-renamed"

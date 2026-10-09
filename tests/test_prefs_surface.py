@@ -24,10 +24,6 @@ that works perfectly.
 """
 from __future__ import annotations
 
-import os
-import pathlib
-import sys
-
 import pytest
 
 from invisible_core._fpforge import generate_profile
@@ -110,11 +106,17 @@ def test_two_seeds_differ_in_the_fields_that_identify_a_machine():
 
 
 # ── cross-check against the real Firefox source, where it is available ──────
+#
+# READ AT THE COMMIT THE PINNED ENGINE WAS BUILT FROM (the seal's
+# `source_commit`), not in whatever a working tree has checked out: see
+# `tests/_engine_source.py` for why, and for the day the working tree's answer
+# refused a release.
 
-_FF_SRC = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", "C:/ff/source"))
+from _engine_source import EngineSource  # noqa: E402
 
+_SOURCE = EngineSource.pinned()
 
-#: Where a pref literal can live. Both search paths use this one list.
+#: Where a pref literal can live.
 _SOURCE_GLOBS = ("*.cpp", "*.h", "*.js", "*.jsm", "*.mjs", "*.yaml", "*.idl")
 
 _PREF_LITERAL = r"zoom[._]stealth[._][A-Za-z0-9_.]+"
@@ -129,86 +131,8 @@ def _normalise(hits) -> set[str]:
     return found
 
 
-def _names_via_git() -> set[str] | None:
-    """Ask git for the literals. None when the tree is not a git work tree.
-
-    WHY THIS EXISTS. The version below walks the tree in Python, and on the
-    workbench that is `C:/ff/source`: **412,691 files, 132,465 of them matching
-    the extension list, 0.86 GB to decode.** Measured 2026-07-28: **189 s with a
-    warm file cache, and over TEN MINUTES cold** - one test costing more wall
-    clock than the other 806 put together, in the suite the core's pre-push hook
-    runs. The cost is not the regex, it is 132,465 individual file opens on
-    Windows, each one seen by the on-access scanner. `git grep` over the same
-    globs answers in **8 s**.
-
-    A twenty-minute pre-push gate is a gate people learn to push past, so the
-    speed is the correctness issue here, not a nicety.
-
-    The two paths were compared, not assumed equivalent: with the git path
-    disabled the suite gives the identical verdict on the workbench tree, only
-    slower.
-
-    It is also a STRICTER question, not a looser one. git sees tracked files plus
-    untracked-and-not-ignored ones, so what it drops relative to the filesystem
-    walk is exactly what `.gitignore` covers - `obj-*`, which is GENERATED from
-    the tree it is being compared against. A name found only in build output
-    cannot be a name the source reads. Fewer names found means more prefs
-    reported missing, so any error this introduces fails closed.
-    """
-    import subprocess
-
-    try:
-        probe = subprocess.run(
-            ["git", "-C", str(_FF_SRC), "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if probe.returncode != 0 or probe.stdout.strip() != "true":
-        return None
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(_FF_SRC), "grep", "--untracked", "-hoIE",
-             _PREF_LITERAL, "--", *_SOURCE_GLOBS],
-            capture_output=True, text=True, timeout=600)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    # git grep exits 1 for "no matches". In a tree that has StaticPrefList.yaml
-    # - which is what gates this whole test - no matches means the invocation is
-    # wrong, not that the engine reads no prefs. Fall back rather than hand back
-    # an empty set that would report every pref as dead.
-    if out.returncode not in (0, 1) or not out.stdout.strip():
-        return None
-    return _normalise(out.stdout.split())
-
-
-def _names_by_walking() -> set[str]:
-    """The fallback: read the tree from Python. Slow - see `_names_via_git`."""
-    import re
-
-    pattern = re.compile(_PREF_LITERAL)
-    suffixes = {g[1:] for g in _SOURCE_GLOBS}
-    hits: list[str] = []
-    for path in _FF_SRC.rglob("*"):
-        if path.suffix not in suffixes:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        if "zoom" not in text:
-            continue
-        hits.extend(pattern.findall(text))
-    return _normalise(hits)
-
-
-#: The search costs 8 seconds and two tests want the same answer, so it is
-#: memoised - but on `_FF_SRC`, not on nothing, because two tests below point
-#: `_FF_SRC` at throwaway trees and must not be served the workbench's answer.
-_READABLE_CACHE: dict[pathlib.Path, frozenset] = {}
-
-
-def _names_the_binary_reads() -> set[str]:
-    """Every `zoom.stealth.*` string literal in the Firefox tree.
+def _names_the_binary_reads(source: EngineSource = _SOURCE) -> set[str] | None:
+    """Every `zoom.stealth.*` string literal in the engine's source, or None.
 
     NOT just StaticPrefList.yaml. A pref read from JS with
     `getBoolPref(name, default)` needs no static declaration and works fine -
@@ -216,21 +140,25 @@ def _names_the_binary_reads() -> set[str]:
     `zoom.stealth.debugger.force_detach`, which devtools/server/actors/thread.js
     reads perfectly well. Searching for the literal is the honest definition of
     "the binary reads this".
+
+    `git grep` and not a walk of the files: on the workbench the tree is 412,691
+    files, and walking them from Python took 189 s warm and over ten minutes cold
+    (measured 2026-07-28), in the suite the pre-push hook runs. And at a commit
+    there is nothing to walk - the files are objects, not a checkout.
+
+    ⛔ None, never an empty set, when the search found nothing: the commit is a
+    Firefox tree, so no literal at all means the invocation is wrong - a glob
+    typo, a git that spells a flag differently - and an empty set would report
+    every emitted pref as dead.
     """
-    key = _FF_SRC
-    if key not in _READABLE_CACHE:
-        _READABLE_CACHE[key] = frozenset(_names_via_git() or _names_by_walking())
-    return set(_READABLE_CACHE[key])
+    out = source.grep(_PREF_LITERAL, _SOURCE_GLOBS)
+    if not out or not out.strip():
+        return None
+    return _normalise(out.split())
 
 
-@pytest.mark.skipif(
-    not (_FF_SRC / "modules" / "libpref" / "init" / "StaticPrefList.yaml").is_file(),
-    reason=(
-        "no Firefox source tree beside this checkout. This cross-check is a "
-        "workbench convenience: the authoritative version runs where the "
-        "binary is built. Set STEALTH_FIREFOX_SRC to point at one."
-    ),
-)
+@pytest.mark.skipif(_SOURCE.unavailable() is not None,
+                    reason=_SOURCE.unavailable() or "")
 def test_every_stealth_pref_emitted_is_one_the_binary_reads():
     """The check that would have caught every dead-pref bug at the source.
 
@@ -240,27 +168,28 @@ def test_every_stealth_pref_emitted_is_one_the_binary_reads():
     webgl.msaa, which appear in NO file of the tree at all.
     """
     readable = _names_the_binary_reads()
+    assert readable, (
+        f"the search found no pref literals at {_SOURCE.commit} in {_SOURCE.repo}: "
+        "the invocation is wrong, not the engine")
     emitted = {k for k in _prefs() if k.startswith("zoom.stealth.")}
     missing = sorted(k for k in emitted if k not in readable
                      and k.replace(".", "_") not in readable)
     assert not missing, (
-        "these prefs are emitted but appear nowhere in the engine source, so "
-        f"they are no-ops that look like working spoofs: {missing}")
+        "these prefs are emitted but appear nowhere in the source of the engine "
+        f"the seal pins ({_SOURCE.commit}), so they are no-ops that look like "
+        f"working spoofs: {missing}")
 
 
-@pytest.mark.skipif(
-    not (_FF_SRC / "modules" / "libpref" / "init" / "StaticPrefList.yaml").is_file(),
-    reason="no Firefox source tree beside this checkout",
-)
+@pytest.mark.skipif(_SOURCE.unavailable() is not None,
+                    reason=_SOURCE.unavailable() or "")
 def test_the_cross_check_would_actually_report_a_dead_pref():
     """Its known-bad input, and the reason it needs one.
 
     The check above passes when nothing is wrong, which is also what it does if
-    `_names_the_binary_reads()` returns everything - and the search moved to
-    `git grep` on 2026-07-28 for speed, so "the new search path is too generous"
-    is now a way for this gate to go quietly vacuous. A fabricated name must come
-    back absent, and the real ones present, or the search is answering the wrong
-    question.
+    `_names_the_binary_reads()` returns everything, so "the search is too
+    generous" is a way for this gate to go quietly vacuous. A fabricated name
+    must come back absent, and the real ones present, or the search is answering
+    the wrong question.
     """
     readable = _names_the_binary_reads()
     assert readable, "the search found no pref literals at all in the engine tree"
@@ -276,47 +205,60 @@ def test_the_cross_check_would_actually_report_a_dead_pref():
         "it is under-reporting, and every pref will look dead")
 
 
-def test_the_git_search_refuses_an_empty_answer_instead_of_returning_one(tmp_path,
-                                                                        monkeypatch):
-    """An empty result must fall back, never be handed on as "nothing is read".
-
-    A git invocation that stops matching - a glob typo, a git version that
-    spells a flag differently - exits 0 or 1 with no output. Returning that
-    empty set makes EVERY emitted pref look dead, which is a wall of false
-    failures; the shape to avoid is the opposite one, where an empty set is
-    treated as a clean answer. Either way the caller must not receive it.
-    """
+def _one_commit_repo(tmp_path, name: str, files: dict) -> EngineSource:
+    """A throwaway repository with one commit, read the way the engine is."""
     import subprocess
 
-    repo = tmp_path / "empty-tree"
+    repo = tmp_path / name
     repo.mkdir()
-    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
-    (repo / "nothing.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+           "-c", "commit.gpgsign=false"]
+    subprocess.run(git[:3] + ["init", "-q"], check=True)
+    for rel, text in files.items():
+        (repo / rel).write_bytes(text.encode("utf-8"))
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "one"], check=True)
+    sha = subprocess.run(git[:3] + ["rev-parse", "HEAD"], check=True,
+                         capture_output=True, text=True).stdout.strip()
+    return EngineSource(repo, sha)
 
-    monkeypatch.setattr(sys.modules[__name__], "_FF_SRC", repo)
-    assert _names_via_git() is None, (
+
+def test_the_search_refuses_an_empty_answer_instead_of_returning_one(tmp_path):
+    """An empty result must come back as None, never as "nothing is read".
+
+    A git invocation that stops matching exits 0 or 1 with no output.
+    Returning that empty set makes EVERY emitted pref look dead, which is a wall
+    of false failures; the shape to avoid is the opposite one, where an empty set
+    is treated as a clean answer. Either way the caller must not receive it.
+    """
+    source = _one_commit_repo(tmp_path, "empty-tree",
+                              {"nothing.cpp": "int main() { return 0; }\n"})
+    assert source.unavailable() is None
+    assert _names_the_binary_reads(source) is None, (
         "a tree with no pref literals produced a non-None result; the caller "
         "would use it as the readable set and report every pref as dead")
 
 
-def test_the_git_search_is_not_silently_skipping_the_tree(tmp_path, monkeypatch):
-    """And the positive half: a tree that DOES carry a literal is read.
-
-    Without this, the test above is satisfied by a `_names_via_git` that always
-    returns None - which would restore the ten-minute walk while every test
-    stayed green.
-    """
-    import subprocess
-
-    repo = tmp_path / "one-hit"
-    repo.mkdir()
-    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
-    (repo / "probe.cpp").write_text(
-        'Preferences::GetBool("zoom.stealth.fpp.hw_seed", false);\n', encoding="utf-8")
-
-    monkeypatch.setattr(sys.modules[__name__], "_FF_SRC", repo)
-    found = _names_via_git()
+def test_the_search_reads_the_commit_and_not_the_checkout(tmp_path):
+    """The positive half, and the property the whole change is for: a literal
+    committed is found, and one that exists only in the working tree is not."""
+    source = _one_commit_repo(tmp_path, "one-hit", {
+        "probe.cpp": 'Preferences::GetBool("zoom.stealth.fpp.hw_seed", false);\n'})
+    (source.repo / "later.cpp").write_bytes(
+        b'Preferences::GetBool("zoom.stealth.only.in.the.checkout", false);\n')
+    found = _names_the_binary_reads(source)
     assert found and "zoom.stealth.fpp.hw_seed" in found, found
+    assert "zoom.stealth.only.in.the.checkout" not in found, (
+        "an uncommitted file was read: the search is looking at the checkout, "
+        "which is the tree another session may have left anywhere")
+
+
+def test_a_commit_the_repository_does_not_have_is_a_skip_reason(tmp_path):
+    """Not a red and not a silent green: a reason that names the commit."""
+    source = _one_commit_repo(tmp_path, "other", {"a.cpp": "int a;\n"})
+    missing = EngineSource(source.repo, "0" * 40)
+    reason = missing.unavailable()
+    assert reason and "0" * 40 in reason and "fetch" in reason, reason
 
 
 # ── hw_seed doubles as an off-switch, so it must never be zero ──────────────
@@ -595,16 +537,15 @@ def test_the_two_manifest_copies_are_byte_identical():
     SKIPS when the Firefox tree is absent, because this package installs on its
     own too. A declared skip is not a green.
     """
-    import os
-    import pathlib
     from invisible_core._fpforge.profile import FONT_MANIFEST
 
-    src = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", "C:/ff/source"))
-    manifest_file = src / "browser" / "fonts" / "bundle-fonts.list"
-    if not manifest_file.is_file():
-        pytest.skip(f"no Firefox tree at {src}: the second copy is not here")
-
-    other = manifest_file.read_text(encoding="utf-8")
+    # The file the PINNED engine bundled, read at its commit (`_engine_source`).
+    if _SOURCE.unavailable():
+        pytest.skip(_SOURCE.unavailable())
+    other = _SOURCE.show("browser/fonts/bundle-fonts.list")
+    assert other is not None, (
+        f"browser/fonts/bundle-fonts.list is not in {_SOURCE.commit}: the engine "
+        "the seal pins bundles no manifest, or it moved")
     if FONT_MANIFEST == other:
         return
 
