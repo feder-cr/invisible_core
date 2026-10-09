@@ -67,9 +67,57 @@ def test_the_screen_a_page_reads_is_the_panel_divided_by_the_scale(panel, dpr, c
     assert (prefs["zoom.stealth.screen.width"], prefs["zoom.stealth.screen.height"]) == css
     geometry = context_geometry(p)
     assert geometry["screen"] == {"width": css[0], "height": css[1]}
-    assert geometry["viewport"] == {
-        "width": css[0] - p.screen.chrome_w,
-        "height": css[1] - p.screen.taskbar_px - p.screen.chrome_h}
+    assert geometry["viewport"]["width"] == css[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("dpr,frame,viewport,avail_device", [
+    # The 2048x1280 panel measured on retail Firefox 151, Windows 11,
+    # 2026-10-08. Device pixels: border, UI above a maximized window's content,
+    # popup UI, default popup position. The viewport is the work area (panel
+    # minus a 48 CSS taskbar) minus the UI, divided by the scale: 890 at 125%
+    # is (1220 - 107) / 1.25, the innerHeight retail reported.
+    (1.0, (8, 85, 72, 4), (2048, 1147), (2048, 1232)),
+    (1.25, (9, 107, 90, 4), (1638, 890), (2048, 1220)),
+    (1.5, (11, 127, 106, 4), (1365, 721), (2048, 1208)),
+    (2.0, (13, 169, 139, 4), (1024, 508), (2048, 1184)),
+])
+def test_the_window_frame_is_declared_in_device_pixels_per_scale(dpr, frame, viewport, avail_device):
+    """Known-bad until 38.x: one CSS window for every scale and every window -
+    at (0, 0), no side border, content 85 below - where a maximized Windows
+    Firefox sits a border off the screen, is two borders wider than the work
+    area, and has its content 85.6 CSS below at 125%."""
+    from invisible_core import context_geometry
+
+    p = generate_profile(seed=7, pin={"screen.width": 2048, "screen.height": 1280,
+                                      "screen.dpr": dpr})
+    prefs = translate_profile_to_prefs(p)
+    assert (prefs["zoom.stealth.screen.frame_border"],
+            prefs["zoom.stealth.screen.maximized_ui"],
+            prefs["zoom.stealth.screen.popup_ui"],
+            prefs["zoom.stealth.screen.popup_position"]) == frame
+    assert (prefs["zoom.stealth.screen.avail_device_width"],
+            prefs["zoom.stealth.screen.avail_device_height"]) == avail_device
+    assert context_geometry(p)["viewport"] == {"width": viewport[0], "height": viewport[1]}
+    for gone in ("window_x", "window_y", "chrome_w", "chrome_h"):
+        assert "zoom.stealth.screen." + gone not in prefs
+
+
+@pytest.mark.unit
+def test_a_scale_with_no_measured_frame_is_refused():
+    """The frame is measured at the four persona scales and nowhere else; a
+    frame interpolated for 1.75 would be one no Windows machine draws."""
+    p = generate_profile(seed=7, pin={"screen.dpr": 1.75})
+    with pytest.raises(ValueError, match="no measured window frame"):
+        translate_profile_to_prefs(p)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["screen.chrome_w", "screen.chrome_h",
+                                 "screen.window_x", "screen.window_y"])
+def test_the_old_window_pins_are_gone(key):
+    with pytest.raises(ValueError):
+        generate_profile(seed=7, pin={key: 0})
 
 
 @pytest.mark.unit
