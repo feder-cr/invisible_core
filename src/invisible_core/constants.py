@@ -21,6 +21,8 @@ The NAMES are the binary/wrapper contract and never change.
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from ._version import CORE_REVISION, __version__ as PKG_VERSION
 from .seal import DEFAULT_ENTRY_REL, active_seal, normalize_arch
 
@@ -72,18 +74,45 @@ OSCPU_OVERRIDE: str = "Windows NT 10.0; Win64; x64"
 # nsGlobalWindowOuter.cpp - with nothing tying them together.
 TASKBAR_PX: int = 48
 
-#: Window chrome, i.e. how much wider and taller the OUTER window is than the
-#: viewport a page sees. Measured against stock Firefox 151 on 2026-08-09, not
-#: chosen: a page computes outerWidth - innerWidth and outerHeight -
-#: innerHeight in one line, and stock answers 0 and 85.
+class WindowFrame(NamedTuple):
+    """The window frame of Windows Firefox at one display scale, in DEVICE
+    pixels."""
+    #: Windows' invisible resize border, on the left, right and bottom of every
+    #: window and on top of a popup. A maximized window sits this far OFF the
+    #: screen on three sides.
+    border: int
+    #: A maximized window: from the screen top to the content top (tab strip
+    #: plus toolbar, seen from the screen).
+    maximized_ui: int
+    #: A popup: from the window top, border included, to the content top.
+    popup_ui: int
+    #: Where a popup opened without left/top is put, on both axes.
+    popup_position: int
+
+
+#: The window frame per display scale, measured on retail Firefox 151 on
+#: Windows 11 on 2026-10-08, lending the display scale (the workbench's
+#: scripts/window_geometry/scales.py). Measured, not chosen: a page reads
+#: screenX, outerWidth - availWidth and mozInnerScreenY in one line each, and
+#: retail answers -8, 16 and 85 at 100%, -7, 15 and 85.6 at 125%. In device
+#: pixels the four rows are one rule; every CSS value is the device value
+#: divided by the scale with Gecko's rounding, done by the engine.
 #:
-#: The wrapper carried 14 and 91 as module constants, commented "measured
-#: empirically on a headed Firefox 150". The 14 is the one that matters: a real
-#: Firefox has NO horizontal chrome, so 14 was fabricated width that no browser
-#: reports, and it was the same 14 on both platforms - a value invented once and
-#: then agreed with itself, which is why nothing caught it.
-CHROME_W: int = 0
-CHROME_H: int = 85
+#: The keys are the DOMAIN: the four scales the screen table gives personas
+#: (cpt_screen_given_class_tier.json). A scale outside it has no measured frame
+#: and is refused, never interpolated (engine rule 2).
+#:
+#: ⛔ It replaces CHROME_W = 0 and CHROME_H = 85 with window_x = window_y = 0,
+#: from a 2026-08-09 measurement of a window that was not a maximized Windows
+#: Firefox (a 768-pixel-tall screen, no resize border): it described a window
+#: at the screen origin with no side border, which Windows never draws
+#: maximized, and every popup answered the same numbers.
+WINDOW_FRAME_BY_DPR: dict = {
+    1.0: WindowFrame(border=8, maximized_ui=85, popup_ui=72, popup_position=4),
+    1.25: WindowFrame(border=9, maximized_ui=107, popup_ui=90, popup_position=4),
+    1.5: WindowFrame(border=11, maximized_ui=127, popup_ui=106, popup_position=4),
+    2.0: WindowFrame(border=13, maximized_ui=169, popup_ui=139, popup_position=4),
+}
 
 
 

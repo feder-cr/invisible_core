@@ -1203,14 +1203,17 @@ def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.screen.height"]       = profile.screen.css_height
     prefs["zoom.stealth.screen.color_depth"]  = profile.screen.color_depth
     prefs["zoom.stealth.screen.taskbar_px"]   = profile.screen.taskbar_px
-    # The window geometry. Four values because three getters read them in
-    # different combinations - screenX, mozInnerScreenX and outerWidth - and
-    # declaring only some of them is what produced a window whose right edge
-    # was off the screen. Measured against stock 151: 0, 0, 0, 85.
-    prefs["zoom.stealth.screen.window_x"]     = profile.screen.window_x
-    prefs["zoom.stealth.screen.window_y"]     = profile.screen.window_y
-    prefs["zoom.stealth.screen.chrome_w"]     = profile.screen.chrome_w
-    prefs["zoom.stealth.screen.chrome_h"]     = profile.screen.chrome_h
+    # The window frame and the work area, in DEVICE pixels (firefox-38): the
+    # engine divides by the window's own scale with Gecko's rounding, so a
+    # maximized window reads screenX -7 and mozInnerScreenY 85.6 at 125% like
+    # retail 151, and a popup answers its own frame.
+    frame = profile.screen.frame
+    prefs["zoom.stealth.screen.frame_border"]     = frame.border
+    prefs["zoom.stealth.screen.maximized_ui"]     = frame.maximized_ui
+    prefs["zoom.stealth.screen.popup_ui"]         = frame.popup_ui
+    prefs["zoom.stealth.screen.popup_position"]   = frame.popup_position
+    prefs["zoom.stealth.screen.avail_device_width"]  = profile.screen.avail_device_width
+    prefs["zoom.stealth.screen.avail_device_height"] = profile.screen.avail_device_height
     # DEAD, and kept only so the next reader does not re-add them. Neither name
     # is declared in StaticPrefList.yaml, and nsScreen::GetAvailRect ignores
     # them outright: it reads zoom_stealth_screen_width/height and subtracts

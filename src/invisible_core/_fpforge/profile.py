@@ -42,23 +42,13 @@ class ScreenProfile:
     #: this generator - kept in step by hand.
     taskbar_px: int = 48
 
-    #: Window chrome: outerWidth - innerWidth, and outerHeight - innerHeight.
-    #: They lived in the wrapper as module constants (14 and 91) where nothing
-    #: could pin or inspect them, and the 14 was fabricated - measured against
-    #: stock Firefox 151, a real browser reports 0 horizontal chrome. Same level
-    #: as every other screen surface (rule 6), so a persona with a different
-    #: toolbar layout can pin them.
-    chrome_w: int = 0
-    chrome_h: int = 85
-
-    #: Where the window sits on the screen. outerWidth/outerHeight already
-    #: claim a MAXIMIZED window filling the screen, and a maximized window is
-    #: at the origin - but the position was never declared, so it stayed
-    #: whatever the OS gave the headless widget: (4,4) on Windows, which put
-    #: the right edge of a 1920-wide window at 1924 on a 1920 screen. Stock
-    #: Firefox 151 reports 0,0 for this window shape (measured 2026-08-09).
-    window_x: int = 0
-    window_y: int = 0
+    # ⛔ chrome_w, chrome_h, window_x AND window_y ARE GONE (38.x). They said a
+    # maximized window sits at (0, 0) with no side border and its content 85 CSS
+    # below, for every window. Retail Firefox 151 on Windows 11 says a
+    # maximized window sits a resize border OFF the screen and is two borders
+    # wider than the work area, its content starts 85.6 CSS down at 125% (a value
+    # no CSS integer carries), and a popup has a frame of its own. The frame is
+    # now `frame`, per scale, in device pixels (constants.WINDOW_FRAME_BY_DPR).
 
     # ⛔ `width` AND `height` ARE THE PANEL, IN DEVICE PIXELS: the screen table
     # samples real displays (a 1920x1080 laptop at 125%, a 3840x2160 monitor at
@@ -85,12 +75,38 @@ class ScreenProfile:
         return self._css(self.height)
 
     @property
+    def frame(self) -> "WindowFrame":
+        """The window frame at this scale, in device pixels. Refuses a scale
+        that was never measured: the domain is finite and known (engine rule
+        2), and a frame interpolated between two scales is a frame no Windows
+        machine draws."""
+        try:
+            return WINDOW_FRAME_BY_DPR[self.dpr]
+        except KeyError:
+            raise ValueError(
+                "no measured window frame for device pixel ratio %r: the "
+                "measured scales are %s (constants.WINDOW_FRAME_BY_DPR)"
+                % (self.dpr, ", ".join(str(k) for k in WINDOW_FRAME_BY_DPR))
+            ) from None
+
+    @property
+    def avail_device_width(self) -> int:
+        """The work area's width in device pixels: the whole panel."""
+        return self.width
+
+    @property
+    def avail_device_height(self) -> int:
+        """The work area's height in device pixels: the panel minus the
+        taskbar, which is 48 CSS at every scale (measured on retail 151), so
+        60 device pixels at 125%."""
+        return self.height - int(self.taskbar_px * self.dpr + 0.5)
+
+    @property
     def viewport(self) -> tuple:
-        """The content area of the maximized window: the screen minus the
-        taskbar and the window chrome, all in CSS pixels (the taskbar is 48 CSS
-        at every scale, measured on retail 151)."""
-        return (self.css_width - self.chrome_w,
-                self.css_height - self.taskbar_px - self.chrome_h)
+        """The content area of the maximized window, in CSS pixels: the work
+        area's full width, and its height minus the UI above the content."""
+        return (self.css_width,
+                self._css(self.avail_device_height - self.frame.maximized_ui))
 
 
 @dataclass(frozen=True)
@@ -284,8 +300,7 @@ class FontProfile:
 #  2026-09-16, it named 33 keys against the tables' 40 - it promised four the
 #  core refuses with ValueError ("screen.avail_width", "screen.avail_height",
 #  "screen.tier", "webgl.msaa_samples") and omitted eleven it accepts, among
-#  them "screen.taskbar_px", "screen.chrome_w"/"chrome_h",
-#  "screen.window_x"/"window_y" and five of "hardware.*".
+#  them "screen.taskbar_px" and five of "hardware.*".
 # ──────────────────────────────────────────────────────────────────────
 
 _PIN_GROUPS = {
@@ -297,8 +312,7 @@ _PIN_GROUPS = {
     # description of a decision already taken and changed nothing else. The FIELD
     # stays on ScreenProfile, where it is an honest label; what went is the
     # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
-    "screen": {"width", "height", "dpr", "taskbar_px", "chrome_w", "chrome_h", "window_x", "window_y",
-               "color_depth"},
+    "screen": {"width", "height", "dpr", "taskbar_px", "color_depth"},
     "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
                  "voices", "fake_media_devices",
                  "storage_enabled", "generics",
@@ -421,10 +435,6 @@ _PIN_TO_RAW = {
     "font.freetype_contrast": "font_freetype_contrast",
     "screen.color_depth": "screen_color_depth",
     "screen.taskbar_px": "taskbar_px",
-    "screen.chrome_w": "chrome_w",
-    "screen.chrome_h": "chrome_h",
-    "screen.window_x": "window_x",
-    "screen.window_y": "window_y",
     "hardware.max_touch_points": "max_touch_points",
     "hardware.voices": "voices",
     "hardware.fake_media_devices": "fake_media_devices",
@@ -474,7 +484,7 @@ SCREEN_COLOR_DEPTH = 24
 #: The Windows taskbar, re-exported so a pin can reach it by the same name
 #: as every other declared constant. The value lives in constants.py, which
 #: the sampler imports too - one number, one home.
-from ..constants import TASKBAR_PX, CHROME_W, CHROME_H  # noqa: E402,F401
+from ..constants import TASKBAR_PX, WINDOW_FRAME_BY_DPR, WindowFrame  # noqa: E402,F401
 
 #: The five Windows English (United States) voices, in the order the binary
 #: parses them. See HardwareProfile.voices for why this is not per-locale yet.
@@ -673,10 +683,6 @@ def generate_profile(
     raw.setdefault("font_freetype_contrast", FONT_FREETYPE_CONTRAST)
     raw.setdefault("screen_color_depth", SCREEN_COLOR_DEPTH)
     raw.setdefault("taskbar_px", TASKBAR_PX)
-    raw.setdefault("chrome_w", CHROME_W)
-    raw.setdefault("chrome_h", CHROME_H)
-    raw.setdefault("window_x", 0)
-    raw.setdefault("window_y", 0)
     # No setdefault for max_touch_points: the forge samples it, and a floor
     # here would be a second source of truth that agrees until it does not.
     raw.setdefault("voices", VOICES)
@@ -721,10 +727,6 @@ def generate_profile(
             tier=str(raw.get("screen_tier", "")),
             color_depth=int(raw["screen_color_depth"]),
             taskbar_px=int(raw["taskbar_px"]),
-            chrome_w=int(raw["chrome_w"]),
-            chrome_h=int(raw["chrome_h"]),
-            window_x=int(raw["window_x"]),
-            window_y=int(raw["window_y"]),
         ),
         hardware=HardwareProfile(
             concurrency=int(raw["hw_concurrency"]),
