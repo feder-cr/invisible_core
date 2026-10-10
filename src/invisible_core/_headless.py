@@ -43,10 +43,11 @@ import secrets
 import select
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Set as AbstractSet
 from typing import Optional
+
+from ._owned_dirs import owned_dir, sweep_owned_dirs
 
 
 # Inherited from WSLg / GNOME / etc. these env vars make Firefox prefer a
@@ -81,6 +82,9 @@ _X_SOCKET = re.compile(r"@?/tmp/\.X11-unix/X(\d+)")
 _FIRST_DISPLAY = 99
 _LAST_DISPLAY = 399
 _ATTEMPTS = 10
+
+#: The directory holding one display's Xauthority file (`_owned_dirs`).
+XAUTH_PREFIX = "invpw-xauth-"
 
 #: The one authorization protocol Xvfb and every X client share.
 _COOKIE_NAME = b"MIT-MAGIC-COOKIE-1"
@@ -222,7 +226,12 @@ class _LinuxVirtualDisplay:
         # read or drive the browser's screen. Now the server loads a random
         # cookie from a file only this user can read, and only the browser,
         # whose environment names that file, presents it.
-        self._auth_dir = tempfile.mkdtemp(prefix="invpw-xauth-")
+        #
+        # Named with this process's pid and swept at the next start, like the
+        # session's profile: a display whose owner was killed never reaches
+        # `stop()`, and its cookie directory stayed for good (B268).
+        sweep_owned_dirs((XAUTH_PREFIX,))
+        self._auth_dir = owned_dir(XAUTH_PREFIX)
         self._auth_file = os.path.join(self._auth_dir, "Xauthority")
         _write_xauthority(self._auth_file, secrets.token_bytes(16))
         try:

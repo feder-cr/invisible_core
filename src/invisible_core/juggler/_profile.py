@@ -14,9 +14,77 @@ one writer the direct launch already used.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
-from typing import Dict
+from typing import Dict, Mapping, Optional
+
+from .._owned_dirs import owned_dir, sweep_owned_dirs
+from ..process import TOKEN_VAR, SessionToken, find_processes, terminate
+
+#: The session directories, named `<prefix><pid>_<random>` (`_owned_dirs`).
+PROFILE_PREFIX = "invisible_profile_"
+TMP_PREFIX = "invisible_tmp_"
+
+
+class SessionFiles:
+    """The directories one browser session writes, and the one place they end.
+
+    The profile, unless the caller named one, and a temporary directory for
+    the browser alone: ``env`` is the environment to launch with, the given
+    one with ``TMP``, ``TEMP`` and ``TMPDIR`` pointed at it, so the browser's
+    temporary files belong to the session instead of the system. ``remove()``,
+    called once the browser has exited, ends whatever still carries the
+    session's token and only then takes the directories away.
+
+    ⛔ THREE COPIES OF THIS LIVED IN THE CLIENTS, and all three left the
+    profile behind. Measured on Windows (B223): a session longer than a minute
+    left its `invisible_profile_*` holding an empty `saved-telemetry-pings`,
+    6,091 of them in one %TEMP%. At exit the browser starts `pingsender.exe`,
+    a child that outlives it holding the ping file inside the profile: the
+    removal ran after the browser, failed on that file, and the child then
+    deleted it. Every process of the session carries the token the launcher
+    stamps into the environment, children included, so they are ended first;
+    the launchers' own last step ended them anyway, a moment later, so nothing
+    changes on the network.
+
+    ⛔ AND THE TEMPORARY DIRECTORY IS NOT A NICETY (B267). Firefox writes into
+    the system one and cleans up when a job finishes, and a session is short:
+    measured, a 70 s session left two 4 MB copies of the Remote Settings
+    certificate bundle in %TEMP%, and one machine had 439. The directory is
+    made inside this process's own, so a caller's ``TMP`` still decides where
+    it lives. No page can read where the temporary directory is.
+
+    The names carry this process's pid, and a new session first sweeps the
+    directories of processes that are gone (``_owned_dirs``): what an owner
+    killed before ``remove()`` left behind (B268).
+    """
+
+    def __init__(self, profile_dir: Optional[str] = None,
+                 env: Optional[Mapping[str, str]] = None) -> None:
+        base = dict(os.environ if env is None else env)
+        self.token = SessionToken(base.get(TOKEN_VAR, ""))
+        self.owns_profile = profile_dir is None
+        sweep_owned_dirs((PROFILE_PREFIX, TMP_PREFIX))
+        self.tmp = owned_dir(TMP_PREFIX)
+        try:
+            self.profile = profile_dir or owned_dir(PROFILE_PREFIX)
+        except BaseException:
+            remove_profile(self.tmp)
+            raise
+        self.env = dict(base, TMP=self.tmp, TEMP=self.tmp, TMPDIR=self.tmp)
+
+    def remove(self) -> None:
+        """End what still carries the session's token, then remove the
+        directories this session made - never a profile the caller named.
+        Never raises, and a second call finds nothing to do."""
+        try:
+            terminate(find_processes(self.token))
+        except Exception:
+            pass
+        if self.owns_profile:
+            remove_profile(self.profile)
+        remove_profile(self.tmp)
 
 
 def remove_profile(directory: str) -> None:

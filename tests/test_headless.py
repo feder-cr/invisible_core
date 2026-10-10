@@ -1017,14 +1017,17 @@ def test_a_cookie_with_newline_bytes_is_written_byte_for_byte(tmp_path):
 
 @pytest.mark.unit
 def test_a_display_that_never_starts_leaves_no_cookie_behind(monkeypatch):
+    # The directory is made through `_owned_dirs.owned_dir`, which asks
+    # `tempfile`: the module is where to watch.
+    import tempfile
     made = []
-    real_mkdtemp = headless.tempfile.mkdtemp
+    real_mkdtemp = tempfile.mkdtemp
 
     def mkdtemp(**kw):
         made.append(real_mkdtemp(**kw))
         return made[-1]
 
-    monkeypatch.setattr(headless.tempfile, "mkdtemp", mkdtemp)
+    monkeypatch.setattr(tempfile, "mkdtemp", mkdtemp)
     _only_these_locks(monkeypatch)
     _proc(monkeypatch)
     _stub_start(monkeypatch, failing={f":{n}" for n in range(99, 400)})
@@ -1063,3 +1066,35 @@ def test_a_dual_stack_listener_on_the_x_port_does_not_stop_the_display(monkeypat
             vd.stop()
     finally:
         s.close()
+
+
+def test_a_display_sweeps_the_cookie_directory_of_a_gone_owner(tmp_path, monkeypatch):
+    """B268: a display whose owner was killed never reaches `stop()`, and its
+    cookie directory stayed for good. Named with the owner's pid now, and
+    swept by the next display that starts; a live owner's is left alone."""
+    import subprocess
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(headless, "_binary_on_path", lambda name: True)
+    monkeypatch.setattr(_LinuxVirtualDisplay, "_start_server",
+                        lambda self: setattr(self, "_display", ":123"))
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    left = tmp_path / f"{headless.XAUTH_PREFIX}{gone.pid}_left"
+    left.mkdir()
+    (left / "Xauthority").write_bytes(b"x")
+    mine = tmp_path / f"{headless.XAUTH_PREFIX}{os.getpid()}_mine"
+    mine.mkdir()
+
+    vd = _LinuxVirtualDisplay()
+    vd.start()
+    try:
+        assert not left.exists(), "the cookie directory of a gone owner was not swept"
+        assert mine.is_dir(), "a live owner's cookie directory was swept"
+        auth = tmp_path / os.path.dirname(vd.launch_env()["XAUTHORITY"])
+        assert auth.name.startswith(f"{headless.XAUTH_PREFIX}{os.getpid()}_")
+    finally:
+        vd.stop()
+    mine.rmdir()
+    assert os.listdir(tmp_path) == []

@@ -296,6 +296,9 @@ CONTRACT = {
         "clamp_to_viewport", "fine_timer", "fit_timeline",
         "domain_matches", "host_of", "only_set", "read_version",
         "remove_profile",
+        # Since the release after 39.34.0: the files of one browser session,
+        # which the three clients made and removed each in its own way (B223).
+        "SessionFiles",
     },
     "invisible_core.juggler.actions": {"Actions"},
     "invisible_core.juggler.connection": {"ProtocolError", "TargetClosedError"},
