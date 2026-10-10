@@ -64,6 +64,11 @@ FIREFOX_OVERRIDES = {
 }
 
 
+def _sleep_ms(ms: float) -> None:
+    if ms > 0.0:
+        time.sleep(ms / 1000.0)
+
+
 class UnknownKey(ValueError):
     """The name is not in the layout. ⛔ It is REJECTED instead of inventing
     an empty event: a `keyCode: 0` does not fail, it lies."""
@@ -104,10 +109,18 @@ def _build_closure() -> dict:
             out[alias] = descr
         if d.get("location"):
             continue
+        # ⛔ THE CHARACTER RESOLVES LIKE ITS KEY, shifted form included. It
+        # used to point at the description WITHOUT it, so with Shift held
+        # `press("2")` sent `key: "2"` with `shiftKey: true` - Shift on Digit2
+        # is `@` on every keyboard - while `press("Digit2")` sent `@` (B270).
         if len(descr["key"]) == 1:
-            out.setdefault(descr["key"], descr)
+            out.setdefault(descr["key"], dict(descr, shifted=shifted))
+        # ⛔ AND A CHARACTER THAT ONLY EXISTS WITH SHIFT SAYS SO: `@`, `!`,
+        # `A` are typed with Shift down, and `down` holds it for them
+        # whoever forgot to (see `down`).
         if shifted:
-            out.setdefault(shifted["key"], dict(shifted, shifted=None))
+            out.setdefault(shifted["key"],
+                           dict(shifted, shifted=None, needs_shift=True))
     return out
 
 
@@ -127,6 +140,9 @@ class Keyboard:
         self.session = session
         self.modifiers: set = set()
         self.pressed: set = set()
+        #: The codes `down` pressed Shift for on its own (see `down`), so `up`
+        #: of the same key releases it.
+        self._implicit_shift: set = set()
         #: ⛔ THE RHYTHM HAS AN OWNER NOW, and this is it.
         #:
         #: A keypress used to be two protocol messages back to back, so a page
@@ -180,8 +196,23 @@ class Keyboard:
             m |= MODIFIER_MASK.get(name, 0)
         return m
 
+    def needs_shift(self, key: str) -> bool:
+        """True for a character that only exists with Shift down (`A`, `@`,
+        `!`) - by name, never by key code: `Digit2` is a key, `@` is what Shift
+        makes of it."""
+        d = LAYOUT_CLOSURE.get(key)
+        return bool(d and d.get("needs_shift"))
+
     # ── the verbs ────────────────────────────────────────────────────────────
     def down(self, key: str) -> None:
+        # ⛔ A CHARACTER THAT ONLY EXISTS WITH SHIFT IS NEVER SENT WITHOUT IT
+        # (B270). `press` and `type` hold Shift themselves, with the timing of
+        # this hand; this is the floor under every other way in - a raw
+        # `keyboard.down("@")` - so no path can send `@` with `shiftKey:
+        # false`, which no keyboard produces. Released by `up` of the same key.
+        if self.needs_shift(key) and "Shift" not in self.modifiers:
+            self.down("Shift")
+            self._implicit_shift.add(LAYOUT_CLOSURE[key]["code"])
         d = self.describe(key)
         repeat = d["code"] in self.pressed
         self.pressed.add(d["code"])
@@ -211,6 +242,9 @@ class Keyboard:
                       "keyCode": d["keyCodeWithoutLocation"],
                       "location": d["location"], "repeat": False},
                      session=self.session, timeout=10)
+        if d["code"] in self._implicit_shift:
+            self._implicit_shift.discard(d["code"])
+            self.up("Shift")
 
     def press(self, key: str, *, dwell_ms: Optional[float] = None) -> None:
         """`press("a")`, `press("Enter")`, `press("Control+Shift+KeyA")`.
@@ -242,13 +276,26 @@ class Keyboard:
         # session's hand rather than a pipe round trip.
         if dwell_ms is None:
             dwell_ms = self._dwell_ms()
+        # ⛔ A FINAL KEY THAT ONLY EXISTS WITH SHIFT GETS SHIFT, with this
+        # hand's lead and release (B270): `press("@")` used to send `@` with
+        # `shiftKey: false`.
+        shift = (self.needs_shift(final) and "Shift" not in self.modifiers
+                 and "Shift" not in held)
+        lead_ms, lag_ms = self._plan_shift(1)[0] if shift else (0.0, 0.0)
         for m in held:
             self.down(m)
         try:
-            self.down(final)
-            if dwell_ms > 0.0:
-                time.sleep(dwell_ms / 1000.0)
-            self.up(final)
+            if shift:
+                self.down("Shift")
+                _sleep_ms(lead_ms)
+            try:
+                self.down(final)
+                _sleep_ms(dwell_ms)
+                self.up(final)
+            finally:
+                if shift:
+                    _sleep_ms(lag_ms)
+                    self.up("Shift")
         finally:
             for m in reversed(held):
                 self.up(m)
@@ -286,12 +333,43 @@ class Keyboard:
                     "fake a keypress." % ch)
 
         plan = self._plan(text)
+        # ⛔ A RUN OF CHARACTERS THAT ONLY EXIST WITH SHIFT IS TYPED UNDER ONE
+        # SHIFT, the way a hand types `ABC` or `!!` (B270). Shift goes down
+        # its lead before the run's first key and comes up its lag after the
+        # run's last; both are taken out of the gaps around the run, so the
+        # per-key rhythm `plan_typing` drew stays what it was.
+        shifted = [self.needs_shift(ch) and "Shift" not in self.modifiers
+                   for ch in text]
+        starts = [s and (i == 0 or not shifted[i - 1])
+                  for i, s in enumerate(shifted)]
+        ends = [s and (i == len(text) - 1 or not shifted[i + 1])
+                for i, s in enumerate(shifted)]
+        timing = iter(self._plan_shift(sum(starts)))
+        lead_at, lag_at = {}, {}
+        for i in range(len(text)):
+            if starts[i]:
+                lead_at[i], lag = next(timing)
+            if ends[i]:
+                lag_at[i] = lag
         for i, ch in enumerate(text):
             dwell_ms, gap_ms = plan[i]
+            if starts[i]:
+                self.down("Shift")
+                _sleep_ms(lead_at[i])
             self.press(ch, dwell_ms=dwell_ms)
+            if i == len(text) - 1:
+                if ends[i]:
+                    _sleep_ms(lag_at[i])
+                    self.up("Shift")
+                break
             wait_ms = delay_ms if delay_ms else gap_ms
-            if wait_ms > 0.0 and i < len(text) - 1:
-                time.sleep(wait_ms / 1000.0)
+            if ends[i]:
+                _sleep_ms(lag_at[i])
+                self.up("Shift")
+                wait_ms -= lag_at[i]
+            if starts[i + 1]:
+                wait_ms -= lead_at[i + 1]
+            _sleep_ms(wait_ms)
 
     def _dwell_ms(self) -> float:
         """How long ONE key stays down, for a press that is not part of typed
@@ -313,6 +391,16 @@ class Keyboard:
             return [(0.0, 0.0)] * len(text)
         from ._behaviour import plan_typing
         return plan_typing(text, self.persona, nonce=self.acts.next("typing"))
+
+    def _plan_shift(self, runs: int):
+        """One `(lead_ms, lag_ms)` per run typed under Shift, from the
+        session's persona; no timing without one, which is what turning
+        humanising off means. Its own act stream, so drawing it moves no
+        number `_plan` draws."""
+        if self.persona is None or runs == 0:
+            return [(0.0, 0.0)] * runs
+        from ._behaviour import plan_shift
+        return plan_shift(self.persona, runs, nonce=self.acts.next("typing-shift"))
 
     def insert_text(self, text: str) -> None:
         """The text goes in without key events. This is what is needed for
