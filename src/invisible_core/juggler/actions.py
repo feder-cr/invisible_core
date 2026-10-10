@@ -659,7 +659,7 @@ class Actions:
             # which no real input device produces.
             return self._act_on_target(
                 f, element, point,
-                approach=lambda: self._approach(point, modifiers=modifiers),
+                approach=lambda: self._approach_to_press(point, modifiers=modifiers),
                 commit=act,
                 force=bool(opts.get("force")))
         return self._retry(selector, run, timeout=timeout, frame_id=frame_id,
@@ -718,7 +718,7 @@ class Actions:
             # only until one of them learns something the other doesn't.
             self._act_on_target(
                 f, element, point,
-                approach=lambda: self._approach(point),
+                approach=lambda: self._approach_to_press(point),
                 commit=lambda: self._click_at_point(point),
                 force=bool(opts.get("force")))
             if not self.inj.element_state(f, element, state):
@@ -1067,6 +1067,7 @@ class Actions:
         # and arriving at the source in one event is the same tell as crossing
         # the page in one.
         self._glide(start)
+        self._settle_before_press()
         self._mouse_event("mousedown", start, buttons=BUTTON_MASK[0],
                           click_count=1)
 
@@ -1103,7 +1104,7 @@ class Actions:
 
     def click_at(self, x: float, y: float, *, button: int = 0,
                 clicks: int = 1, delay_ms: Optional[float] = None):
-        self._approach((x, y))
+        self._approach_to_press((x, y))
         self._click_at_point((x, y), button=button, clicks=clicks,
                              delay_ms=delay_ms)
 
@@ -1141,6 +1142,36 @@ class Actions:
                               click_count=n, modifiers=modifiers)
             if gap_ms > 0.0:
                 time.sleep(gap_ms / 1000.0)
+
+    def _approach_to_press(self, point, *, modifiers: int = 0) -> int:
+        """`_approach`, then the hand's pause before it presses (B271).
+
+        ⛔ THE PAUSE BELONGS TO THE APPROACH, NOT TO THE PRESS: `_act_on_target`
+        checks the target between the two, and a pause after that check would
+        be a window in which the element can move under a press already
+        decided ([B217])."""
+        sent = self._approach(point, modifiers=modifiers)
+        self._settle_before_press()
+        return sent
+
+    def _settle_before_press(self) -> None:
+        """The pause between the pointer arriving and the button going down.
+
+        ⛔ IT WAS ONE PROTOCOL ROUND TRIP (B271): measured against a person on
+        Firefox 151 on Windows, the press came 8-16 ms after the last mousemove
+        where a hand waits 46-1063 ms, median about 180, while the eye confirms
+        the target. Every client gets here - the wrapper after its own cursor
+        has walked onto the element, selenium and puppeteer after `_glide` - so
+        it is drawn once, here, from the session's hand. Nothing without a
+        persona, which is what turning humanising off means. `mouse.down()`
+        does not come here: there the caller scripts the timing.
+        """
+        if self.pointer_persona is None:
+            return
+        from ._behaviour import plan_press_settle
+        pause_ms = plan_press_settle(self.pointer_persona,
+                                     nonce=self.acts.next("press-settle"))
+        time.sleep(pause_ms / 1000.0)
 
     def _click_plan(self, clicks: int, delay_ms: Optional[float] = None):
         """How long each press lasts and how long until the next one.
