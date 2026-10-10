@@ -494,6 +494,53 @@ def test_an_unusable_declaration_reports_not_checkable_with_a_reason(
     _pin.assert_core_pin("fake-consumer")
 
 
+def _another_world(report: dict, here) -> "str | None":
+    """Why the installed core is NOT this tree, or None when it is.
+
+    Two ways for it not to be, and the guard used to know one. An EDITABLE core
+    pointing somewhere else is the 2026-09-16 case below. A REGULAR install is a
+    copy, and it is this tree only as far as a pin can tell: at the same
+    version. Measured 2026-10-10 from a worktree of 38.34.0 on a machine whose
+    interpreter has a regular 34.29.0 install and a wrapper pinning it: `editable`
+    is None, so the guard let it through, and the test reported `violated` about
+    a wrapper that was never installed against this tree.
+
+    An editable core pointing HERE is the case the test exists for, recorded
+    version or not: a seal rolled in this tree after `pip install -e` leaves the
+    record behind, and that stale pair is exactly what it has to catch.
+    """
+    import pathlib
+    installed = report.get("editable")
+    if installed:
+        if pathlib.Path(installed).resolve() != pathlib.Path(here).resolve():
+            return ("the installed core is %s, not this tree (%s): the installed "
+                    "wrapper's pin says nothing about the code under test"
+                    % (installed, here))
+        return None
+    recorded, have = report.get("recorded"), report.get("have")
+    if recorded and have and recorded != have:
+        return ("the installed core is a regular install of %s, not this tree "
+                "(%s at %s): the installed wrapper was pinned against that copy"
+                % (recorded, have, here))
+    return None
+
+
+@pytest.mark.parametrize("editable,recorded,have,other", [
+    ("ELSEWHERE", "30.22.0", "30.23.0", True),     # 2026-09-16
+    ("HERE", "30.22.0", "30.23.0", False),         # a seal rolled here: the subject
+    ("HERE", "30.23.0", "30.23.0", False),
+    (None, "34.29.0", "38.34.0", True),            # 2026-10-10
+    (None, "38.34.0", "38.34.0", False),           # a regular install OF this version
+    (None, None, "38.34.0", False),                # no core installed at all
+])
+def test_the_real_installation_test_knows_when_it_has_no_subject(
+        tmp_path, editable, recorded, have, other):
+    here = tmp_path / "here"
+    paths = {"HERE": str(here), "ELSEWHERE": str(tmp_path / "elsewhere")}
+    report = {"editable": paths.get(editable), "recorded": recorded, "have": have}
+    assert (_another_world(report, here) is not None) is other
+
+
 def test_the_real_installation_reports_a_pin_that_holds():
     """Not a tautology: this reads the installed wrapper's real Requires-Dist
     and this repo's real seal, and is the test that catches a seal rolled
@@ -508,14 +555,13 @@ def test_the_real_installation_reports_a_pin_that_holds():
     # two worlds. Measured 2026-09-16 pushing 30.23.0 from a worktree: want
     # 30.22.0, have 30.23.0, and the pre-push hook refused a release the rules
     # ORDER this way - bump the core, publish, then move the pin. The question
-    # this test asks only has a subject when the installed core IS this tree.
+    # this test asks only has a subject when the installed core IS this tree,
+    # and `_another_world` is the one place that decides whether it is.
     import pathlib
     here = pathlib.Path(__file__).resolve().parents[1]
-    installed = report.get("editable")
-    if installed and pathlib.Path(installed).resolve() != here:
-        pytest.skip("the installed core is %s, not this tree (%s): the installed "
-                    "wrapper's pin says nothing about the code under test"
-                    % (installed, here))
+    elsewhere = _another_world(report, here)
+    if elsewhere:
+        pytest.skip(elsewhere)
     assert report["verdict"] in ("holds", "not-checkable"), report
     if report["verdict"] == "not-checkable":
         pytest.skip("invisible-playwright is not installed here: " + str(report["reason"]))

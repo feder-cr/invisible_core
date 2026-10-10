@@ -54,7 +54,7 @@ already did, including the two decisions that look inconsistent and are not:
 
   * a missing PIN checker REFUSES, while a missing NAME word list carries on
     with a warning. The pin checker is a maintainer tool that must be beside
-    this checkout and its absence means the workbench moved; the word list
+    the main checkout and its absence means the workbench moved; the word list
     deliberately lives outside every public repo, so demanding it would leave
     every clone red by default, which is how gates get switched off.
 
@@ -79,6 +79,7 @@ __all__ = [
     "push_range",
     "foreign_identities",
     "outside_the_hook",
+    "workbench_scripts",
     "HOOK_LOCATION_VARIABLES",
     "GATE_NOTHING_TO_DO",
     "HookConfigError",
@@ -91,9 +92,11 @@ __all__ = [
 #: fatal. Treating every non-zero code alike made a correct tag push impossible.
 GATE_NOTHING_TO_DO = 5
 
-#: What the pin and name gates are called in the workbench, two levels up from a
-#: repository checkout. Not importable and not meant to be: they are maintainer
-#: tools, and one of them reads a word list that must never enter a public repo.
+#: What the pin and name gates are called in the workbench, two levels up from
+#: the repository's MAIN checkout (`workbench_scripts` says why the main one and
+#: not the checkout being pushed). Not importable and not meant to be: they are
+#: maintainer tools, and one of them reads a word list that must never enter a
+#: public repo.
 _PIN_CHECKER = "sync_core_pin.py"
 _NAME_CHECKER = "check_forbidden_names.py"
 #: A third, and it is a different question from the name scan rather than more
@@ -307,12 +310,45 @@ def _masked(email: str) -> str:
 
 
 def _git_out(repo: Path, *args: str) -> Optional[str]:
+    # `outside_the_hook` for the same reason `_subprocess_run` uses it: the
+    # question is about `repo`, the argument, and an inherited GIT_DIR answers
+    # about whichever repository git named to the hook instead. In a real push
+    # the two are the same repository; in a test they are not.
     try:
         out = subprocess.run(["git", "-C", str(repo), *args],
-                             capture_output=True, text=True, check=False)
+                             capture_output=True, text=True, check=False,
+                             env=outside_the_hook(dict(os.environ)))
     except FileNotFoundError:
         return None
     return out.stdout if out.returncode == 0 else None
+
+
+def workbench_scripts(root: Path) -> Path:
+    """Where the maintainer gates live: `scripts/` two levels above the MAIN checkout.
+
+    The two-level rule is right; the tree it used to be measured from was not.
+    `root.parent.parent` is the workbench only for a checkout that sits at
+    `<workbench>/release/<repo>`. A worktree sits wherever it was created, and
+    the workbench's rule 17 says a worktree is where all the work happens. From
+    `<tmp>/wt-x/invisible_playwright` the hook looked for `<tmp>/scripts`: the
+    pin gate refused over a checker it could not reach, and the name and
+    disclosure scans skipped with a line that reads like a normal one.
+
+    git names the main checkout. From a worktree `--git-common-dir` is the main
+    checkout's `.git`; from the main checkout or a plain clone it is the
+    repository's own, so nothing changes there. `--path-format=absolute`
+    because without it git answers relative to the cwd in one case and
+    absolute in the other, and a path that changes shape depending on where you
+    stand is not something to join onto another one.
+
+    With no answer from git, `root` itself is the anchor, which is what every
+    checkout used before; the gates that need a script already refuse or say
+    out loud that they skipped when it is not there.
+    """
+    out = _git_out(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    common = Path(out.strip()) if out and out.strip() else None
+    main_checkout = common.parent if common is not None and common.is_absolute() else root
+    return main_checkout.parent.parent / "scripts"
 
 
 def foreign_identities(push_refs: str, repo: Path) -> List[Tuple[str, str, str]]:
@@ -424,7 +460,7 @@ def main(
 
     ran: List[str] = []
     skipped: List[str] = []
-    workbench = root.parent.parent / "scripts"
+    workbench = workbench_scripts(root)
 
     # --- the suite -----------------------------------------------------
     if cfg["pytest"]:
@@ -478,7 +514,9 @@ def main(
                 _say("REFUSED - the invisible-core pin gate is not reachable.", err=True)
                 _say(f"  looked for: {checker}", err=True)
                 _say(f"  from:       {root}", err=True)
-                _say("The workbench moved, or this is a clone at another depth. "
+                _say("The workbench moved, or this repository's main checkout is "
+                     "not one of its siblings (a clone elsewhere, or a worktree "
+                     "of one). "
                      "Point INVISIBLE_PIN_CHECK at sync_core_pin.py, or push with "
                      "INVISIBLE_PIN_CHECK=skip to state on the record that the "
                      "pin is going out unchecked.", err=True)
@@ -584,12 +622,14 @@ def main(
 
     # --- the language ------------------------------------------------
     # ⛔ THIS ONE DOES NOT LIVE IN THE WORKBENCH, AND THAT IS THE POINT. Every
-    # gate above is an external script found by walking up from the repo, so
-    # from a git WORKTREE - which rule 17 says is where all the work happens -
-    # the hook cannot find it and prints `SKIPPED: name scan, disclosure scan`
-    # in a line that reads like a normal one. This check ships inside the
-    # package both repos already depend on, so it is present wherever the core
-    # is, worktree or clone or runner, and it has nothing to skip.
+    # gate above is an external script found by walking up from the repo. Until
+    # `workbench_scripts` measured that walk from the MAIN checkout, a git
+    # WORKTREE - which rule 17 says is where all the work happens - could not
+    # find them, and the hook printed `SKIPPED: name scan, disclosure scan` in a
+    # line that reads like a normal one. A clone outside the workbench and a CI
+    # runner still cannot. This check ships inside the package both repos
+    # already depend on, so it is present wherever the core is, worktree or
+    # clone or runner, and it has nothing to skip.
     #
     # It also answers about the repository being PUSHED rather than about the
     # one it lives in: the tree is an argument. The script version could only
