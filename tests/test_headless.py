@@ -787,11 +787,13 @@ def test_the_display_is_not_on_the_network():
         vd.stop()
 
 
-def _x_setup_status(display: str, cookie: bytes = b"") -> int:
+def _x_open(display: str, cookie: bytes = b""):
     """Open the display's abstract socket and send the X11 connection setup,
     with ``cookie`` as MIT-MAGIC-COOKIE-1 or no authorization at all. Returns
-    the server's first reply byte: 1 accepted, 0 refused, 2 authenticate.
-    Spoken by hand so the test needs no X client package on the host."""
+    the server's first reply byte - 1 accepted, 0 refused, 2 authenticate -
+    and the socket, still open: an accepted one is a client of the server
+    until the caller closes it. Spoken by hand so the test needs no X client
+    package on the host."""
     import socket
     import struct
 
@@ -805,9 +807,91 @@ def _x_setup_status(display: str, cookie: bytes = b"") -> int:
     try:
         s.connect("\0/tmp/.X11-unix/X" + display[1:])
         s.sendall(request)
-        return s.recv(1)[0]
-    finally:
+        return s.recv(1)[0], s
+    except BaseException:
         s.close()
+        raise
+
+
+def _x_setup_status(display: str, cookie: bytes = b"") -> int:
+    """``_x_open``'s reply byte, with the connection closed again."""
+    status, s = _x_open(display, cookie)
+    s.close()
+    return status
+
+
+def _running(pid: int) -> bool:
+    """A process that exists and is not a zombie: one that died and that its
+    new parent has not reaped yet still answers ``kill(pid, 0)``."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] not in ("Z", "X")
+    except OSError:
+        return False
+
+
+#: A session owner and nothing else: it starts the display, says where it is,
+#: and waits to be killed.
+_OWNER = (
+    "import time\n"
+    "from invisible_core._headless import _LinuxVirtualDisplay\n"
+    "vd = _LinuxVirtualDisplay()\n"
+    "vd.start()\n"
+    "env = vd.launch_env()\n"
+    "print(env['DISPLAY'], env['XAUTHORITY'], vd._proc.pid, flush=True)\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.e2e
+@pytest.mark.linux_only
+@real_xvfb
+def test_a_display_does_not_outlive_a_killed_owner():
+    """⛔ Known-bad until this test: an owner killed with SIGKILL, or with a
+    SIGTERM Python does not handle, never runs ``stop()``, and its Xvfb lived
+    on forever with the display number taken (measured: both signals, the
+    browser processes gone and the server running). The browser already ends
+    with its owner - Juggler closes it at end of file on the pipe - so the
+    display has to end with the browser. Here the test plays the browser: a
+    client holding the session's cookie, which outlives the owner by a moment
+    and then leaves."""
+    import shutil
+    import signal
+    import subprocess
+    import time
+
+    owner = subprocess.Popen([sys.executable, "-c", _OWNER],
+                             stdout=subprocess.PIPE, text=True)
+    xvfb = auth_dir = client = None
+    try:
+        display, xauthority, pid = owner.stdout.readline().split()
+        xvfb, auth_dir = int(pid), os.path.dirname(xauthority)
+        with open(xauthority, "rb") as f:
+            cookie = f.read()[-16:]
+        status, client = _x_open(display, cookie)
+        assert status == 1, "the session's own cookie was refused"
+        owner.send_signal(signal.SIGKILL)
+        owner.wait()
+        time.sleep(1)
+        assert _running(xvfb), "the display went away under a client still on it"
+        client.close()
+        client = None
+        deadline = time.monotonic() + headless._TERMINATE_DELAY + 10
+        while _running(xvfb) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        assert not _running(xvfb), (
+            f"the Xvfb of a killed owner was still running "
+            f"{headless._TERMINATE_DELAY + 10}s after its last client left")
+    finally:
+        if client is not None:
+            client.close()
+        if owner.poll() is None:
+            owner.kill()
+            owner.wait()
+        if xvfb is not None and _running(xvfb):
+            os.kill(xvfb, signal.SIGKILL)
+        if auth_dir is not None:
+            shutil.rmtree(auth_dir, ignore_errors=True)
 
 
 @pytest.mark.e2e
@@ -862,6 +946,20 @@ def test_xvfb_is_started_off_the_network_and_with_access_control(monkeypatch):
     assert "-ac" not in argv, "access control is off again"
     assert ("-auth", vd._auth_file) in pairs, argv
     assert "-listen" not in argv, argv
+
+
+@pytest.mark.unit
+def test_the_display_ends_with_its_last_client(monkeypatch):
+    """The unit half of ``test_a_display_does_not_outlive_a_killed_owner``:
+    take ``-terminate`` out and this goes red on any host. And the delay must
+    not be zero: a client that comes and goes before the browser connects
+    would end the display the browser is about to open."""
+    vd = _LinuxVirtualDisplay()
+    vd._auth_file = "/run/invpw-test/Xauthority"
+    argv = _xvfb_argv(monkeypatch, vd)
+    pairs = list(zip(argv, argv[1:]))
+    assert ("-terminate", str(headless._TERMINATE_DELAY)) in pairs, argv
+    assert headless._TERMINATE_DELAY > 0
 
 
 def _stub_one_start(monkeypatch):
