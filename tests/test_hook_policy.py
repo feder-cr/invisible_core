@@ -105,9 +105,11 @@ def make_repo(tmp_path: Path, *, block: str | None = "pytest = false\npin = fals
               workbench: bool = True, untested: "Sequence[str]" = ()) -> Path:
     """A checkout at the real depth, with the workbench two levels above it.
 
-    The depth matters: the policy finds the maintainer scripts at
-    `<root>/../../scripts`, which is where they sit relative to a real checkout,
-    and a test that flattened the layout would never exercise the lookup.
+    The depth matters: the policy finds the maintainer scripts two levels above
+    the repository's MAIN checkout, which for a repository made here is `root`
+    itself, so `<root>/../../scripts`. A test that flattened the layout would
+    never exercise the lookup. A worktree placed somewhere else is
+    `_a_worktree_of`.
     """
     root = tmp_path / "release" / "pkg"
     root.mkdir(parents=True)
@@ -234,6 +236,79 @@ def test_an_unreachable_pin_checker_refuses_instead_of_skipping(tmp_path, capsys
     out = capsys.readouterr()
     assert "REFUSED" in out.err and "not reachable" in out.err
     assert not run.ran(_NAME), "the name scan ran past a refusal"
+
+
+def _git_in(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t",
+                    *args], check=True, capture_output=True,
+                   env=hooks.outside_the_hook(dict(os.environ)))
+
+
+def _a_worktree_of(root: Path, tmp_path: Path) -> Path:
+    """A worktree of `root`, made where worktrees get made: NOT beside it.
+
+    Two levels above it there is no `scripts/`, so a policy that measures from
+    the tree being pushed finds nothing there, and one that measures from the
+    main checkout finds the workbench `make_repo` built.
+    """
+    _git_in(root, "add", "-A")
+    _git_in(root, "commit", "-qm", "c")
+    wt = tmp_path / "elsewhere" / "wt-x" / "pkg"
+    _git_in(root, "worktree", "add", "-q", "--detach", str(wt))
+    assert not (wt.parent.parent / "scripts").exists(), "the layout proves nothing"
+    return wt
+
+
+def test_the_workbench_is_two_levels_above_the_main_checkout(tmp_path):
+    root = make_repo(tmp_path)
+    assert hooks.workbench_scripts(root).resolve() == (tmp_path / "scripts").resolve()
+
+
+def test_from_a_worktree_the_workbench_is_still_the_main_checkouts(tmp_path):
+    """The defect, measured on 2026-10-10 pushing from `<tmp>/wt-link/...`: the
+    pin gate looked for `<tmp>/scripts/sync_core_pin.py` and refused."""
+    root = make_repo(tmp_path)
+    wt = _a_worktree_of(root, tmp_path)
+    assert hooks.workbench_scripts(wt).resolve() == (tmp_path / "scripts").resolve()
+
+
+def test_a_push_from_a_worktree_runs_all_three_workbench_gates(tmp_path, capsys):
+    """The pin gate refused, and the name and disclosure scans printed SKIPPED in
+    a line that reads like a normal one. All three have to RUN, and from the
+    workbench of the main checkout."""
+    root = make_repo(tmp_path, block="pytest = false\npin = true")
+    wt = _a_worktree_of(root, tmp_path)
+    code, run = run_policy(wt)
+    out = capsys.readouterr()
+    assert code == 0, out.err
+    for gate in (_PIN, _NAME, _DISCLOSURE):
+        assert run.ran(gate), f"{gate} did not run from a worktree"
+        script = next(Path(part) for part in run.call_for(gate) if part.endswith(gate))
+        assert script.resolve() == (tmp_path / "scripts" / gate).resolve()
+    skipped = out.out.partition("SKIPPED:")[2].splitlines()[0] if "SKIPPED:" in out.out else ""
+    for label in ("pin gate", "name scan", "disclosure scan"):
+        assert label not in skipped, f"the summary still says {label} was skipped"
+
+
+def test_the_lookup_asks_about_its_argument_not_the_hooks_git_dir(tmp_path, monkeypatch):
+    """git hands a hook an absolute GIT_DIR. Inherited, it answers about THAT
+    repository whatever `-C` says. Here it names a decoy with no workbench."""
+    root = make_repo(tmp_path)
+    wt = _a_worktree_of(root, tmp_path)
+    decoy = tmp_path / "decoy" / "a" / "b"
+    decoy.mkdir(parents=True)
+    _git_in(decoy, "init", "-q")
+    monkeypatch.setenv("GIT_DIR", str(decoy / ".git"))
+    assert hooks.workbench_scripts(wt).resolve() == (tmp_path / "scripts").resolve()
+
+
+def test_with_no_repository_the_anchor_is_the_tree_itself(tmp_path, monkeypatch):
+    """No answer from git is not a guess: it is what every checkout used before,
+    and the gates that need a script already refuse or say they skipped."""
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    folder = tmp_path / "a" / "b" / "c"
+    folder.mkdir(parents=True)
+    assert hooks.workbench_scripts(folder) == folder.parent.parent / "scripts"
 
 
 def test_skipping_the_pin_is_possible_and_the_summary_says_so(tmp_path, capsys):
