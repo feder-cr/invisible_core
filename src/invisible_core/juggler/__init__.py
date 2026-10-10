@@ -40,7 +40,9 @@ from ._pacing import (
     DONE, MIN_EVENT_INTERVAL_MS, SLEEP, Ev, Pacer, clamp_to_viewport,
     fine_timer, fit_timeline,
 )
-from ._profile import domain_matches, host_of, only_set, read_version, remove_profile
+from ._profile import (
+    SessionFiles, domain_matches, host_of, only_set, read_version, remove_profile,
+)
 
 __all__ = [
     "actions", "connection", "injected", "keyboard", "keylayout", "lifecycle",
@@ -51,5 +53,6 @@ __all__ = [
     "CursorMotion",
     "DONE", "MIN_EVENT_INTERVAL_MS", "SLEEP", "Ev", "Pacer",
     "clamp_to_viewport", "fine_timer", "fit_timeline",
-    "domain_matches", "host_of", "only_set", "read_version", "remove_profile",
+    "SessionFiles", "domain_matches", "host_of", "only_set", "read_version",
+    "remove_profile",
 ]

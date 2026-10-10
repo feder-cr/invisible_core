@@ -375,6 +375,17 @@ class PointerPersona:
     # and the pair is still delivered as a `dblclick` because the event is born
     # from `clickCount`, not from the interval.
     dblclick_gap_median_ms: float
+    # Between the pointer arriving where it presses and the press: the moment
+    # the eye confirms the target. Median and sigma of a log-normal.
+    # ⛔ MEASURED, NOT ASSUMED (2026-10-10, B271): a person on Firefox 151 on
+    # Windows, fourteen clicks of a login form, paused 46-1063 ms between the
+    # last mousemove and the mousedown, median about 180 ms, with a long
+    # tail. The product pressed 8-16 ms after arriving - one protocol round
+    # trip - on every release back to 0.29.0. The range of the median and the
+    # wide sigma are the admission that one person is not a population.
+    # ⛔ APPENDED after every other field, so no existing seed moves.
+    press_settle_median_ms: float = 180.0
+    press_settle_sigma: float = 0.6
 
     @classmethod
     def from_seed(cls, seed: int) -> "PointerPersona":
@@ -399,6 +410,8 @@ class PointerPersona:
             click_dwell_median_ms=r.uniform(58.0, 124.0),
             click_dwell_sigma=r.uniform(0.20, 0.40),
             dblclick_gap_median_ms=r.uniform(95.0, 215.0),
+            press_settle_median_ms=r.uniform(120.0, 280.0),
+            press_settle_sigma=r.uniform(0.45, 0.75),
         )
 
 
@@ -486,6 +499,22 @@ class TypingPersona:
     # ⛔ DRAWN LAST, so every field above keeps the value it had for the same
     # seed.
     hesitation_sigma: float
+    # The Shift key around a character that only exists with it (`A`, `@`,
+    # `!`): how long Shift is down before that key goes down, and how long it
+    # stays down after the last such key comes up, medians of log-normals.
+    # [judg] informed by keystroke-dynamics work on modifier timing, where the
+    # modifier leads the key by roughly a tenth of a second and is released
+    # shortly after it; the ranges are the admission that hands differ.
+    #
+    # ⛔ THE SHIFT USED TO BE MISSING ALTOGETHER, and that is a fact a page
+    # reads off the event, not a timing: `@` came with `code: "Digit2"` and
+    # `shiftKey: false`, a combination no keyboard produces (B270).
+    #
+    # ⛔ DRAWN AFTER EVERYTHING ELSE, so every field above keeps the value it
+    # had for the same seed, and the per-key rhythm with it.
+    shift_lead_median_ms: float
+    shift_lag_median_ms: float
+    shift_sigma: float
 
     @classmethod
     def from_seed(cls, seed: int) -> "TypingPersona":
@@ -502,6 +531,9 @@ class TypingPersona:
             hesitation_rate=r.uniform(0.02, 0.07),
             hesitation_median_ms=r.uniform(420.0, 1250.0),
             hesitation_sigma=r.uniform(0.40, 0.70),
+            shift_lead_median_ms=r.uniform(70.0, 170.0),
+            shift_lag_median_ms=r.uniform(25.0, 110.0),
+            shift_sigma=r.uniform(0.30, 0.50),
         )
 
     def hesitation_ms(self, rng: random.Random) -> float:
@@ -541,6 +573,14 @@ def plan_click(persona: PointerPersona, clicks: int = 1,
     return out
 
 
+def plan_press_settle(persona: PointerPersona, nonce: int = 0) -> float:
+    """How long this hand waits, in milliseconds, between the pointer arriving
+    where it presses and the press. Its own tagged stream (`press-settle`), so
+    no number `plan_click` or the motion draw for the same seed moves (B271)."""
+    r = _rng(persona.seed, "press-settle", nonce)
+    return _log_normal(r, persona.press_settle_median_ms, persona.press_settle_sigma)
+
+
 def plan_typing(text: str, persona: TypingPersona,
                 nonce: int = 0) -> List[Tuple[float, float]]:
     """One `(dwell_ms, gap_ms)` per character of `text`.
@@ -574,6 +614,24 @@ def plan_typing(text: str, persona: TypingPersona,
             gap += persona.hesitation_ms(r)
         out.append((dwell, gap))
     return out
+
+
+def plan_shift(persona: TypingPersona, runs: int,
+               nonce: int = 0) -> List[Tuple[float, float]]:
+    """One `(lead_ms, lag_ms)` per run of characters typed under Shift.
+
+    `lead_ms` is how long Shift is down before the run's first key goes down,
+    `lag_ms` how long it stays down after the run's last key comes up. The
+    keyboard decides which characters need Shift - that is the layout's
+    knowledge - and asks here only how this hand times it.
+
+    ⛔ ITS OWN TAGGED STREAM (`typing-shift`), so the per-key plan of
+    `plan_typing` stays exactly what it was for the same seed and nonce.
+    """
+    r = _rng(persona.seed, "typing-shift", nonce)
+    return [(_log_normal(r, persona.shift_lead_median_ms, persona.shift_sigma),
+             _log_normal(r, persona.shift_lag_median_ms, persona.shift_sigma))
+            for _ in range(runs)]
 
 
 def plan_hesitation(persona: TypingPersona, act: str, nonce: int = 0,

@@ -43,10 +43,11 @@ import secrets
 import select
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Set as AbstractSet
 from typing import Optional
+
+from ._owned_dirs import owned_dir, sweep_owned_dirs
 
 
 # Inherited from WSLg / GNOME / etc. these env vars make Firefox prefer a
@@ -81,6 +82,9 @@ _X_SOCKET = re.compile(r"@?/tmp/\.X11-unix/X(\d+)")
 _FIRST_DISPLAY = 99
 _LAST_DISPLAY = 399
 _ATTEMPTS = 10
+
+#: The directory holding one display's Xauthority file (`_owned_dirs`).
+XAUTH_PREFIX = "invpw-xauth-"
 
 #: The one authorization protocol Xvfb and every X client share.
 _COOKIE_NAME = b"MIT-MAGIC-COOKIE-1"
@@ -121,6 +125,19 @@ def _write_xauthority(path: str, cookie: bytes) -> None:
 #: sessions starting together on a 16-thread host took up to 0.36 s, and a
 #: small or busy CI runner can be many times slower than that.
 _READY_TIMEOUT = 30.0
+
+#: How long the Xvfb stays up after its last client has gone (``-terminate``).
+#: The browser is the client, so the display ends with it, and the browser
+#: already ends with whoever drives it: Juggler closes it when its pipe
+#: reaches end of file. ``stop()`` is the ordinary end; this is the end when
+#: ``stop()`` never runs, because the owner died of SIGKILL or of a SIGTERM
+#: Python does not handle (``timeout``, ``docker stop``, a cancelled CI job).
+#: Until this existed that Xvfb lived forever, with its display number taken:
+#: measured, both signals left the server running and every browser process
+#: gone. The delay is cancelled by any client that connects, so a client that
+#: comes and goes BEFORE the browser (a refused one included, measured) does
+#: not take the display away from the browser that is still starting.
+_TERMINATE_DELAY = 10
 
 
 def _read_proc(path: str) -> str:
@@ -209,7 +226,12 @@ class _LinuxVirtualDisplay:
         # read or drive the browser's screen. Now the server loads a random
         # cookie from a file only this user can read, and only the browser,
         # whose environment names that file, presents it.
-        self._auth_dir = tempfile.mkdtemp(prefix="invpw-xauth-")
+        #
+        # Named with this process's pid and swept at the next start, like the
+        # session's profile: a display whose owner was killed never reaches
+        # `stop()`, and its cookie directory stayed for good (B268).
+        sweep_owned_dirs((XAUTH_PREFIX,))
+        self._auth_dir = owned_dir(XAUTH_PREFIX)
         self._auth_file = os.path.join(self._auth_dir, "Xauthority")
         _write_xauthority(self._auth_file, secrets.token_bytes(16))
         try:
@@ -274,6 +296,15 @@ class _LinuxVirtualDisplay:
         Access control is on: ``-auth`` loads the session's cookie (see
         ``start``). Until 37.33.0 it was ``-ac``, so with TCP gone the abstract
         socket was still open, without credentials, to every local process.
+
+        And the server ends with its last client (``-terminate``, see
+        ``_TERMINATE_DELAY``), which is the browser: a session whose owner is
+        killed no longer leaves an Xvfb behind. The browser opens the display
+        before anything else of its own does (``XRE_mainStartup``; the
+        ``glxtest`` probe is fired later), so the probe leaving never empties
+        the server while the browser is up. A ``start_new_session`` child is
+        not in the owner's process group, so without this nothing else would
+        ever stop it.
         """
         read_end, write_end = os.pipe()
         try:
@@ -287,6 +318,7 @@ class _LinuxVirtualDisplay:
                     "-nolisten", "unix",
                     "-nolisten", "tcp",
                     "-auth", self._auth_file,
+                    "-terminate", str(_TERMINATE_DELAY),
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

@@ -180,6 +180,8 @@ class Seal:
     playwright_min: str
     playwright_max: str
     assets: Dict[str, Asset]
+    #: Of the seal's CONTENT (`seal_digest`), not of the bytes it was read
+    #: from: the same seal has one digest however its file is encoded.
     digest: str
     origin: str
     # Top-level "build_id", present only on a seal with no assets (one tree, one
@@ -286,6 +288,24 @@ class Seal:
                 f"seal {self.digest[:12]}{kind})")
 
 
+def seal_digest(data: dict) -> str:
+    """The digest of a seal: sha256 of its content in one canonical form.
+
+    ⛔ Until this it was the sha256 of the FILE, and the same seal had two
+    digests on one machine. `seal.json` is stored with LF and checked out with
+    CRLF on Windows (`core.autocrlf`), so a published wheel (LF) and an
+    editable install of the same commit (CRLF) stamped the same cached engine
+    with different digests: every start that saw the other's stamp took the
+    adoption path and rewrote it. Measured on 2026-10-10, four starters at
+    once for five rounds: ten rewrites, and two starters dead on the rename
+    (B269). A digest of the content is the same for both, and for a seal a
+    user re-saved with an editor.
+    """
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
 def _parse_seal_bytes(raw: bytes, origin: str) -> Seal:
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -329,7 +349,7 @@ def _parse_seal_bytes(raw: bytes, origin: str) -> Seal:
         tag=data["tag"], upstream_version=data["upstream_version"],
         source_commit=data.get("source_commit") or "",
         playwright_min=pw.get("min") or "", playwright_max=pw.get("max") or "",
-        assets=assets, digest=hashlib.sha256(raw).hexdigest(), origin=origin,
+        assets=assets, digest=seal_digest(data), origin=origin,
         build_id_declared=declared,
     )
 
@@ -704,6 +724,51 @@ def write_stamp(version_dir: Path, seal: Seal, *, asset: str,
         "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     dst = stamp_path(version_dir)
-    tmp = dst.with_suffix(".tmp")
+    # ⛔ ONE TEMPORARY FILE PER WRITER. It was `.invisible-seal.tmp` for every
+    # writer, so two sessions stamping the same tree at once wrote into one
+    # file and the second rename found it gone or held (B269).
+    tmp = dst.with_name(f"{dst.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
-    os.replace(tmp, dst)
+    try:
+        _replace_stamp(tmp, dst, seal)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+#: How long a writer waits for another process to let go of the stamp: twenty
+#: tries fifty milliseconds apart. A concurrent starter holds the file for the
+#: milliseconds of one read; a second is far beyond that and far short of a
+#: hang.
+_STAMP_REPLACE_ATTEMPTS = 20
+_STAMP_REPLACE_PAUSE = 0.05
+
+
+def _replace_stamp(tmp: Path, dst: Path, seal: Seal) -> None:
+    """`os.replace`, and the two ways it fails on Windows when another
+    process is on the same file.
+
+    A rename onto a file another process holds open is refused there
+    (`WinError 5` or `32`), and a concurrent starter holds the stamp open for
+    exactly as long as it reads it. Either that process WROTE a stamp for this
+    seal a moment ago - then its stamp is as good as ours and ours is dropped -
+    or it only read: then it lets go within milliseconds, and the rename is
+    tried again, a bounded number of times. Measured on 2026-10-10 with the
+    one shared temporary file: four starters, five rounds, two dead with
+    `PermissionError` on this rename.
+    """
+    import time
+    last: Optional[PermissionError] = None
+    for _ in range(_STAMP_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError as e:
+            last = e
+            current = read_stamp(dst.parent)
+            if current and current.get("seal_digest") == seal.digest:
+                return
+            time.sleep(_STAMP_REPLACE_PAUSE)
+    raise last  # type: ignore[misc]
