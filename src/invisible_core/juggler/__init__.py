@@ -16,8 +16,10 @@
 invisible-puppeteer, about 13,000 lines each, and a fix reached one client and
 not the others: the wrapper had five remedies the other two never got, and the
 selenium copy had the one guard the wrapper lacked. What each client does its
-own way is an OPTION here, not a fork: `Actions(engine_approach=...)`, the
-`Actions.dialog_opened` hook, `glide_to`, `Connection.send(abort=...)`.
+own way is an OPTION here, not a fork: `Actions(engine_approach=...)` and
+`glide_to`. (The `Actions.dialog_opened` hook and `Connection.send(abort=...)`
+were options too until firefox-39, for a click whose `alert()` held the page:
+the engine ends that wait itself now, inside the dispatch. [B230])
 
 ⛔ No Playwright here: the client speaks Juggler, the engine's own protocol,
 and Selenium and Puppeteer use it without Playwright installed.

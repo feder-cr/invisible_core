@@ -38,7 +38,9 @@ def test_the_generated_protocol_has_the_five_domains():
     # 78 since firefox-37 (`Browser.setServiceWorkersBlocked`). The selenium
     # and puppeteer copies of this mirror were a command behind the wrapper's
     # until all three came from the core.
-    assert len(COMMANDS) == 78, "commands: %d" % len(COMMANDS)
+    # 77 since firefox-39: `Page.pointerLanded` left, because where an event
+    # landed now comes back with its own dispatch (`landsOn`). [B230]
+    assert len(COMMANDS) == 77, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
 
@@ -49,15 +51,17 @@ def test_the_commands_the_client_will_use_are_declared():
     for name in ("Browser.enable", "Browser.createBrowserContext",
                  "Browser.newPage", "Page.navigate", "Runtime.evaluate",
                  "Browser.setServiceWorkersBlocked",
-                 # Asked after every click and hover since [B217]: an engine
-                 # without it refuses the question, and the mirror must say so
-                 # before a browser does.
-                 "Page.pointerLanded",
                  # How a picked value, an option and a file reach a control:
                  # through Firefox's own user paths, which fire the events.
                  "Page.setUserInput", "Page.selectOptions",
                  "Page.setFileInputFiles"):
         assert name in COMMANDS, name
+    # Where a click or a hover LANDED comes back with the dispatch, for the
+    # events that name their element (firefox-39, [B230]); the separate
+    # question it replaced is gone, and a client still asking it would be
+    # refused at the first click.
+    assert "landsOn" in COMMANDS["Page.dispatchMouseEvent"]["params"]["fields"]
+    assert "Page.pointerLanded" not in COMMANDS
     # The engine no longer builds `input`/`change` itself: a client still
     # asking for them would be refused at the first `select_option`.
     assert "Page.dispatchTrustedInputEvents" not in COMMANDS

@@ -69,20 +69,26 @@ class _Lifecycle:
 
 
 class _Conn:
-    """The engine's side of the ONE question asked after the press: where did
-    the events land. It is not a read of the geometry, and `log` does not see
-    it - the property this file asserts is that nothing is READ after the
-    press, and this is not a read."""
+    """The engine's side of the press: it dispatches the events and, for those
+    that name their element (`landsOn`), says where they LANDED - in the
+    dispatch's own answer, since firefox-39 [B230]. It is not a read of the
+    geometry, and `log` does not see it: the property this file asserts is
+    that nothing is READ after the press, and this is not a read."""
 
     def __init__(self):
         self.asked: list = []
 
     def send(self, method, params=None, **kw):
-        self.asked.append(method)
-        if method == "Page.pointerLanded":
-            return {"landings": [{"type": t, "landed": True, "on": ""}
-                                 for t in (params or {}).get("types", [])]}
+        self.asked.append((method, "landsOn" in (params or {})))
+        if method == "Page.dispatchMouseEvent" and "landsOn" in (params or {}):
+            return {"landing": {"type": params["type"], "landed": True,
+                                "seen": 1, "on": ""}}
         return {}
+
+
+class _Keyboard:
+    def modifier_mask(self) -> int:
+        return 0
 
 
 def _actions(verdicts=("done",), origins=None, log=None) -> Actions:
@@ -90,14 +96,21 @@ def _actions(verdicts=("done",), origins=None, log=None) -> Actions:
     actions.lifecycle = _Lifecycle()
     actions.inj = _Injected(verdicts, origins, log)
     actions.c = _Conn()
+    actions.keyboard = _Keyboard()
     actions.session = "s"
     return actions
 
 
-def _halves(log):
-    """An approach and a commit that write their own names into `log`."""
-    return (lambda: log.append("approach"),
-            lambda: log.append("commit") or "ok")
+def _halves(log, actions):
+    """An approach and a commit that write their own names into `log`; the
+    commit presses and releases through the real `_mouse_event`, which is where
+    the landing of each event comes back from."""
+    def commit():
+        log.append("commit")
+        actions._mouse_event("mousedown", (10.0, 20.0))
+        actions._mouse_event("mouseup", (10.0, 20.0))
+        return "ok"
+    return (lambda: log.append("approach"), commit)
 
 
 def test_the_check_sits_between_the_approach_and_the_press():
@@ -109,7 +122,7 @@ def test_the_check_sits_between_the_approach_and_the_press():
     """
     log: list = []
     actions = _actions(log=log)
-    approach, commit = _halves(log)
+    approach, commit = _halves(log, actions)
 
     result = actions._act_on_target(MAIN, "element", (10.0, 20.0),
                                     approach=approach, commit=commit)
@@ -129,7 +142,7 @@ def test_the_target_is_read_ONCE_and_never_after_the_press():
     """
     log: list = []
     actions = _actions(log=log)
-    approach, commit = _halves(log)
+    approach, commit = _halves(log, actions)
 
     actions._act_on_target(MAIN, "element", (10.0, 20.0),
                            approach=approach, commit=commit)
@@ -141,20 +154,22 @@ def test_the_target_is_read_ONCE_and_never_after_the_press():
 
 
 def test_after_the_press_the_engine_is_asked_where_it_LANDED_not_the_geometry():
-    """⛔ THE GAP IS CLOSED BY THE ENGINE, NOT BY A THIRD READ. What follows the
-    press is one question to the engine - `Page.pointerLanded`, answered from
-    what it recorded when it dispatched - and no read of the injected script
-    at all. A read after the press is the known-bad above; a recorded landing
-    is the thing that CAN tell a miss from a control that did its job. [B217]
+    """⛔ THE GAP IS CLOSED BY THE ENGINE, NOT BY A THIRD READ. After the
+    check, the press and the release go out naming the element, and the engine
+    answers each with where it landed - recorded when it dispatched, judged
+    when the page handled it - and nothing reads the injected script again. A
+    read after the press is the known-bad above; a recorded landing is the
+    thing that CAN tell a miss from a control that did its job. [B217] [B230]
     """
     log: list = []
     actions = _actions(log=log)
-    approach, commit = _halves(log)
+    approach, commit = _halves(log, actions)
 
     actions._act_on_target(MAIN, "element", (10.0, 20.0),
                            approach=approach, commit=commit)
 
-    assert actions.c.asked == ["Page.pointerLanded"]
+    assert actions.c.asked == [("Page.dispatchMouseEvent", True),
+                               ("Page.dispatchMouseEvent", True)]
     assert len(actions.inj.points) == 1
     assert log[-1] == "commit"
 
@@ -170,7 +185,7 @@ def test_a_point_that_has_already_moved_stops_the_press_HAPPENING():
     """
     log: list = []
     actions = _actions(verdicts=("<div id='overlay'>",), log=log)
-    approach, commit = _halves(log)
+    approach, commit = _halves(log, actions)
 
     with pytest.raises(WrongHitTarget, match="overlay"):
         actions._act_on_target(MAIN, "element", (10.0, 20.0),
@@ -192,7 +207,7 @@ def test_a_nested_frame_is_asked_about_ITS_OWN_coordinates():
     log: list = []
     actions = _actions(origins={MAIN: {"x": 100.0, "y": 200.0},
                                 CHILD: {"x": 130.0, "y": 260.0}}, log=log)
-    approach, commit = _halves(log)
+    approach, commit = _halves(log, actions)
     actions._act_on_target(CHILD, "element", (10.0, 20.0),
                            approach=approach, commit=commit)
 
@@ -208,7 +223,7 @@ def test_the_main_frame_pays_for_no_conversion_at_all():
     raise instead of quietly returning something."""
     log: list = []
     actions = _actions(origins={}, log=log)
-    approach, commit = _halves(log)
+    approach, commit = _halves(log, actions)
     actions._act_on_target(MAIN, "element", (7.0, 8.0),
                            approach=approach, commit=commit)
     assert actions.inj.origin_reads == 0

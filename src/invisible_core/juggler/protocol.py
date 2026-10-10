@@ -2,7 +2,7 @@
 Do not edit by hand.
 
 Source: omni.ja!chrome/juggler/content/protocol/Protocol.js
-Commands: 78   Events: 35
+Commands: 77   Events: 35
 
 The browser enforces this schema in a CLOSED WORLD: an undeclared field is
 REJECTED at runtime, not ignored. It therefore serves to verify what WE
@@ -442,6 +442,11 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                    'buttons': {'k': 'Number'},
                                                    'clickCount': {'k': 'Optional',
                                                                   'of': {'k': 'Number'}},
+                                                   'landsOn': {'k': 'Optional',
+                                                               'of': {'fields': {'frameId': {'k': 'String'},
+                                                                                 'objectId': {'k': 'String'}},
+                                                                      'k': 'Object',
+                                                                      'ref': 'pageTypes.LandingTarget'}},
                                                    'modifiers': {'k': 'Number'},
                                                    'type': {'k': 'Enum',
                                                             'values': ['mousedown',
@@ -450,7 +455,13 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                    'x': {'k': 'Number'},
                                                    'y': {'k': 'Number'}},
                                         'k': 'Object'},
-                             'returns': {'fields': {'eventId': {'k': 'Number'}},
+                             'returns': {'fields': {'landing': {'k': 'Optional',
+                                                                'of': {'fields': {'landed': {'k': 'Boolean'},
+                                                                                  'on': {'k': 'String'},
+                                                                                  'seen': {'k': 'Number'},
+                                                                                  'type': {'k': 'String'}},
+                                                                       'k': 'Object',
+                                                                       'ref': 'pageTypes.PointerLanding'}}},
                                          'k': 'Object'}},
  'Page.dispatchTapEvent': {'params': {'fields': {'modifiers': {'k': 'Number'},
                                                  'x': {'k': 'Number'},
@@ -509,21 +520,6 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                    'returns': {'fields': {'navigationId': {'k': 'Nullable',
                                                            'of': {'k': 'String'}}},
                                'k': 'Object'}},
- 'Page.pointerLanded': {'params': {'fields': {'afterEventId': {'k': 'Optional',
-                                                               'of': {'k': 'Number'}},
-                                              'frameId': {'k': 'String'},
-                                              'objectId': {'k': 'String'},
-                                              'types': {'k': 'Array',
-                                                        'of': {'k': 'String'}}},
-                                   'k': 'Object'},
-                        'returns': {'fields': {'landings': {'k': 'Array',
-                                                            'of': {'fields': {'landed': {'k': 'Boolean'},
-                                                                              'on': {'k': 'String'},
-                                                                              'seen': {'k': 'Number'},
-                                                                              'type': {'k': 'String'}},
-                                                                   'k': 'Object',
-                                                                   'ref': 'pageTypes.PointerLanding'}}},
-                                    'k': 'Object'}},
  'Page.reload': {'params': {'fields': {}, 'k': 'Object'}, 'returns': None},
  'Page.screencastFrameAck': {'params': {'fields': {'screencastId': {'k': 'String'}},
                                         'k': 'Object'},

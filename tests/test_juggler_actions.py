@@ -188,7 +188,7 @@ class _Recorder:
         self.sent = []
 
     # the connection
-    def send(self, method, params=None, session=None, timeout=None, abort=None):
+    def send(self, method, params=None, session=None, timeout=None):
         self.sent.append((method, dict(params or {})))
         if method == "Page.getContentQuads":
             return {"quads": [{"p1": {"x": 390, "y": 295}, "p2": {"x": 410, "y": 295},
