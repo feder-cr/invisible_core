@@ -325,6 +325,30 @@ def test_occlusion_tracking_is_off_for_every_session():
     assert forced[key] is True
 
 
+@pytest.mark.unit
+def test_occlusion_is_one_decision_for_both_engines(monkeypatch):
+    """⛔ B149, rule 7-ter: the Linux engine had no switch, so a window another
+    one fully covered went `hidden` on Linux (4 times in 4 with two sessions on
+    one Xvfb) while Windows, told by the pref above, kept it visible. GTK reads
+    `zoom.stealth.widget.occlusion_tracking.enabled` from firefox-41 on, and
+    both names must come from ONE value: flipping that value moves both, and
+    nothing else decides either."""
+    from invisible_core import prefs as P
+    from invisible_core._fpforge import generate_profile
+
+    names = ("widget.windows.window_occlusion_tracking.enabled",
+             "zoom.stealth.widget.occlusion_tracking.enabled")
+    profile = generate_profile(seed=4242)
+
+    emitted = P.compose_session_prefs(profile).prefs
+    assert [emitted[n] for n in names] == [False, False]
+
+    monkeypatch.setattr(P, "OCCLUSION_TRACKING", True)
+    flipped = P.compose_session_prefs(profile).prefs
+    assert [flipped[n] for n in names] == [True, True], (
+        "one of the two names does not follow the declaration")
+
+
 
 #  _pick_display / start() - which number is chosen. These are selection and
 #  bookkeeping tests: Xvfb is not started, and _spawn is stubbed.

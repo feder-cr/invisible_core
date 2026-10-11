@@ -1860,6 +1860,12 @@ def humanize_prefs(humanize: Any) -> Dict[str, Any]:
 #: rather than deleted, because the trade did not stop being true.
 DEFAULT_SHOW_CURSOR = True
 
+#: Whether a window that another one fully covers is treated as occluded,
+#: its pages `hidden` and inactive. False on both engines: an automated
+#: browser must never be treated as backgrounded (what a page then reads is
+#: listed where the prefs are emitted, in the occlusion block).
+OCCLUSION_TRACKING = False
+
 
 def show_cursor_prefs(show_cursor: Any) -> Dict[str, Any]:
     """The `stealthfox.*` prefs implied by a `show_cursor=` value.
@@ -1951,8 +1957,18 @@ def compose_session_prefs(
     # this pref is justified by the observable list above, which does not depend
     # on it.
     #
+    # ⛔ ONE DECISION, TWO ENGINE NAMES (B149, rule 7-ter). Windows reads
+    # the upstream pref; GTK has no upstream switch, so the engine reads
+    # `zoom.stealth.widget.occlusion_tracking.enabled` in
+    # nsWindow::OnVisibilityNotifyEvent from firefox-41 on. Before it, a Linux
+    # window that another one fully covered went `hidden` (4 times in 4 with
+    # two sessions on one Xvfb) while the same page on Windows stayed visible.
+    # Both names come from this one value, so the two builds cannot disagree.
+    #
     # setdefault, so an explicit caller override still wins.
-    prefs.setdefault("widget.windows.window_occlusion_tracking.enabled", False)
+    for name in ("widget.windows.window_occlusion_tracking.enabled",
+                 "zoom.stealth.widget.occlusion_tracking.enabled"):
+        prefs.setdefault(name, OCCLUSION_TRACKING)
 
     # The launch counter's address, declared here for every session. The engine
     # fetches a five-byte release asset once at startup and the asset's download

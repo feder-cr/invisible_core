@@ -354,8 +354,14 @@ class Connection(EventListeners):
 
     # ── writing ─────────────────────────────────────────────────────────────
     def send(self, method: str, params: Optional[dict] = None,
-             session: Optional[str] = None, timeout: float = 30.0) -> Any:
+             session: Optional[str] = None,
+             timeout: Optional[float] = 30.0) -> Any:
         """Send a command and wait for its reply.
+
+        ``timeout=None`` waits for the reply without a bound of its own: it
+        still ends, because a closed pipe wakes every waiter at once with
+        TargetClosedError. For a command whose only meaningful bound is the
+        caller's (Browser.newPage, invisible_playwright #321).
 
         (Until firefox-39 it also took `abort`, polled while waiting, for one
         case: the landing question asked after a click whose `alert()` held
