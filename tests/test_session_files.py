@@ -12,12 +12,13 @@ import subprocess
 import sys
 import tempfile
 
+import psutil
 import pytest
 
 from invisible_core._owned_dirs import sweep_owned_dirs
-from invisible_core.juggler import SessionFiles
+from invisible_core.juggler import SessionFiles, _profile
 from invisible_core.juggler._profile import PROFILE_PREFIX, TMP_PREFIX
-from invisible_core.process import TOKEN_VAR, SessionToken
+from invisible_core.process import TOKEN_VAR, SessionToken, terminate
 
 pytestmark = pytest.mark.unit
 
@@ -134,7 +135,54 @@ def test_removing_twice_is_harmless_and_without_a_token_no_process_is_looked_for
     assert not pathlib.Path(files.profile).exists()
 
 
-def test_a_child_that_outlives_the_browser_is_ended_before_the_profile_goes():
+def test_the_ping_sender_is_let_finish_before_the_profile_goes():
+    """⛔ KNOWN-BAD, measured on both platforms (B266): `remove()` ended every
+    survivor at once, and the survivor is the shutdown-ping sender, so its
+    POST was lost or cut in half. A real child stands in for it: it carries the
+    session's token, holds the ping, and after a second deletes it and exits 0,
+    which is what the sender does once the server has answered. It must be
+    allowed to: exit code 0 (not ended by us) and the ping gone by its hand."""
+    token = SessionToken.mint()
+    files = SessionFiles(env=dict(os.environ, **{TOKEN_VAR: token.value}))
+    ping = pathlib.Path(files.profile, "saved-telemetry-pings", "ping")
+    ping.parent.mkdir()
+    ping.write_bytes(b"{}")
+    child = subprocess.Popen(
+        [sys.executable, "-c",
+         "import os, sys, time\n"
+         "print('sending', flush=True)\n"
+         "time.sleep(1)\n"
+         "os.remove(sys.argv[1])\n", str(ping)],
+        env=files.env, stdout=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout.readline().strip() == "sending"
+        files.remove()
+        assert child.wait(timeout=10) == 0, (
+            "the sender was ended instead of being let finish")
+        assert not pathlib.Path(files.profile).exists()
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        files.remove()
+
+
+def test_terminate_does_not_count_what_exits_within_the_grace():
+    quick = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)"])
+    slow = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        procs = [psutil.Process(quick.pid), psutil.Process(slow.pid)]
+        assert terminate(procs, grace=5.0, timeout=5.0) == 1
+        assert quick.wait(timeout=5) == 0, "the quick one was ended, not waited for"
+        assert slow.wait(timeout=5) != 0, "the slow one outlived the grace and was not ended"
+    finally:
+        for p in (quick, slow):
+            if p.poll() is None:
+                p.kill()
+                p.wait()
+
+
+def test_a_child_that_outlives_the_browser_is_ended_before_the_profile_goes(monkeypatch):
     """⛔ KNOWN-BAD, measured on Windows: at exit the browser hands its shutdown
     ping to `pingsender.exe`, a child that outlives it with the ping file inside
     the profile open. The removal failed on that file, the child then deleted
@@ -142,7 +190,9 @@ def test_a_child_that_outlives_the_browser_is_ended_before_the_profile_goes():
     child is real and carries the session's token, as the browser's children
     do; on Windows its open file is what makes the removal fail, on Linux
     deleting an open file succeeds and the test still asks that the child was
-    ended."""
+    ended. The grace a sender gets (B266) is shortened: this child never
+    finishes, and what is asked here is that it is ended after it."""
+    monkeypatch.setattr(_profile, "SENDER_GRACE", 0.5)
     token = SessionToken.mint()
     files = SessionFiles(env=dict(os.environ, **{TOKEN_VAR: token.value}))
     assert files.token == token

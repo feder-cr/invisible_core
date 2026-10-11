@@ -178,13 +178,23 @@ def find_processes(token: SessionToken) -> List[Any]:
     return found
 
 
-def terminate(procs: Iterable[Any], *, timeout: float = 5.0) -> int:
+def terminate(procs: Iterable[Any], *, timeout: float = 5.0,
+              grace: float = 0.0) -> int:
     """Graceful terminate, then kill the survivors. Returns how many were sent.
 
     A count rather than nothing, so a caller can tell "nothing was leaked" from
     "the reaper did not run" - two outcomes that look identical from outside.
+
+    ``grace`` is how long the processes get to exit ON THEIR OWN before they
+    are asked to; the ones that do are not counted, because nothing was sent
+    to them.
     """
     procs = list(procs)
+    if procs and grace > 0:
+        try:
+            _, procs = psutil.wait_procs(procs, timeout=grace)
+        except Exception:
+            pass
     if not procs:
         return 0
     for proc in procs:

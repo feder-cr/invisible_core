@@ -26,6 +26,13 @@ from ..process import TOKEN_VAR, SessionToken, find_processes, terminate
 PROFILE_PREFIX = "invisible_profile_"
 TMP_PREFIX = "invisible_tmp_"
 
+#: Seconds `SessionFiles.remove()` lets the session's surviving processes end
+#: by themselves before it ends them. What survives the browser is the
+#: shutdown-ping sender (B266): measured at 0.6 s on Linux and 1.0 s on
+#: Windows, through a proxy and without. Past this the close stops waiting and
+#: the pings are lost, not leaked - the sender leaves by the session's road.
+SENDER_GRACE = 10.0
+
 
 class SessionFiles:
     """The directories one browser session writes, and the one place they end.
@@ -45,8 +52,16 @@ class SessionFiles:
     removal ran after the browser, failed on that file, and the child then
     deleted it. Every process of the session carries the token the launcher
     stamps into the environment, children included, so they are ended first;
-    the launchers' own last step ended them anyway, a moment later, so nothing
-    changes on the network.
+    the launchers' own last step ended them anyway, a moment later.
+
+    ⛔ AND THEY ARE ENDED ONLY AFTER ``SENDER_GRACE`` (B266). Ending the sender
+    at once lost the shutdown pings, or cut one mid-POST. An engine that
+    carries the fix for B266 sends them through its own background task, by
+    the session's proxy, so letting it finish costs a second of close and puts
+    nothing on the host's road. With an engine before that, the sender is
+    `pingsender[.exe]`, which leaves from the host's own address: this wait
+    belongs to the release that seals the engine with the fix, never to one
+    before it.
 
     ⛔ AND THE TEMPORARY DIRECTORY IS NOT A NICETY (B267). Firefox writes into
     the system one and cleans up when a job finishes, and a session is short:
@@ -79,7 +94,7 @@ class SessionFiles:
         directories this session made - never a profile the caller named.
         Never raises, and a second call finds nothing to do."""
         try:
-            terminate(find_processes(self.token))
+            terminate(find_processes(self.token), grace=SENDER_GRACE)
         except Exception:
             pass
         if self.owns_profile:
