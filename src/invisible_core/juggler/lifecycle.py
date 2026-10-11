@@ -42,6 +42,8 @@ import threading
 import time
 from typing import Optional
 
+from .deadline import Deadline
+
 #: How much silence the network needs before it counts as "still". It is
 #: Playwright's value: shorter, and a pause between two requests would read
 #: as quiet.
@@ -327,7 +329,7 @@ class Lifecycle:
 
     def wait_for_new_navigation(self, frame_id: str, previous: Optional[str],
                                 state: str = "load",
-                                timeout: float = 30.0) -> Optional[str]:
+                                timeout: Optional[float] = 30.0) -> Optional[str]:
         """Wait for a navigation that is NOT the one already in progress, and
         answer with the id of the one it waited for.
 
@@ -351,25 +353,24 @@ class Lifecycle:
         navigationId to wait on. History gives no id, so the only thing to
         anchor on is that the frame's CURRENT navigation has changed.
         """
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         with self._cv:
             while True:
                 f = self.frames.get(frame_id)
                 if f is not None and f.navigation != previous:
                     break
-                left = deadline - time.monotonic()
-                if left <= 0:
+                if deadline.passed():
                     raise TimeoutError(
                         "no new navigation on frame %s in %.0fs: the previous "
                         "one (%s) is still current" % (frame_id, timeout,
                                                        previous))
-                self._cv.wait(min(left, 0.05))
+                self._cv.wait(deadline.slice(0.05))
             navigation = self.frames[frame_id].navigation
         self.wait_for_state(frame_id, state, navigation=navigation,
-                            timeout=max(0.05, deadline - time.monotonic()))
+                            timeout=deadline.left(floor=0.05))
         return navigation
 
-    def wait_for_main_frame(self, timeout: float = 20.0) -> str:
+    def wait_for_main_frame(self, timeout: Optional[float] = 20.0) -> str:
         """The main frame id, waiting for it to arrive.
 
         ⛔ IT ARRIVES AS AN EVENT, so reading `main_frame` right after attaching
@@ -379,24 +380,23 @@ class Lifecycle:
         this the kind of race that ships - it fails under load, on somebody
         else's machine, once in twenty runs.
         """
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         with self._cv:
             while self.main_frame is None:
-                left = deadline - time.monotonic()
-                if left <= 0:
+                if deadline.passed():
                     raise TimeoutError(
                         "no main frame in %.0fs: the page never announced one. "
                         "Frames seen: %s" % (timeout, sorted(self.frames)))
-                self._cv.wait(min(left, 0.05))
+                self._cv.wait(deadline.slice(0.05))
             return self.main_frame
 
     def wait_for_state(self, frame_id: str, state: str, *,
                         navigation: Optional[str] = None,
-                        timeout: float = 30.0) -> None:
+                        timeout: Optional[float] = 30.0) -> None:
         if state not in STATES:
             raise ValueError("unknown state: %r (the four are %s)"
                               % (state, ", ".join(STATES)))
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         with self._cv:
             while True:
                 f = self.frames.get(frame_id)
@@ -426,8 +426,7 @@ class Lifecycle:
                         pass
                     elif self._reached(f, state):
                         return
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
+                if deadline.passed():
                     if f is None:
                         reason = "the frame does not exist"
                     elif (navigation is not None
@@ -447,11 +446,11 @@ class Lifecycle:
                 # networkidle comes true on a SILENCE DEADLINE, when nothing
                 # happens; `_settle`'s timer notifies then, so every state
                 # can sleep until the next notify.
-                self._cv.wait(remaining)
+                self._cv.wait(deadline.left())
 
     # ── navigation ──────────────────────────────────────────────────────────
     def goto(self, url: str, *, frame_id: Optional[str] = None,
-              until: str = "load", timeout: float = 30.0,
+              until: str = "load", timeout: Optional[float] = 30.0,
               referer: Optional[str] = None) -> dict:
         fid = frame_id or self.main_frame
         if fid is None:
@@ -460,7 +459,7 @@ class Lifecycle:
         params = {"frameId": fid, "url": url}
         if referer:
             params["referer"] = referer
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         # Counted BEFORE the command: the engine may report the same-document
         # navigation before its reply arrives.
         with self._cv:
@@ -483,12 +482,11 @@ class Lifecycle:
         if nav is None:
             with self._cv:
                 while self._frame(fid).same_document == before:
-                    left = deadline - time.monotonic()
-                    if left <= 0:
+                    if deadline.passed():
                         raise TimeoutError(
                             "the same-document navigation to %s was not "
                             "reported in %.0fs" % (url, timeout))
-                    self._cv.wait(left)
+                    self._cv.wait(deadline.left())
                 return {"navigationId": None, "url": self.frames[fid].url}
 
         self.wait_for_state(fid, until, navigation=nav, timeout=timeout)

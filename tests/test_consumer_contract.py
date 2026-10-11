@@ -302,6 +302,8 @@ CONTRACT = {
     },
     "invisible_core.juggler.actions": {"Actions"},
     "invisible_core.juggler.connection": {"ProtocolError", "TargetClosedError"},
+    # Since 41.35.0: the one meaning of "no limit" (B278).
+    "invisible_core.juggler.deadline": {"Deadline"},
     "invisible_core.juggler.injected": {
         "EvaluationError", "InjectedScript", "UTILITY_WORLD",
     },

@@ -30,6 +30,7 @@ import time
 from typing import Optional
 
 from . import _pacing
+from .deadline import Deadline
 from .injected import EvaluationError
 from .keyboard import BUTTON_MASK, Keyboard, UnknownKey
 
@@ -249,7 +250,7 @@ class Actions:
 
     # ── the loop ────────────────────────────────────────────────────────────
     def _retry(self, selector: str, run, *, states=None,
-               timeout: float = 30.0, frame_id: Optional[str] = None,
+               timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
                position=None, element_id: Optional[str] = None,
                trial: bool = False, strict: bool = False,
                force: bool = False, needs_point: bool = True):
@@ -292,7 +293,7 @@ class Actions:
         if f is None:
             raise RuntimeError("no main frame: the page isn't ready")
         states = ACTION_STATES if states is None else states
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         reason = "haven't tried yet"
         turns = 0
         while True:
@@ -421,7 +422,7 @@ class Actions:
                 if element and ours:
                     self.inj.dispose(f, element)
 
-            if time.monotonic() > deadline:
+            if deadline.passed():
                 raise ElementNotActionable(
                     "%r not actionable in %.0fs after %d attempts. Last "
                     "reason: %s" % (selector, timeout, turns, reason))
@@ -577,7 +578,7 @@ class Actions:
 
     # ── waiting ─────────────────────────────────────────────────────────────
     def wait_for_selector(self, selector: str, *, state: str = "visible",
-                          timeout: float = 30.0, frame_id: Optional[str] = None,
+                          timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
                           strict: bool = False):
         """Waits for a selector to reach a state, and returns its handle.
 
@@ -596,7 +597,7 @@ class Actions:
         frame = frame_id or self.lifecycle.main_frame
         if frame is None:
             raise RuntimeError("no main frame: the page is not ready")
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         reason = "not tried yet"
         while True:
             element = self.inj.query_selector(frame, selector, strict=strict)
@@ -617,14 +618,14 @@ class Actions:
                 self.inj.dispose(frame, element)
             else:
                 reason = "the selector matches nothing"
-            if time.monotonic() > deadline:
+            if deadline.passed():
                 raise ElementNotActionable(
                     "%r did not become %s in %.0fs. Last reason: %s"
                     % (selector, state, timeout, reason))
             time.sleep(0.05)
 
     # ── the actions ─────────────────────────────────────────────────────────
-    def hover(self, selector: str, *, timeout: float = 30.0, frame_id: Optional[str] = None,
+    def hover(self, selector: str, *, timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
               position=None, element_id: Optional[str] = None, **opts):
         def run(f, element, point):
             # The move IS the action here, so there is nothing to approach
@@ -640,7 +641,7 @@ class Actions:
         return self._retry(selector, run, timeout=timeout, element_id=element_id,
                            frame_id=frame_id, position=position, **opts)
 
-    def click(self, selector: str, *, timeout: float = 30.0, frame_id: Optional[str] = None, button: int = 0,
+    def click(self, selector: str, *, timeout: Optional[float] = 30.0, frame_id: Optional[str] = None, button: int = 0,
               delay_ms: Optional[float] = None,
               clicks: int = 1, position=None, modifiers: int = 0,
               element_id: Optional[str] = None, **opts):
@@ -665,7 +666,7 @@ class Actions:
         return self._retry(selector, run, timeout=timeout, frame_id=frame_id,
                            position=position, element_id=element_id, **opts)
 
-    def dblclick(self, selector: str, *, timeout: float = 30.0, frame_id: Optional[str] = None,
+    def dblclick(self, selector: str, *, timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
                  delay_ms: Optional[float] = None,
                  button: int = 0, position=None, modifiers: int = 0, **opts):
         """⛔ These are NOT two `click`s in a row: the second one must carry
@@ -684,17 +685,17 @@ class Actions:
                           clicks=2, frame_id=frame_id, position=position,
                           modifiers=modifiers, delay_ms=delay_ms, **opts)
 
-    def check(self, selector: str, *, timeout: float = 30.0, frame_id: Optional[str] = None,
+    def check(self, selector: str, *, timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
               position=None, element_id: Optional[str] = None, **opts):
         return self._set_checked(selector, True, timeout=timeout, element_id=element_id,
                                  frame_id=frame_id, position=position, **opts)
 
-    def uncheck(self, selector: str, *, timeout: float = 30.0, frame_id: Optional[str] = None,
+    def uncheck(self, selector: str, *, timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
                 position=None, element_id: Optional[str] = None, **opts):
         return self._set_checked(selector, False, timeout=timeout, element_id=element_id,
                                  frame_id=frame_id, position=position, **opts)
 
-    def _set_checked(self, selector: str, wanted: bool, *, timeout: float,
+    def _set_checked(self, selector: str, wanted: bool, *, timeout: Optional[float],
                      frame_id: Optional[str] = None, position=None,
                      element_id: Optional[str] = None, **opts):
         """`check` / `uncheck`.
@@ -730,7 +731,7 @@ class Actions:
         return self._retry(selector, run, timeout=timeout, element_id=element_id,
                            frame_id=frame_id, position=position, **opts)
 
-    def focus(self, selector: str, *, timeout: float = 30.0,
+    def focus(self, selector: str, *, timeout: Optional[float] = 30.0,
               frame_id: Optional[str] = None,
               element_id: Optional[str] = None, **opts):
         """⛔ Does NOT require `visible`: `focus()` works on an off-screen
@@ -743,7 +744,7 @@ class Actions:
         return self._retry(selector, run, states=[], timeout=timeout, frame_id=frame_id,
                            element_id=element_id, needs_point=False, **opts)
 
-    def blur(self, selector: str, *, timeout: float = 30.0,
+    def blur(self, selector: str, *, timeout: Optional[float] = 30.0,
              frame_id: Optional[str] = None, **opts):
         def run(f, element, point):
             return self.inj.call(
@@ -754,7 +755,7 @@ class Actions:
         return self._retry(selector, run, states=[], timeout=timeout, frame_id=frame_id,
                            needs_point=False, **opts)
 
-    def select_text(self, selector: str, *, timeout: float = 30.0,
+    def select_text(self, selector: str, *, timeout: Optional[float] = 30.0,
                     frame_id: Optional[str] = None, **opts):
         def run(f, element, point):
             r = self.inj.call(f, "(injected, el) => injected.selectText(el)",
@@ -765,7 +766,7 @@ class Actions:
         return self._retry(selector, run, states=["visible"],
                            timeout=timeout, frame_id=frame_id, **opts)
 
-    def select_option(self, selector: str, options, *, timeout: float = 30.0,
+    def select_option(self, selector: str, options, *, timeout: Optional[float] = 30.0,
                       frame_id: Optional[str] = None,
                       element_id: Optional[str] = None, **opts):
         """`select_option`. Options are given by value, label or index.
@@ -795,7 +796,7 @@ class Actions:
                            element_id=element_id, **opts)
 
     def dispatch_event(self, selector: str, event_type: str, detail=None, *,
-                       timeout: float = 30.0, frame_id: Optional[str] = None,
+                       timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
                        **opts):
         """`dispatch_event`.
 
@@ -814,7 +815,7 @@ class Actions:
         return self._retry(selector, run, states=[], timeout=timeout, frame_id=frame_id,
                            needs_point=False, **opts)
 
-    def press(self, selector: str, key: str, *, timeout: float = 30.0,
+    def press(self, selector: str, key: str, *, timeout: Optional[float] = 30.0,
               frame_id: Optional[str] = None,
               element_id: Optional[str] = None,
               dwell_ms: Optional[float] = None, **opts):
@@ -838,7 +839,7 @@ class Actions:
                            timeout=timeout, frame_id=frame_id,
                            element_id=element_id, **opts)
 
-    def type_text(self, selector: str, text: str, *, timeout: float = 30.0, frame_id: Optional[str] = None,
+    def type_text(self, selector: str, text: str, *, timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
                   delay: float = 0.0, element_id: Optional[str] = None,
                   **opts):
         """`type`: one key per character, WITHOUT clearing first.
@@ -850,7 +851,7 @@ class Actions:
         The typist's pause between the focus and the first key is the same
         as `fill`'s, see `_reach_field`.
         """
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
 
         def run(f, element, point):
             self._reach_field(f, element, deadline)
@@ -861,7 +862,7 @@ class Actions:
                            timeout=timeout, frame_id=frame_id,
                            element_id=element_id, **opts)
 
-    def set_input_files(self, selector: str, files, *, timeout: float = 30.0,
+    def set_input_files(self, selector: str, files, *, timeout: Optional[float] = 30.0,
                         frame_id: Optional[str] = None,
                         element_id: Optional[str] = None, **opts):
         """`set_input_files`. The paths are ABSOLUTE and the browser
@@ -889,7 +890,7 @@ class Actions:
         that used to draw this pause through a public helper no longer needs
         one. No persona, no pause.
         """
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         paused = []
 
         def run(f, element, point):
@@ -899,7 +900,7 @@ class Actions:
                 from ._behaviour import plan_hesitation
                 pause = plan_hesitation(self.typing_persona, "file",
                                         self.acts.next("file"), times=2) / 1000.0
-                time.sleep(max(0.0, min(pause, deadline - time.monotonic())))
+                time.sleep(deadline.slice(pause))
                 paused.append(pause)
             self.c.send("Page.setFileInputFiles",
                         {"frameId": f, "objectId": element,
@@ -910,7 +911,7 @@ class Actions:
                            frame_id=frame_id, element_id=element_id,
                            needs_point=False, **opts)
 
-    def tap(self, selector: str, *, timeout: float = 30.0, frame_id: Optional[str] = None,
+    def tap(self, selector: str, *, timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
             position=None, **opts):
         """`tap`. ⛔ Requires the context to have touch TURNED ON: without
         it, the event fires and the page has no `ontouchstart`, so it
@@ -1028,7 +1029,7 @@ class Actions:
         return _pacing.drive(evs, emit, origin=(x0, y0))
 
     def drag_and_drop(self, source: str, target: str, *,
-                      timeout: float = 30.0,
+                      timeout: Optional[float] = 30.0,
                       frame_id: Optional[str] = None,
                       **opts):
         """`drag_and_drop`, in four beats.
@@ -1195,7 +1196,7 @@ class Actions:
         return plan_click(self.pointer_persona, clicks,
                           nonce=self.acts.next("click"))
 
-    def fill(self, selector: str, text: str, *, timeout: float = 30.0,
+    def fill(self, selector: str, text: str, *, timeout: Optional[float] = 30.0,
              frame_id: Optional[str] = None,
              element_id: Optional[str] = None, **opts):
         """Writes into a field.
@@ -1216,7 +1217,7 @@ class Actions:
         value waits the same: the person who focuses a date field does not
         commit a date in the same millisecond either.
         """
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
 
         def run(f, element, point):
             self._reach_field(f, element, deadline)
@@ -1260,7 +1261,7 @@ class Actions:
         "  const n = e.nodeName.toLowerCase();"
         "  return (n === 'input' || n === 'textarea') ? e.value : e.textContent; }")
 
-    def _reach_field(self, f, element, deadline: float) -> None:
+    def _reach_field(self, f, element, deadline: Deadline) -> None:
         """Focus a field, then wait the time a person takes before the first
         key, and longer while the field visibly changes.
 
@@ -1310,8 +1311,7 @@ class Actions:
         held = text()
         still_since = time.monotonic()
         while True:
-            now = time.monotonic()
-            left = min(still_since + pause, deadline) - now
+            left = deadline.until(still_since + pause)
             if left <= 0:
                 return
             # Read eight times per pause, so a change is seen within an eighth

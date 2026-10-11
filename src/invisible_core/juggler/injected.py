@@ -31,6 +31,8 @@ import pathlib
 import time
 from typing import Any, Optional
 
+from .deadline import Deadline
+
 #: ⛔ Must stay equal to the driver's `UTILITY_WORLD_NAME` and to the name
 #: that `31-client-fork.md` §3.5 declares. This is not a cosmetic detail:
 #: it is the key that identifies the right context in
@@ -158,11 +160,11 @@ class InjectedScript:
             self._init_scripts.remove(source)
             self._push_scripts()
 
-    def context_id(self, frame_id: str, *, timeout: float = 10.0) -> str:
+    def context_id(self, frame_id: str, *, timeout: Optional[float] = 10.0) -> str:
         key = (frame_id, UTILITY_WORLD)
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         while key not in self.contexts:
-            if time.monotonic() > deadline:
+            if deadline.passed():
                 worlds = sorted(n for f, n in self.contexts if f == frame_id)
                 raise TimeoutError(
                     "the utility world (%s) has not been born for frame "
@@ -186,7 +188,7 @@ class InjectedScript:
         return (response or {}).get("result") or {}
 
     def evaluate(self, frame_id: str, expression: str, *,
-                by_value: bool = True, timeout: float = 30.0) -> Any:
+                by_value: bool = True, timeout: Optional[float] = 30.0) -> Any:
         r = self._result(self.c.send(
             "Runtime.evaluate",
             {"executionContextId": self.context_id(frame_id),
@@ -195,7 +197,7 @@ class InjectedScript:
         return r.get("value") if by_value else r.get("objectId")
 
     def call(self, frame_id: str, declaration: str, *arguments,
-             by_value: bool = True, timeout: float = 30.0) -> Any:
+             by_value: bool = True, timeout: Optional[float] = 30.0) -> Any:
         """`declaration` is a JS declaration; the FIRST argument passed
         is always the InjectedScript, the way the driver does it."""
         args = [{"objectId": self.handle(frame_id)}]
@@ -285,7 +287,7 @@ class InjectedScript:
             selector)
 
     def evaluate_in_main(self, frame_id: str, expression: str, *,
-                         by_value: bool = True, timeout: float = 30.0):
+                         by_value: bool = True, timeout: Optional[float] = 30.0):
         """Evaluate in the PAGE's own world, deliberately and rarely.
 
         ⛔ THIS IS THE ONE PLACE THAT LEAVES THE XRAY, AND IT NEEDS A REASON
@@ -663,16 +665,16 @@ class InjectedScript:
     # invisible_selenium's and invisible_puppeteer's copies until this module
     # moved into the core.)
 
-    def main_context(self, frame_id: str, *, timeout: float = 30.0) -> str:
+    def main_context(self, frame_id: str, *, timeout: Optional[float] = 30.0) -> str:
         """The id of the page's own execution context for a frame.
 
         ⛔ THE MAIN WORLD IS THE ONE WITH THE EMPTY NAME: `auxData.name` is
         absent for the page's own context, which is why the key is `""`.
         """
-        deadline = time.monotonic() + timeout
+        deadline = Deadline(timeout)
         key = (frame_id, "")
         while key not in self.contexts:
-            if time.monotonic() > deadline:
+            if deadline.passed():
                 raise TimeoutError(
                     "the main world never appeared for frame %s. Worlds seen: "
                     "%s" % (frame_id, sorted(n for f, n in self.contexts
@@ -681,7 +683,7 @@ class InjectedScript:
         return self.contexts[key]
 
     def call_raw(self, context_id: str, declaration: str, args: list, *,
-                 by_value: bool = False, timeout: float = 30.0) -> dict:
+                 by_value: bool = False, timeout: Optional[float] = 30.0) -> dict:
         """`Runtime.callFunction` in a given context, returning the raw
         RemoteObject (`value`, or `objectId` plus `type`/`subtype`).
 

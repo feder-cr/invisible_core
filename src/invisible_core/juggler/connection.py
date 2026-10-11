@@ -39,6 +39,8 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from .deadline import Deadline
+
 NUL = b"\x00"
 _READY = "Juggler listening to the pipe"
 
@@ -158,7 +160,7 @@ class ProcessOutput:
         `timeout=None` waits without a bound of its own: the line arrives, or
         the process exits. It is what a caller's "no limit" (Playwright's
         `launch(timeout=0)`) asks for."""
-        deadline = None if timeout is None else time.monotonic() + timeout
+        deadline = Deadline(timeout)
         with self._cv:
             while not self._ready and not self._eof:
                 if process.poll() is not None:
@@ -166,10 +168,9 @@ class ProcessOutput:
                     while not self._eof and time.monotonic() < drain:
                         self._cv.wait(0.05)
                     break
-                left = 0.05 if deadline is None else deadline - time.monotonic()
-                if left <= 0:
+                if deadline.passed():
                     break
-                self._cv.wait(min(left, 0.05))
+                self._cv.wait(deadline.slice(0.05))
             return self._ready
 
     def tail(self, n: int = 15) -> list:
@@ -280,10 +281,9 @@ class Connection(EventListeners):
         self.output: Optional[ProcessOutput] = None
         #: Whether the browser printed its readiness line, from `launch`.
         self.ready_seen = True
-        #: The launch's timeout in seconds and its deadline on the monotonic
-        #: clock, from `launch`; None for no limit. Read by `startup_send`.
-        self._startup_timeout: Optional[float] = None
-        self._startup_deadline: Optional[float] = None
+        #: The launch's deadline, from `launch`; no limit for a connection
+        #: that `launch` did not make. Read by `startup_send`.
+        self._startup = Deadline(None)
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
@@ -447,15 +447,12 @@ class Connection(EventListeners):
         caller's 60 s still had time. `launch` sends the proxy through here,
         and each client its `Browser.enable`.
         """
-        left = None
-        if self._startup_deadline is not None:
-            left = max(0.0, self._startup_deadline - time.monotonic())
         try:
-            return self.send(method, params, timeout=left)
+            return self.send(method, params, timeout=self._startup.left())
         except ReplyTimeout as exc:
             raise ReplyTimeout(
                 "Timeout %dms exceeded while the browser was starting%s: %s"
-                % (round(self._startup_timeout * 1000),
+                % (round(self._startup.seconds * 1000),
                    "" if self.ready_seen else
                    " (it never printed that it was listening)", exc)) from exc
 
@@ -855,7 +852,7 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     than having no proxy at all. Until 41.35.0 each of the three clients sent
     this command itself, with the same 10 s and the same message.
     """
-    deadline = None if ready_timeout is None else time.monotonic() + ready_timeout
+    deadline = Deadline(ready_timeout)
     argv = ["-no-remote"]
     if headless:
         argv.append("-headless")
@@ -877,8 +874,7 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     # ONE owner of the browser's output, for the whole life of the process
     # (`ProcessOutput` says why a second reader would not do).
     output = ProcessOutput(p.stdout)
-    seen = output.wait_for_ready(
-        p, None if deadline is None else max(0.0, deadline - time.monotonic()))
+    seen = output.wait_for_ready(p, deadline.left())
     # ⛔ A BROWSER THAT EXITED SAYS SO HERE, WHERE ITS OUTPUT STILL EXISTS.
     #
     # `stderr` is merged into `stdout` two functions up and read line by line
@@ -901,8 +897,7 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     c = Connection(to_browser, from_browser, p)
     c.ready_seen = seen
     c.output = output
-    c._startup_timeout = ready_timeout
-    c._startup_deadline = deadline
+    c._startup = deadline
     if proxy is not None:
         try:
             c.startup_send("Browser.setBrowserProxy", proxy)
