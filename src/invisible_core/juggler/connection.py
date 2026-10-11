@@ -52,6 +52,18 @@ class ProtocolError(RuntimeError):
     """
 
 
+class ReplyTimeout(ProtocolError, TimeoutError):
+    """The browser did not answer a command within the bound it was sent with.
+
+    A ProtocolError still, so whoever catches the wider class keeps catching
+    it, and a TimeoutError, because that is what it is: the absence of an
+    answer, where a refusal is the engine's answer. Until 41.35.0 both came
+    out as ProtocolError, and the three clients' launch reported a proxy
+    command that had not been answered in its fixed 10 s as "the engine
+    refused the proxy" (firefox-41 gate, Linux, under load).
+    """
+
+
 class TargetClosedError(Exception):
     """The thing a call was aimed at is gone: a disposed object, or the
     browser itself, whose pipe has closed.
@@ -137,12 +149,16 @@ class ProcessOutput:
                 self._eof = True
                 self._cv.notify_all()
 
-    def wait_for_ready(self, process, timeout: float) -> bool:
+    def wait_for_ready(self, process, timeout: Optional[float]) -> bool:
         """True when the readiness line arrived within `timeout`. False when it
         did not, or when the process exited first - in which case whatever it
         managed to print is drained before answering, because the last line
-        before an exit is usually the one that says why."""
-        deadline = time.monotonic() + timeout
+        before an exit is usually the one that says why.
+
+        `timeout=None` waits without a bound of its own: the line arrives, or
+        the process exits. It is what a caller's "no limit" (Playwright's
+        `launch(timeout=0)`) asks for."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         with self._cv:
             while not self._ready and not self._eof:
                 if process.poll() is not None:
@@ -150,7 +166,7 @@ class ProcessOutput:
                     while not self._eof and time.monotonic() < drain:
                         self._cv.wait(0.05)
                     break
-                left = deadline - time.monotonic()
+                left = 0.05 if deadline is None else deadline - time.monotonic()
                 if left <= 0:
                     break
                 self._cv.wait(min(left, 0.05))
@@ -262,6 +278,12 @@ class Connection(EventListeners):
         #: The browser's own output, when this connection launched it. Read
         #: here only to say why the pipe closed.
         self.output: Optional[ProcessOutput] = None
+        #: Whether the browser printed its readiness line, from `launch`.
+        self.ready_seen = True
+        #: The launch's timeout in seconds and its deadline on the monotonic
+        #: clock, from `launch`; None for no limit. Read by `startup_send`.
+        self._startup_timeout: Optional[float] = None
+        self._startup_deadline: Optional[float] = None
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
@@ -401,7 +423,7 @@ class Connection(EventListeners):
         if not arrived:
             with self._lock:
                 self._pending.pop(msg_id, None)
-            raise ProtocolError(
+            raise ReplyTimeout(
                 "%s: no response in %.0fs. If this is the FIRST command, "
                 "look at the readiness signal before the pipe."
                 % (method, timeout))
@@ -412,6 +434,30 @@ class Connection(EventListeners):
                 raise TargetClosedError("%s: %s" % (method, e.get("message", e)))
             raise ProtocolError("%s: %s" % (method, e.get("message", e)))
         return response.get("result")
+
+    def startup_send(self, method: str, params: Optional[dict] = None) -> Any:
+        """A command that belongs to starting the browser: bounded by what is
+        left of the launch's timeout, and its silence reported as the launch's.
+
+        ⛔ ONE DEADLINE FOR THE WHOLE STARTUP. Until 41.35.0 only the readiness
+        wait had the caller's `launch(timeout=)`, and the commands after it had
+        bounds of their own in each client: `Browser.setBrowserProxy` 10 s and
+        `Browser.enable` 30 s. On the firefox-41 gate, Linux under load, the
+        proxy command went unanswered for 10 s and the launch failed while the
+        caller's 60 s still had time. `launch` sends the proxy through here,
+        and each client its `Browser.enable`.
+        """
+        left = None
+        if self._startup_deadline is not None:
+            left = max(0.0, self._startup_deadline - time.monotonic())
+        try:
+            return self.send(method, params, timeout=left)
+        except ReplyTimeout as exc:
+            raise ReplyTimeout(
+                "Timeout %dms exceeded while the browser was starting%s: %s"
+                % (round(self._startup_timeout * 1000),
+                   "" if self.ready_seen else
+                   " (it never printed that it was listening)", exc)) from exc
 
     def post(self, method: str, params: Optional[dict] = None,
              session: Optional[str] = None) -> None:
@@ -789,9 +835,27 @@ def _spawn_posix(executable, argv, env):
 
 def launch(executable: str, profile_dir: str, *, headless: bool = True,
           argv_extra: Optional[list] = None, env: Optional[dict] = None,
-          ready_timeout: float = 60.0) -> Connection:
+          ready_timeout: Optional[float] = 60.0,
+          proxy: Optional[dict] = None) -> Connection:
     """Launches Firefox over the pipe and returns an already-ready
-    connection."""
+    connection.
+
+    `ready_timeout` is the caller's launch timeout, in seconds, and it bounds
+    the whole startup: the readiness line, the proxy below, and whatever the
+    client sends through `Connection.startup_send` (its `Browser.enable`).
+    None is no limit, which is what Playwright's `launch(timeout=0)` asks.
+
+    `proxy` is the `Browser.setBrowserProxy` command
+    (`parse_proxy(...).as_engine_command()`), sent before any page exists.
+    ⛔ A PROXY THAT CANNOT BE SET CLOSES THE BROWSER: until 2026-08-30 `proxy=`
+    was accepted and dropped for every scheme the engine prefs do not carry,
+    and a page resolved its own DNS and went out on the host address while the
+    session's timezone, locale and WebRTC candidate had been resolved THROUGH
+    the proxy. Announcing one country and connecting from another is worse
+    than having no proxy at all. Until 41.35.0 each of the three clients sent
+    this command itself, with the same 10 s and the same message.
+    """
+    deadline = None if ready_timeout is None else time.monotonic() + ready_timeout
     argv = ["-no-remote"]
     if headless:
         argv.append("-headless")
@@ -813,7 +877,8 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     # ONE owner of the browser's output, for the whole life of the process
     # (`ProcessOutput` says why a second reader would not do).
     output = ProcessOutput(p.stdout)
-    seen = output.wait_for_ready(p, ready_timeout)
+    seen = output.wait_for_ready(
+        p, None if deadline is None else max(0.0, deadline - time.monotonic()))
     # ⛔ A BROWSER THAT EXITED SAYS SO HERE, WHERE ITS OUTPUT STILL EXISTS.
     #
     # `stderr` is merged into `stdout` two functions up and read line by line
@@ -836,4 +901,20 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     c = Connection(to_browser, from_browser, p)
     c.ready_seen = seen
     c.output = output
+    c._startup_timeout = ready_timeout
+    c._startup_deadline = deadline
+    if proxy is not None:
+        try:
+            c.startup_send("Browser.setBrowserProxy", proxy)
+        except ReplyTimeout:
+            c.close()
+            raise
+        except ProtocolError as exc:
+            c.close()
+            raise ProtocolError(
+                "the engine refused the proxy, so the browser was closed "
+                "rather than left running without one: %s" % exc) from exc
+        except BaseException:
+            c.close()
+            raise
     return c
