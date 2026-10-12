@@ -215,6 +215,23 @@ class EventListeners:
         #: with entries HERE means your handler is broken, and those are two
         #: completely different bugs that used to look identical.
         self.handler_errors: list = []
+        #: How many events have been dispatched, so the one being delivered
+        #: is number `delivered`. A command's reply has a place in the same
+        #: stream (`send_placed`), and that place is what tells an event the
+        #: browser sent after handling the command from one it sent before.
+        self.delivered = 0
+
+    def send_placed(self, method: str, params: Optional[dict] = None,
+                    session: Optional[str] = None,
+                    timeout: Optional[float] = 30.0) -> tuple:
+        """`send`, and the number of events dispatched before its reply.
+
+        The connection reads both from one stream and knows the reply's place
+        exactly (`Connection.send_placed`). A stand-in that has only `send`
+        answers with what it has dispatched when `send` returns: its events
+        sent from inside `send` count as before the reply."""
+        result = self.send(method, params, session=session, timeout=timeout)
+        return result, self.delivered
 
     def add_listener(self, fn) -> None:
         """Subscribe to every event. Registering twice is a no-op, not two
@@ -245,6 +262,7 @@ class EventListeners:
         was the last statement of the one that raised. Here each call is
         isolated: the failure is recorded and the loop carries on.
         """
+        self.delivered += 1
         with self._listeners_lock:
             subscribers = list(self._listeners)
         for fn in subscribers:
@@ -313,8 +331,9 @@ class Connection(EventListeners):
             for ready, box in pending:
                 # Named, so `send` raises the closed-target class and the
                 # client sees the browser is GONE rather than a refusal.
-                box.append({"error": {"name": "TargetClosedError",
-                                      "message": "the pipe closed"}})
+                box.append(({"error": {"name": "TargetClosedError",
+                                       "message": "the pipe closed"}},
+                            self.delivered))
                 ready.set()
 
     def _deliver(self, raw: bytes) -> None:
@@ -351,7 +370,9 @@ class Connection(EventListeners):
             entry = self._pending.pop(msg_id, None)
         if entry is not None:
             ready, box = entry
-            box.append(msg)
+            # Its place in the stream, read HERE, on the reader thread, before
+            # the next message is delivered (`send_placed`).
+            box.append((msg, self.delivered))
             ready.set()
 
     def _why_closed(self) -> str:
@@ -378,7 +399,22 @@ class Connection(EventListeners):
     def send(self, method: str, params: Optional[dict] = None,
              session: Optional[str] = None,
              timeout: Optional[float] = 30.0) -> Any:
-        """Send a command and wait for its reply.
+        """Send a command and wait for its reply (`send_placed`, without the
+        place)."""
+        return self.send_placed(method, params, session, timeout)[0]
+
+    def send_placed(self, method: str, params: Optional[dict] = None,
+                    session: Optional[str] = None,
+                    timeout: Optional[float] = 30.0) -> tuple:
+        """Send a command and wait for its reply: the result, and how many
+        events the reader had delivered when the reply arrived.
+
+        ⛔ THE PLACE IS READ BY THE READER, NOT BY THE CALLER. The caller wakes
+        on the reply while the reader carries on delivering, so by the time it
+        looks, events the browser sent AFTER handling the command may already
+        be in. `Lifecycle.goto` needs exactly that line: a document committed
+        before the browser took our `Page.navigate` is the past, one committed
+        after it is either ours or the one that replaced ours.
 
         ``timeout=None`` waits for the reply without a bound of its own: it
         still ends, because a closed pipe wakes every waiter at once with
@@ -427,13 +463,13 @@ class Connection(EventListeners):
                 "%s: no response in %.0fs. If this is the FIRST command, "
                 "look at the readiness signal before the pipe."
                 % (method, timeout))
-        response = box[0]
+        response, place = box[0]
         if "error" in response:
             e = response["error"]
             if e.get("name") == "TargetClosedError":
                 raise TargetClosedError("%s: %s" % (method, e.get("message", e)))
             raise ProtocolError("%s: %s" % (method, e.get("message", e)))
-        return response.get("result")
+        return response.get("result"), place
 
     def startup_send(self, method: str, params: Optional[dict] = None) -> Any:
         """A command that belongs to starting the browser: bounded by what is

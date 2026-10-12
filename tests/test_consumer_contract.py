@@ -310,7 +310,10 @@ CONTRACT = {
         "ContextDestroyed", "EvaluationError", "InjectedScript", "UTILITY_WORLD",
     },
     "invisible_core.juggler.keyboard": {"BUTTON_MASK", "MODIFIER_MASK"},
-    "invisible_core.juggler.lifecycle": {"Lifecycle", "NavigationError"},
+    # NavigationInterrupted since 41.36.0: another document committed in the
+    # navigation's place, which Selenium must not word as an error page.
+    "invisible_core.juggler.lifecycle": {"Lifecycle", "NavigationError",
+                                         "NavigationInterrupted"},
     # The one seed mixer: the wrapper's cursor seeds its per-action streams
     # with it, as it did with the pointer planner's copy before 38.34.0.
     "invisible_core.seedmix": {"sub_seed"},
@@ -341,10 +344,26 @@ def _imports_in(root: pathlib.Path) -> dict:
     return found
 
 
+def _provides(mod, name: str) -> bool:
+    """What `from <mod> import <name>` finds: an attribute, or a submodule.
+
+    `hasattr` alone sees a submodule only once something has imported it, so
+    this file run on its own reported `invisible_core.juggler` missing (the
+    wrapper's `from invisible_core import juggler`), and passed in the full
+    suite only because another test had imported it first (2026-10-12)."""
+    if hasattr(mod, name):
+        return True
+    try:
+        importlib.import_module("%s.%s" % (mod.__name__, name))
+    except ImportError:
+        return False
+    return True
+
+
 @pytest.mark.parametrize("module,names", sorted(CONTRACT.items()))
 def test_every_name_a_consumer_imports_still_exists(module, names):
     mod = importlib.import_module(module)
-    missing = sorted(n for n in names if not hasattr(mod, n))
+    missing = sorted(n for n in names if not _provides(mod, n))
     assert not missing, (
         f"{module} no longer provides {missing}, and shipped code in "
         f"one of the consumers (invisible-playwright, invisible-selenium, "

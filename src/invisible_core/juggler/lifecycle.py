@@ -56,6 +56,12 @@ class NavigationError(RuntimeError):
     """The navigation was aborted by the browser, with its text."""
 
 
+class NavigationInterrupted(NavigationError):
+    """Another document committed in the navigation's place before it did
+    (`Frame.outcome`): the browser went elsewhere, and nothing failed to load.
+    Its own type so a client words it as what it is, not as an error page."""
+
+
 class Frame:
     def __init__(self, frame_id: str, parent: Optional[str]):
         self.id = frame_id
@@ -67,46 +73,61 @@ class Frame:
         #: the aborted navigations, with their text, for whoever was
         #: waiting on them
         self.aborted: dict = {}
-        #: every navigation this frame has shown, numbered in the order the
-        #: browser reported it. See `follows`.
-        self._order: dict = {}
+        #: Where in the connection's event stream (`EventListeners.delivered`)
+        #: each navigation was first reported started, and every document the
+        #: frame has committed, in order, as (place, navigation, url). Kept
+        #: across a re-announcement of the frame; read by `outcome`.
+        self._started: dict = {}
+        self._commits: list = []
         #: how many same-document navigations the browser has reported, so a
         #: `goto` that creates no document can wait for the one it caused.
         self.same_document = 0
 
-    def saw(self, navigation: Optional[str]) -> None:
-        """Number `navigation` the first time the browser mentions it."""
-        if navigation is not None and navigation not in self._order:
-            self._order[navigation] = len(self._order)
+    def outcome(self, navigation: str, after: Optional[int] = None):
+        """The document that decided `navigation`: `(navigation, url)` of its
+        own commit, or of the first OTHER document committed after `after`,
+        which replaced it; None while neither has arrived. `after` is the place
+        of the reply to the command that started `navigation` (`goto`); without
+        it, the place where `navigation` was first reported started.
 
-    def follows(self, navigation: str) -> bool:
-        """Is the current navigation `navigation` itself, or one that came
-        AFTER it?
-
-        ⛔ TWO DEFECTS SIT ON EITHER SIDE OF THIS LINE, and each fix alone
-        re-opens the other.
+        ⛔ THREE DEFECTS SIT AROUND THIS RULE, and each earlier fix re-opened
+        one of the others.
 
         Before ours: `Page.navigate` answers with the navigationId before
         `navigationStarted` arrives, and in that window the frame still
         carries the states of the PREVIOUS document. Accepting them made
         `goto(until="commit")` return in 0.01s on `about:blank` (2026-08-27).
-        A navigation we have not seen yet is therefore never followed.
+        Nothing counts until a document has committed after our command.
 
         After ours: a page that replaces itself from script while it loads -
         `location.replace`, a JavaScript challenge, YouTube's `?themeRefresh=1`
         - starts a NEW navigation after ours committed, and ours never
-        reaches `load`: its document is gone. Requiring `f.navigation ==
-        ours` made every such `goto` time out on a page that was ready, 45 s
-        on YouTube and Reddit while stock Playwright answered in 2 to 4 s on
-        the same Firefox (2026-09-25, [B228]). Stock Playwright waits for the
-        frame's lifecycle after our navigation, whichever document carries
-        it, and so does this.
+        reaches `load`: its document is gone. Requiring the frame's current
+        navigation to be ours made every such `goto` time out on a page that
+        was ready, 45 s on YouTube and Reddit while stock Playwright answered
+        in 2 to 4 s on the same Firefox (2026-09-25, [B228]). Once ours has
+        committed, the frame's states count, whichever document carries them.
+
+        Instead of ours: a `goto` sent while the previous page's own
+        `location.replace` was in flight. Measured 2026-10-12 on firefox-41,
+        2 and 3 rounds in 80 of goto, read, goto on a page that redirects
+        50 ms after `load`: ours started, the frame was re-announced from a
+        new process, the page's redirect - started BEFORE our command - was
+        re-announced and committed, and ours was never heard of again: no
+        commit, and no abort either, since `FrameTree.onStateChange` drops
+        every `NS_BINDING_ABORTED` of the main frame (a process swap fires
+        them spuriously). The rule then numbered navigations by when they
+        were first seen and followed a later one; the redirect had been seen
+        first, so the wait was for a document that would never come, 45 s in
+        the MCP server. Upstream Playwright's `goto` decides on the same
+        line, the first document committed after the command's reply: ours,
+        or "interrupted by another navigation".
         """
-        if self.navigation == navigation:
-            return True
-        mine = self._order.get(navigation)
-        current = self._order.get(self.navigation)
-        return mine is not None and current is not None and current > mine
+        since = after if after is not None else self._started.get(navigation)
+        for place, nav, url in self._commits:
+            if nav == navigation or (since is not None and place > since):
+                return nav, url
+        return None
 
 
 class Lifecycle:
@@ -235,7 +256,7 @@ class Lifecycle:
             # Measured 2026-10-12 on firefox-41: our own `goto` re-announces
             # the main frame before its commit, and a page that replaces itself
             # from script after `load` re-announces it again. Building a new
-            # Frame here threw away the numbering `follows` reads ([B228]), so
+            # Frame here threw away the history `Frame.outcome` reads, so
             # a `goto` waiting for a state its document never reached (that
             # document was replaced) waited for the timeout: networkidle 12 in
             # 12 on a local page, domcontentloaded on a loaded host where the
@@ -264,7 +285,7 @@ class Lifecycle:
         if method == "Page.navigationStarted":
             f = self._frame(p["frameId"])
             f.navigation = p["navigationId"]
-            f.saw(f.navigation)
+            f._started.setdefault(f.navigation, self.c.delivered)
             # ⛔ THIS is where the correctness of the whole file lives: the
             # states of the previous document do NOT count for this one.
             f.states = set()
@@ -284,10 +305,12 @@ class Lifecycle:
             self._retire(p["frameId"], itself=False)
             f = self._frame(p["frameId"])
             nav = p.get("navigationId")
+            f.url = p.get("url", f.url)
+            # Without an id it is a document already committed, re-announced
+            # by a new PageAgent (its constructor), not a new one.
             if nav is not None:
                 f.navigation = nav
-                f.saw(nav)
-            f.url = p.get("url", f.url)
+                f._commits.append((self.c.delivered, nav, f.url))
             f.states.add("commit")
             return f
 
@@ -448,7 +471,15 @@ class Lifecycle:
 
     def wait_for_state(self, frame_id: str, state: str, *,
                         navigation: Optional[str] = None,
-                        timeout: Optional[float] = 30.0) -> None:
+                        timeout: Optional[float] = 30.0,
+                        after: Optional[int] = None,
+                        url: Optional[str] = None) -> None:
+        """Wait until `frame_id` reaches `state`. Given a `navigation`, only
+        once its document has committed, and from then on on whichever
+        document the frame carries; replaced by another before it committed,
+        it is `NavigationInterrupted` at once (`Frame.outcome`, which says what
+        `after` is), in upstream Playwright's words, naming `url`, the address
+        asked for, when the caller has one."""
         if state not in STATES:
             raise ValueError("unknown state: %r (the four are %s)"
                               % (state, ", ".join(STATES)))
@@ -456,9 +487,17 @@ class Lifecycle:
         with self._cv:
             while True:
                 f = self.frames.get(frame_id)
+                decided = None
                 if f is not None:
                     if navigation and navigation in f.aborted:
                         raise NavigationError(f.aborted[navigation])
+                    if navigation is not None:
+                        decided = f.outcome(navigation, after)
+                        if decided is not None and decided[0] != navigation:
+                            raise NavigationInterrupted(
+                                'Navigation to "%s" is interrupted by another '
+                                'navigation to "%s"'
+                                % (url or navigation, decided[1]))
                     # ⛔ CLEARING THE STATES ON `navigationStarted` IS NOT
                     # ENOUGH, and this is the real defect measured on
                     # 2026-08-27.
@@ -474,25 +513,24 @@ class Lifecycle:
                     # even started.
                     #
                     # The fix is not to wait a moment: it is to require
-                    # that the states belong to OUR navigation or to one
-                    # that came after it (`Frame.follows` says why the
-                    # second half is not optional). A navigation from
-                    # BEFORE ours is not ours, no matter what it says.
-                    if navigation is not None and not f.follows(navigation):
-                        pass
-                    elif self._reached(f, state):
+                    # that OUR document has committed before any state
+                    # counts (`Frame.outcome` says why the states of a later
+                    # document count too). A document from BEFORE ours is
+                    # not ours, no matter what it says.
+                    if ((navigation is None or decided is not None)
+                            and self._reached(f, state)):
                         return
                 if deadline.passed():
                     if f is None:
                         reason = "the frame does not exist"
-                    elif (navigation is not None
-                          and not f.follows(navigation)):
+                    elif navigation is not None and decided is None:
                         # The message must say THIS, because it is the
                         # case where the states are there but are not
                         # ours, and without this line it would look like
                         # the browser is not responding.
                         reason = ("the current navigation is %s, not our "
-                                  "%s" % (f.navigation, navigation))
+                                  "%s, which has not committed"
+                                  % (f.navigation, navigation))
                     else:
                         reason = ("states reached: %s"
                                   % (sorted(f.states) or "none"))
@@ -520,9 +558,12 @@ class Lifecycle:
         # navigation before its reply arrives.
         with self._cv:
             before = self._frame(fid).same_document
-        result = self.c.send("Page.navigate", params,
-                              session=self.session, timeout=timeout) or {}
-        nav = result.get("navigationId")
+        # The reply's place in the event stream is the line `Frame.outcome`
+        # decides on.
+        result, after = self.c.send_placed("Page.navigate", params,
+                                           session=self.session,
+                                           timeout=timeout)
+        nav = (result or {}).get("navigationId")
 
         # ⛔ A NULL `navigationId` is not an error: the protocol declares
         # it `Nullable`, and Juggler answers it for a url that differs from
@@ -545,7 +586,8 @@ class Lifecycle:
                     self._cv.wait(deadline.left())
                 return {"navigationId": None, "url": self.frames[fid].url}
 
-        self.wait_for_state(fid, until, navigation=nav, timeout=timeout)
+        self.wait_for_state(fid, until, navigation=nav, timeout=timeout,
+                            after=after, url=url)
         return {"navigationId": nav, "url": self.frames[fid].url}
 
     # ── inspection ──────────────────────────────────────────────────────────

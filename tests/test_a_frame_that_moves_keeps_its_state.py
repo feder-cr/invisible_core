@@ -36,7 +36,7 @@ import time
 import pytest
 
 from invisible_core.juggler.connection import EventListeners
-from invisible_core.juggler.lifecycle import Lifecycle
+from invisible_core.juggler.lifecycle import Lifecycle, NavigationInterrupted
 
 pytestmark = pytest.mark.unit
 
@@ -142,7 +142,13 @@ def test_a_reattach_keeps_the_frames_history():
     assert life.frames[F] is frame, "the re-announced frame is a new object"
     assert frame.aborted == {"nav-1": "NS_BINDING_ABORTED"}
     assert frame.same_document == 1
-    assert frame.follows("nav-1") and frame.follows("nav-2")
+    # It still knows when nav-2 started, so a document committed after that is
+    # the one that replaced it; a frame born again would wait for the timeout.
+    engine.emit([("Page.navigationCommitted", {"frameId": F, "navigationId": "nav-3",
+                                               "url": "http://a/other"})])
+    with pytest.raises(NavigationInterrupted) as e:
+        life.wait_for_state(F, "commit", navigation="nav-2", timeout=2)
+    assert "interrupted" in str(e.value)
 
 
 def test_a_child_reattached_under_a_new_parent_says_so():
