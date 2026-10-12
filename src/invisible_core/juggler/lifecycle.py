@@ -125,7 +125,11 @@ class Lifecycle:
         #: frame_id, url=None)`, called UNDER the lock and BEFORE any waiter
         #: is woken, so whatever it sends upward is on its way before the
         #: answer of a wait that the same event satisfies. Set by the page
-        #: once its channel exists.
+        #: once its channel exists. `what` is one of `frameAttached` (a frame
+        #: id seen for the first time), `frameDetached` (a frame gone, its own
+        #: detach or its parent's new document), `networkidle` and
+        #: `sameDocument`: the frame tree is this object's, and a client that
+        #: keeps frames of its own builds and retires them from these alone.
         self.announce = None
         #: The one pending silence check, or None. See `_settle`.
         self._settle_timer: Optional[threading.Timer] = None
@@ -209,8 +213,7 @@ class Lifecycle:
             return
         for f in waiting:
             f.states.add("networkidle")
-            if self.announce is not None:
-                self.announce("networkidle", f.id)
+            self._tell("networkidle", f.id)
         self._cv.notify_all()
 
     def _settle_later(self) -> None:
@@ -224,20 +227,38 @@ class Lifecycle:
             return None
 
         if method == "Page.frameAttached":
+            # ⛔ A FRAME ID ALREADY KNOWN IS THE SAME FRAME, RE-ANNOUNCED, and
+            # it keeps everything it knows. A navigation that moves the frame
+            # to another content process brings up a new PageAgent there, which
+            # announces the frames it holds (`PageAgent`'s constructor) and
+            # re-sends the navigation in flight; the old process says nothing.
+            # Measured 2026-10-12 on firefox-41: our own `goto` re-announces
+            # the main frame before its commit, and a page that replaces itself
+            # from script after `load` re-announces it again. Building a new
+            # Frame here threw away the numbering `follows` reads ([B228]), so
+            # a `goto` waiting for a state its document never reached (that
+            # document was replaced) waited for the timeout: networkidle 12 in
+            # 12 on a local page, domcontentloaded on a loaded host where the
+            # events arrive together (invisible_dots, 45 s). Playwright keeps
+            # the same object for the same reason ("retain frame identity on
+            # cross-process navigation").
             fid = p["frameId"]
-            self.frames[fid] = Frame(fid, p.get("parentFrameId"))
-            if p.get("parentFrameId") is None:
+            parent = p.get("parentFrameId")
+            f = self.frames.get(fid)
+            if f is None:
+                f = self.frames[fid] = Frame(fid, parent)
+                self._tell("frameAttached", fid)
+            else:
+                f.parent = parent
+            if parent is None:
                 self.main_frame = fid
-            return self.frames[fid]
+            return f
 
         if method == "Page.frameDetached":
-            fid = p["frameId"]
             # The whole subtree is removed, not just the one node: an
             # orphaned child would be left answering for a frame that no
             # longer exists.
-            for x in [k for k, v in self.frames.items()
-                      if k == fid or self._descendants(k, fid)]:
-                self.frames.pop(x, None)
+            self._retire(p["frameId"], itself=True)
             return None
 
         if method == "Page.navigationStarted":
@@ -250,6 +271,17 @@ class Lifecycle:
             return f
 
         if method == "Page.navigationCommitted":
+            # ⛔ A NEW DOCUMENT HAS NONE OF THE OLD ONE'S FRAMES. The engine does
+            # not say so when the navigation moved the frame to another process
+            # (the old process is simply left), nor after a back-forward cache
+            # restore: measured 2026-10-12 on firefox-41, an iframe stayed here
+            # for the rest of the session after its parent navigated away, and
+            # the client's `page.frames` grew by the stale child and a repeated
+            # main frame at every such navigation. The children a frame has when
+            # it commits belong to the document being replaced; the new
+            # document's attach after. Playwright retires them at the same
+            # moment (`frameCommittedNewDocumentNavigation`).
+            self._retire(p["frameId"], itself=False)
             f = self._frame(p["frameId"])
             nav = p.get("navigationId")
             if nav is not None:
@@ -272,8 +304,7 @@ class Lifecycle:
             # Announced HERE, under the lock and before `_on_event` wakes a
             # waiter, so the page's `navigated` is on its way up before the
             # answer of a `goto` waiting for this very event.
-            if self.announce is not None:
-                self.announce("sameDocument", f.id, f.url)
+            self._tell("sameDocument", f.id, f.url)
             return f
 
         if method == "Page.eventFired":
@@ -301,6 +332,31 @@ class Lifecycle:
             self._inflight = max(0, self._inflight - 1)
             self._last_activity = time.monotonic()
         return None
+
+    def _tell(self, what: str, frame_id: str, url: Optional[str] = None) -> None:
+        """Hand `what` to whoever listens (`announce`), under the lock and
+        before any waiter is woken."""
+        if self.announce is not None:
+            self.announce(what, frame_id, url)
+
+    def _retire(self, frame_id: str, *, itself: bool) -> None:
+        """Remove `frame_id`'s descendants, and the frame too if `itself`,
+        telling each one, the deepest first, the way a tree comes down."""
+        gone = [k for k in self.frames
+                if self._descendants(k, frame_id) or (itself and k == frame_id)]
+        gone.sort(key=lambda k: -self._depth(k))
+        for k in gone:
+            self.frames.pop(k, None)
+        for k in gone:
+            self._tell("frameDetached", k)
+
+    def _depth(self, fid: str) -> int:
+        depth, seen, cur = 0, set(), self.frames.get(fid)
+        while cur and cur.parent and cur.parent not in seen:
+            seen.add(cur.parent)
+            depth += 1
+            cur = self.frames.get(cur.parent)
+        return depth
 
     def _descendants(self, fid: str, ancestor: str) -> bool:
         seen = set()

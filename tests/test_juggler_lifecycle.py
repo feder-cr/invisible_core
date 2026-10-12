@@ -414,7 +414,9 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
            ("Network.requestFinished", {"requestId": "R"}),
            ("Page.eventFired", {"frameId": "F1", "name": "load"}))
     time.sleep(IDLE_QUIET * 3)
-    assert heard == [("networkidle", "F1")], heard
+    # The frame's birth is announced too, since 41.36.0: the frame tree is the
+    # lifecycle's, and a client builds its frames from these announcements.
+    assert heard == [("frameAttached", "F1"), ("networkidle", "F1")], heard
     assert "networkidle" in v.frames["F1"].states
 
     # A later request does not take it back (Playwright fires it once per
@@ -423,7 +425,7 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
     assert "networkidle" in v.frames["F1"].states
     events(v, ("Page.navigationStarted", {"frameId": "F1", "navigationId": "N1"}))
     assert "networkidle" not in v.frames["F1"].states
-    assert heard == [("networkidle", "F1")], heard
+    assert heard == [("frameAttached", "F1"), ("networkidle", "F1")], heard
 
 
 def test_a_same_document_goto_answers_after_the_engine_reports_it():
