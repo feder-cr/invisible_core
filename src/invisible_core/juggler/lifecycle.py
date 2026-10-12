@@ -581,8 +581,21 @@ class Lifecycle:
 
     # ── navigation ──────────────────────────────────────────────────────────
     def goto(self, url: str, *, frame_id: Optional[str] = None,
-              until: str = "load", timeout: Optional[float] = 30.0,
+              until: Optional[str] = "load", timeout: Optional[float] = 30.0,
               referer: Optional[str] = None) -> dict:
+        """Navigate `frame_id` (the main frame when not given) to `url` and
+        wait for `until` on its document, one of the four `STATES`.
+
+        `until=None` waits for no state: it returns once the engine has
+        started the navigation, its reply to `Page.navigate`. That is
+        WebDriver's "none" page load strategy (Marionette returns once the
+        navigation has started, `navigate.sys.mjs`), which a client offers and
+        Playwright does not. A same-document navigation is still waited for:
+        it has no document to wait on, and the engine reports it at once.
+        """
+        if until is not None and until not in STATES:
+            raise ValueError("unknown state: %r (the four are %s)"
+                              % (until, ", ".join(STATES)))
         fid = frame_id or self.main_frame
         if fid is None:
             raise RuntimeError("no frame: the page has not announced its "
@@ -624,8 +637,9 @@ class Lifecycle:
                     self._cv.wait(deadline.left())
                 return {"navigationId": None, "url": self.frames[fid].url}
 
-        self.wait_for_state(fid, until, navigation=nav, timeout=timeout,
-                            after=after, url=url)
+        if until is not None:
+            self.wait_for_state(fid, until, navigation=nav, timeout=timeout,
+                                after=after, url=url)
         return {"navigationId": nav, "url": self.frames[fid].url}
 
     # ── inspection ──────────────────────────────────────────────────────────

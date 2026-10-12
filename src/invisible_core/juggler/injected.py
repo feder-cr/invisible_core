@@ -246,10 +246,17 @@ class InjectedScript:
         for f in [f for f, (c, _) in self._handle.items() if c == context]:
             self._handle.pop(f, None)
 
-    def _in_current_world(self, attempt, *, timeout: Optional[float]) -> Any:
+    def in_current_world(self, attempt, *, timeout: Optional[float]) -> Any:
         """Run `attempt(deadline)`, and again in the frame's CURRENT world if
         the one it was aimed at has gone, until it answers or the caller's
         time is up.
+
+        ⛔ THE ONE COPY OF THIS RULE. Until 41.37.0 each client carried its own
+        loop (`_bridge.across_navigation` in invisible_selenium and in
+        invisible_puppeteer, the same twenty lines); a client's `attempt`
+        reads the world itself (`main_context`, `context_id`), so a turn after
+        a refusal waits for the frame's next world, and decides what is final
+        by raising anything but `ContextDestroyed`.
 
         ⛔ ONLY FOR A COMMAND THAT CARRIES NOTHING BUT VALUES. A refused command
         never ran, so making it again is the same command and not a second
@@ -302,7 +309,7 @@ class InjectedScript:
             return self._evaluate_in(
                 self.context_id(frame_id, timeout=deadline.left()),
                 expression, by_value=by_value, timeout=deadline.left())
-        return self._in_current_world(attempt, timeout=timeout)
+        return self.in_current_world(attempt, timeout=timeout)
 
     def _evaluate_in(self, context: str, expression: str, *, by_value: bool,
                      timeout: Optional[float]) -> Any:
@@ -320,7 +327,7 @@ class InjectedScript:
 
         Made again in the frame's current world when the one it was aimed at
         has gone, unless an argument is an element's objectId: see
-        `_in_current_world`. The InjectedScript itself is not such an
+        `in_current_world`. The InjectedScript itself is not such an
         argument - each world has its own, and `handle()` gives the one of the
         world the call is sent to."""
         values = [a if isinstance(a, dict) and ("objectId" in a or "value" in a)
@@ -342,7 +349,7 @@ class InjectedScript:
         if any("objectId" in a for a in values):
             r = attempt(Deadline(timeout))
         else:
-            r = self._in_current_world(attempt, timeout=timeout)
+            r = self.in_current_world(attempt, timeout=timeout)
         return r.get("value") if by_value else r.get("objectId")
 
     def handle(self, frame_id: str) -> str:
@@ -392,7 +399,7 @@ class InjectedScript:
         # navigated in between paired the objectId with a world it did not
         # exist in. Pairing it with the context the build was sent to is exact;
         # if that context is gone, the build raises `ContextDestroyed` and the
-        # caller's `_in_current_world` asks again.
+        # caller's `in_current_world` asks again.
         context = self.context_id(frame_id)
         oid = self._evaluate_in(context, expression, by_value=False,
                                 timeout=30.0)
@@ -447,7 +454,7 @@ class InjectedScript:
             return self._evaluate_in(
                 self.main_context(frame_id, timeout=deadline.left()),
                 expression, by_value=by_value, timeout=deadline.left())
-        return self._in_current_world(attempt, timeout=timeout)
+        return self.in_current_world(attempt, timeout=timeout)
 
     def query_selector_all(self, frame_id: str, selector: str) -> list:
         """Every match, as a list of objectIds the caller must dispose.

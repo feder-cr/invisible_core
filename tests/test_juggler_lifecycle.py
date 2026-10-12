@@ -313,6 +313,27 @@ def test_goto_without_a_main_frame_SAYS_SO():
     assert "main frame" in str(e.value)
 
 
+def test_goto_until_None_returns_once_the_navigation_has_started():
+    """WebDriver's "none" page load strategy: the reply says the engine has
+    started ours, and nothing after it is waited for - not even the commit,
+    which here never comes."""
+    c, v = lifecycle({"Page.navigate": {"navigationId": "N1"}})
+    events(v, ("Page.frameAttached", {"frameId": "F1"}))
+    began = time.monotonic()
+    result = v.goto("http://slow/", until=None, timeout=5)
+    assert time.monotonic() - began < 1
+    assert result["navigationId"] == "N1"
+    assert [m for m, _, _ in c.sent] == ["Page.navigate"]
+
+
+def test_goto_with_an_invented_state_is_refused_before_it_navigates():
+    c, v = lifecycle({"Page.navigate": {"navigationId": "N1"}})
+    events(v, ("Page.frameAttached", {"frameId": "F1"}))
+    with pytest.raises(ValueError, match="unknown state"):
+        v.goto("http://a/", until="loaded")
+    assert c.sent == []
+
+
 def test_goto_networkidle_waits_for_ITS_OWN_document_not_the_quiet_old_one():
     """⛔ The old page's silence must not satisfy the wait for the new one.
 
