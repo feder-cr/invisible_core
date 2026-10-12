@@ -634,6 +634,28 @@ class InjectedScript:
         return True, (self._state_answer(args, value) if what == "state"
                       else value)
 
+    def read_all(self, frame_id: str, selector: str, what: str, *args,
+                 timeout: Optional[float] = 30.0) -> list:
+        """One of `_READS` on every element `selector` matches NOW, in
+        document order (`locator.all_inner_texts()`, `all_text_contents()`).
+
+        ⛔ A READ OF THIS PACKAGE, NOT THE CALLER'S CODE, and that is why it
+        exists. Playwright's client asks for these two through
+        `evalOnSelectorAll` with a fixed function, the same door as the
+        caller's `$$eval`, and since 41.38.0 that door sends what it carries
+        once ([B285]). Found and read in one command of values, as
+        `read_match`, it is made again in the frame's current world when the
+        page moves on under it: the MCP's `read_text` reads this way right
+        after a navigation, on pages that replace themselves ([B282]).
+        """
+        self._check_read(what, args)
+        return self.call(
+            frame_id,
+            "(injected, sel, ...args) => injected.querySelectorAll("
+            "  injected.parseSelector(sel), document)"
+            "  .map(el => (%s)(injected, el, ...args))" % _READS[what],
+            selector, *args, timeout=timeout) or []
+
     def _check_read(self, what: str, args: tuple) -> None:
         """A state outside the ones `elementState` knows is refused before
         anything is sent: it would answer a value that means nothing."""

@@ -217,3 +217,16 @@ def test_a_declaration_carrying_the_callers_code_is_sent_once():
     with pytest.raises(ContextDestroyed):
         inj.call(F, "(i, s) => { window.runs++ }", "body", repeatable=False)
     assert not any(c == "c2" for m, c in engine.sent if m == "Runtime.callFunction")
+
+
+def test_a_read_of_every_match_is_made_in_the_frames_new_world():
+    """`all_inner_texts` is this package's read, not the caller's code: the
+    page moving on under it is answered by the new document, as `read_match`
+    is ([B282]), while the caller's `$$eval` is sent once ([B285])."""
+    engine, inj = _injected()
+    inj.call(F, "(i) => 1")
+    engine.dead.add("c1")
+    engine.on_refusal = lambda: engine.world("c2")
+    engine.sent.clear()
+    assert inj.read_all(F, "p", "innerText") == "ran in c2"
+    assert [c for m, c in engine.sent if m == "Runtime.callFunction"] == ["c1", "c2"]
