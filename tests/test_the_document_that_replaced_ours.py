@@ -143,8 +143,11 @@ def test_a_wait_without_a_reply_is_decided_from_the_first_start_whenever_it_look
                  _committed("nav-12884901950", LANDED),
                  ("Page.frameAttached", {"frameId": F}), _started("nav-7"),
                  _committed("nav-7", "http://127.0.0.1/back"), *_loaded()])
-    with pytest.raises(NavigationInterrupted):
+    with pytest.raises(NavigationInterrupted) as e:
         life.wait_for_state(F, "load", navigation="nav-7", timeout=2)
+    # No address was asked for, so the navigation is named by its id.
+    assert str(e.value) == ('Navigation nav-7 is interrupted by another '
+                            'navigation to "%s"' % LANDED)
 
 
 def test_ours_still_wins_when_it_is_the_document_that_commits():

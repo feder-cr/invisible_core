@@ -495,9 +495,10 @@ class Lifecycle:
                         decided = f.outcome(navigation, after)
                         if decided is not None and decided[0] != navigation:
                             raise NavigationInterrupted(
-                                'Navigation to "%s" is interrupted by another '
+                                'Navigation %s is interrupted by another '
                                 'navigation to "%s"'
-                                % (url or navigation, decided[1]))
+                                % ('to "%s"' % url if url else navigation,
+                                   decided[1]))
                     # ⛔ CLEARING THE STATES ON `navigationStarted` IS NOT
                     # ENOUGH, and this is the real defect measured on
                     # 2026-08-27.
