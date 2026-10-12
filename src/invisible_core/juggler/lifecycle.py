@@ -42,6 +42,7 @@ import threading
 import time
 from typing import Optional
 
+from .connection import TargetClosedError
 from .deadline import Deadline
 
 #: How much silence the network needs before it counts as "still". It is
@@ -154,6 +155,9 @@ class Lifecycle:
         self.announce = None
         #: The one pending silence check, or None. See `_settle`.
         self._settle_timer: Optional[threading.Timer] = None
+        #: The connection has ended (`_on_close`): no event will come, and a
+        #: wait - with a limit or without one - says so instead of waiting.
+        self._gone = False
         # ⛔ REGISTERED, NOT CHAINED, and the difference is not style: this
         # used to capture the previous `on_event` and install a closure over
         # it, so every page added a nested call to the delivery of every
@@ -162,6 +166,7 @@ class Lifecycle:
         # observer that a chain could silence by forgetting one line cannot
         # be silenced by a list.
         connection.add_listener(self._route)
+        connection.add_close_listener(self._on_close)
 
     def _route(self, method: str, params: dict,
                event_session: Optional[str]) -> None:
@@ -171,11 +176,25 @@ class Lifecycle:
     def detach(self) -> None:
         """Stop listening. Called when the page this follows goes away."""
         self.c.remove_listener(self._route)
+        self.c.remove_close_listener(self._on_close)
         with self._cv:
             self.announce = None
             if self._settle_timer is not None:
                 self._settle_timer.cancel()
                 self._settle_timer = None
+
+    def _on_close(self) -> None:
+        with self._cv:
+            self._gone = True
+            self._cv.notify_all()
+
+    def _check_alive(self, waiting_for: str) -> None:
+        """Raise if the connection ended: what is awaited can no longer come.
+        Called under the lock, after the wait's own condition, so a wait
+        already satisfied answers rather than raising."""
+        if self._gone:
+            raise TargetClosedError(
+                "the browser closed while waiting for %s" % waiting_for)
 
     def frame(self, frame_id: str):
         """The frame with this id, or None.
@@ -433,21 +452,36 @@ class Lifecycle:
         anchor on is that the frame's CURRENT navigation has changed.
         """
         deadline = Deadline(timeout)
+        navigation = self.wait_for_navigation_start(frame_id, previous,
+                                                    timeout=timeout)
+        if navigation is None:
+            raise TimeoutError(
+                "no new navigation on frame %s in %.0fs: the previous one (%s) "
+                "is still current" % (frame_id, timeout, previous))
+        self.wait_for_state(frame_id, state, navigation=navigation,
+                            timeout=deadline.left(floor=0.05))
+        return navigation
+
+    def wait_for_navigation_start(self, frame_id: str, previous: Optional[str],
+                                  timeout: Optional[float]) -> Optional[str]:
+        """The id of a navigation `frame_id` starts that is not `previous`, or
+        None if none starts within `timeout`.
+
+        The question a client asks after an action that MAY navigate: Selenium
+        waits for the page a click unloads into and only if the click unloads
+        one (Marionette, `clickElement`), so "did one start" is answered with
+        no error either way. `wait_for_new_navigation` asks it too, and turns
+        the None into its timeout."""
+        deadline = Deadline(timeout)
         with self._cv:
             while True:
                 f = self.frames.get(frame_id)
                 if f is not None and f.navigation != previous:
-                    break
+                    return f.navigation
+                self._check_alive("a new navigation of frame %s" % frame_id)
                 if deadline.passed():
-                    raise TimeoutError(
-                        "no new navigation on frame %s in %.0fs: the previous "
-                        "one (%s) is still current" % (frame_id, timeout,
-                                                       previous))
+                    return None
                 self._cv.wait(deadline.slice(0.05))
-            navigation = self.frames[frame_id].navigation
-        self.wait_for_state(frame_id, state, navigation=navigation,
-                            timeout=deadline.left(floor=0.05))
-        return navigation
 
     def wait_for_main_frame(self, timeout: Optional[float] = 20.0) -> str:
         """The main frame id, waiting for it to arrive.
@@ -462,6 +496,7 @@ class Lifecycle:
         deadline = Deadline(timeout)
         with self._cv:
             while self.main_frame is None:
+                self._check_alive("the main frame")
                 if deadline.passed():
                     raise TimeoutError(
                         "no main frame in %.0fs: the page never announced one. "
@@ -521,6 +556,7 @@ class Lifecycle:
                     if ((navigation is None or decided is not None)
                             and self._reached(f, state)):
                         return
+                self._check_alive("%s on frame %s" % (state, frame_id))
                 if deadline.passed():
                     if f is None:
                         reason = "the frame does not exist"
@@ -580,6 +616,7 @@ class Lifecycle:
         if nav is None:
             with self._cv:
                 while self._frame(fid).same_document == before:
+                    self._check_alive("the same-document navigation to %s" % url)
                     if deadline.passed():
                         raise TimeoutError(
                             "the same-document navigation to %s was not "

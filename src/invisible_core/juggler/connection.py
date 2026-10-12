@@ -220,6 +220,47 @@ class EventListeners:
         #: stream (`send_placed`), and that place is what tells an event the
         #: browser sent after handling the command from one it sent before.
         self.delivered = 0
+        #: Who is told when the connection ends (`add_close_listener`), and
+        #: whether it has. ⛔ A WAIT ON AN EVENT HAS NO REPLY FOR A CLOSED
+        #: PIPE TO ANSWER: a session attaching, a main frame, a load state.
+        #: With a limit of its own such a wait ended late; with none - the
+        #: clients wait as long as the library they stand in for does - it
+        #: would outlive the browser. So the end is told to it, like a reply.
+        self._close_listeners: list = []
+        self.gone = False
+
+    def add_close_listener(self, fn) -> None:
+        """Call `fn()` once, when the connection ends. Registered after the
+        end, it is called at once: a waiter that subscribes late must not
+        wait for news that has already gone by."""
+        with self._listeners_lock:
+            if fn not in self._close_listeners:
+                self._close_listeners.append(fn)
+            told = self.gone
+        if told:
+            fn()
+
+    def remove_close_listener(self, fn) -> None:
+        with self._listeners_lock:
+            try:
+                self._close_listeners.remove(fn)
+            except ValueError:
+                pass
+
+    def announce_closed(self) -> None:
+        """Tell every close listener that the connection has ended, once, each
+        one isolated from the others' failures as events are."""
+        with self._listeners_lock:
+            if self.gone:
+                return
+            self.gone = True
+            listeners = list(self._close_listeners)
+        for fn in listeners:
+            try:
+                fn()
+            except Exception as failure:
+                if len(self.handler_errors) < 32:
+                    self.handler_errors.append("closed: %s" % failure)
 
     def send_placed(self, method: str, params: Optional[dict] = None,
                     session: Optional[str] = None,
@@ -335,6 +376,8 @@ class Connection(EventListeners):
                                        "message": "the pipe closed"}},
                             self.delivered))
                 ready.set()
+            # And the waits on an event, which no reply would ever wake.
+            self.announce_closed()
 
     def _deliver(self, raw: bytes) -> None:
         try:

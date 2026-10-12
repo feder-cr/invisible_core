@@ -309,6 +309,10 @@ CONTRACT = {
         # instead of matched by its sentence in each client.
         "ContextDestroyed", "EvaluationError", "InjectedScript", "UTILITY_WORLD",
     },
+    # Since 41.37.0: the browser module selenium and puppeteer each carried a
+    # copy of, here once.
+    "invisible_core.juggler.instance": {"launch", "MOTION_BUDGET_PREF",
+                                        "SESSION_SEED_PREF"},
     "invisible_core.juggler.keyboard": {"BUTTON_MASK", "MODIFIER_MASK"},
     # NavigationInterrupted since 41.36.0: another document committed in the
     # navigation's place, which Selenium must not word as an error page.
