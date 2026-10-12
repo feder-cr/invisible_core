@@ -760,3 +760,40 @@ def test_the_tunnel_failure_text_is_still_what_urllib3_writes(monkeypatch):
         "urllib3 no longer writes 'Tunnel connection failed: <code>', so the "
         "proxy status code is not reaching the classification any more")
     assert _geo._classify(excinfo.value)[0] == "proxy_auth"
+
+
+@pytest.mark.parametrize("exc", [
+    requests.exceptions.SSLError("HTTPSConnectionPool(host='api.ipify.org', port=443): "
+                                 "Max retries exceeded with url: / " + "(Caused by ...) " * 8
+                                 + "THE CAUSE: certificate verify failed"),
+    ValueError("'" + "<div>" * 30 + "' does not appear to be an IPv4 or IPv6 address, THE CAUSE"),
+    MemoryError("x" * 200 + " THE CAUSE"),
+], ids=["tls_failed", "endpoint_not_an_ip", "unknown"])
+def test_the_cause_comes_whole(exc):
+    """Until 41.36.0 these details stopped at 70 and 110 characters, and an
+    exception chain names its cause at the end. Known-bad: cut them again."""
+    kind, detail = _geo._classify(exc)
+    assert "THE CAUSE" in detail, f"{kind}: the cause was cut: {detail[-60:]!r}"
+
+
+def test_the_proxy_credentials_never_reach_the_diagnosis(monkeypatch):
+    """With the cut gone a detail can be long enough to quote the proxy URL,
+    which carries the credentials. They are taken out where the attempt is
+    recorded, as typed and as the URL quotes them. Known-bad: record the
+    detail as `_classify` gives it."""
+    proxy = {"server": "socks5://proxy.example:1080",
+             "username": "alice", "password": "s3cr@t pw"}
+
+    def fake_get(url, proxies=None, timeout=None):
+        raise requests.exceptions.SSLError(
+            "could not reach %s through %s (raw s3cr@t pw) and the cause is late"
+            % (url, proxies["https"]))
+
+    monkeypatch.setattr(_geo.requests, "get", fake_get)
+    with pytest.raises(_geo.GeoTimezoneError) as excinfo:
+        _geo.discover_egress_ip(proxy)
+    text = str(excinfo.value)
+    assert "the cause is late" in text, text
+    for secret in ("s3cr@t pw", "s3cr%40t%20pw", "alice:"):
+        assert secret not in text, f"{secret!r} reached the diagnosis: {text}"
+    assert "socks5h://***@proxy.example:1080" in text, text

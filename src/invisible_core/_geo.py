@@ -274,7 +274,7 @@ def _classify(exc: BaseException) -> "tuple[str, str]":
 
     if isinstance(exc, ValueError) and not isinstance(exc, requests.RequestException):
         # `ipaddress.ip_address` on a body that is not an address.
-        return "endpoint_not_an_ip", f"reply was not an IP ({str(exc)[:70]})"
+        return "endpoint_not_an_ip", f"reply was not an IP ({exc})"
 
     if any(token in text for token in _DNS_TOKENS):
         return "dns_failure", "a hostname did not resolve"
@@ -284,7 +284,7 @@ def _classify(exc: BaseException) -> "tuple[str, str]":
     # portal this classification exists to separate - was reported as a dead TCP
     # port, sending the reader to check a host:port that was answering fine.
     if isinstance(exc, requests.exceptions.SSLError):
-        return "tls_failed", f"TLS failed ({str(exc)[:70]})"
+        return "tls_failed", f"TLS failed ({exc})"
 
     # ORDER 3: before the ConnectionError arm, which ProxyError also subclasses.
     # ReadTimeout is not a ConnectionError, but it is kept adjacent so the three
@@ -297,7 +297,31 @@ def _classify(exc: BaseException) -> "tuple[str, str]":
                         requests.exceptions.ConnectionError)):
         return "connect_failed", "could not open a connection"
 
-    return "unknown", repr(exc)[:110]
+    # ⛔ THE CAUSE WHOLE, in this branch and the two above: until 41.36.0 they
+    # stopped at 70 and 110 characters, and a diagnosis exists to be read for
+    # its cause, which an exception chain names at its end. No constraint asked
+    # for the cut (D87: a cap only where one does). The proxy's credentials,
+    # which a longer text could carry, are taken out by `_without_credentials`
+    # where the attempt is recorded - a cut was never what kept them out.
+    return "unknown", repr(exc)
+
+
+def _without_credentials(text: str, proxy: Optional[Dict[str, str]]) -> str:
+    """`text` with the proxy's password, and its `user:password@`, as `***`.
+
+    The proxy URL handed to requests carries the credentials
+    (`_proxies_for_requests`), and an exception may quote that URL back. Both
+    spellings are taken out, as typed and as the URL quotes them."""
+    if not proxy:
+        return text
+    user = proxy.get("username") or ""
+    pwd = proxy.get("password") or ""
+    for u, w in ((user, pwd), (quote(user, safe=""), quote(pwd, safe=""))):
+        if u or w:
+            text = text.replace(f"{u}:{w}@", "***@")
+        if w:
+            text = text.replace(w, "***")
+    return text
 
 
 def _proxy_is_set(proxy: Optional[Dict[str, str]]) -> bool:
@@ -401,7 +425,8 @@ def discover_egress_ip(
         except Exception as exc:  # noqa: BLE001 - try the next endpoint
             kind, detail = _classify(exc)
             attempts.append(
-                _Attempt(url, time.monotonic() - started, kind, detail))
+                _Attempt(url, time.monotonic() - started, kind,
+                         _without_credentials(detail, proxy)))
             continue
 
         if any(parsed in net for net in _NOT_ROUTABLE):
