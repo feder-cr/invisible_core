@@ -24,7 +24,10 @@ class Deadline:
         self._at = None if seconds is None else time.monotonic() + seconds
 
     def passed(self) -> bool:
-        return self._at is not None and time.monotonic() > self._at
+        """True once no time is left: the same moment `left()` reaches 0.
+        On Windows the monotonic clock moves in steps of about 15 ms, and a
+        strict `>` left a wait that had no time left believing it had."""
+        return self._at is not None and time.monotonic() >= self._at
 
     def left(self, floor: float = 0.0) -> Optional[float]:
         """Seconds left, never below `floor`; None when there is no limit, so

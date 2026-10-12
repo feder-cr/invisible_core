@@ -123,3 +123,14 @@ def test_wait_for_state_without_a_limit_waits_for_the_event():
     life.wait_for_state("F1", "commit", navigation="B", timeout=None)
     assert real_time.monotonic() - started >= 0.4
     assert life.frames["F1"].url == "http://b/"
+
+
+@pytest.mark.unit
+def test_a_deadline_has_passed_the_moment_no_time_is_left(monkeypatch):
+    """Windows' monotonic clock moves in steps of about 15 ms: a read at the
+    very moment of the deadline is `left() == 0`, and must be `passed()` too,
+    or a wait with no time left believes it has some."""
+    monkeypatch.setattr(deadline_module.time, "monotonic", lambda: 100.0)
+    d = Deadline(0.0)
+    assert d.left() == 0.0
+    assert d.passed()

@@ -31,6 +31,7 @@ import pathlib
 import time
 from typing import Any, Optional
 
+from .connection import ProtocolError, ReplyTimeout
 from .deadline import Deadline
 
 #: ⛔ Must stay equal to the driver's `UTILITY_WORLD_NAME` and to the name
@@ -44,6 +45,60 @@ _SOURCE = pathlib.Path(__file__).with_name("injected.js")
 
 class EvaluationError(RuntimeError):
     """The JavaScript raised. Carries the PAGE's text and stack."""
+
+
+class ContextDestroyed(RuntimeError):
+    """The execution context a command was aimed at no longer exists: the
+    frame navigated, or its document was replaced, after the id was read.
+
+    ⛔ NOT AN `EvaluationError`, which says the page's JavaScript raised.
+    Nothing ran here, and the clients translate the two differently: a
+    selector query that raised is an invalid selector to Selenium and
+    Puppeteer, a vanished world is a stale element or a navigation.
+
+    The engine checks the context BEFORE running anything (`Runtime.js`,
+    `findExecutionContext`), so a command refused this way never ran. The
+    text is Playwright's, and so is the reason for a type: until 41.36.0 this
+    arrived as the engine's raw `Failed to find execution context with id`,
+    which nothing above recognised, and a read right after a `goto` on a page
+    that replaces itself failed with it (5 in 5 on a local page that calls
+    `location.replace` from its `<head>`).
+    """
+
+
+#: The engine's refusal of a command aimed at a context it does not have.
+_CONTEXT_GONE = "Failed to find execution context with id"
+
+#: The element reads, each a function of `(injected, el, ...args)`, in ONE
+#: table: a read on a handle (`read`) and a read on a selector (`read_match`)
+#: run the same text, so the two cannot drift.
+#:
+#: ⛔ Every read goes through the UTILITY world, hence through the Xray. The
+#: same lines run in the MAIN world would be accountable to a site that
+#: wrapped the accessor, the defect measured in §3.9 and §3.10 of
+#: `31-client-fork.md`.
+_READS = {
+    "textContent": "(injected, el) => el.textContent || ''",
+    "innerText": "(injected, el) => el.innerText",
+    "innerHTML": "(injected, el) => el.innerHTML",
+    # ⛔ Only valid on input, textarea and select: on a div it would silently
+    # return `undefined`, so it REFUSES instead.
+    "inputValue": (
+        "(injected, el) => {"
+        "  const e = injected.retarget(el, 'follow-label');"
+        "  const n = e && e.nodeName.toLowerCase();"
+        "  if (n !== 'input' && n !== 'textarea' && n !== 'select')"
+        "    throw new Error('Node is not an <input>, <textarea> or <select> element');"
+        "  return e.value; }"),
+    # ⛔ An ABSENT attribute must come back as `None`, not as the empty string:
+    # an empty value and an absence are two different things.
+    "attribute": "(injected, el, n) => el.getAttribute(n)",
+    "state": "(injected, el, s) => injected.elementState(el, s)",
+    # ⛔ In the utility world like every other read, which matters more here
+    # than anywhere: it walks the whole subtree and reads a role, a name and
+    # a description off every node.
+    "ariaSnapshot": "(injected, el, o) => injected.ariaSnapshot(el, o)",
+}
 
 
 class InjectedScript:
@@ -160,6 +215,58 @@ class InjectedScript:
             self._init_scripts.remove(source)
             self._push_scripts()
 
+    def _send_in(self, method: str, params: dict, *,
+                 timeout: Optional[float]) -> Any:
+        """Every command aimed at ONE execution context goes through here.
+
+        ⛔ ONE PLACE KNOWS WHAT A VANISHED CONTEXT LOOKS LIKE. The id was read
+        a moment ago and the frame may have navigated since; the engine then
+        refuses the command before running it. That refusal becomes
+        `ContextDestroyed`, and the dead id leaves the registry at once: its
+        `executionContextDestroyed` can arrive after this answer, and until it
+        does the registry would hand the same dead id to the next caller.
+        """
+        try:
+            return self.c.send(method, params, session=self.session,
+                               timeout=timeout)
+        except ReplyTimeout:
+            raise
+        except ProtocolError as exc:
+            if _CONTEXT_GONE not in str(exc):
+                raise
+            context = params.get("executionContextId")
+            self._forget_context(context)
+            raise ContextDestroyed(
+                "Execution context was destroyed, most likely because of a "
+                "navigation (%s, context %s)" % (method, context)) from exc
+
+    def _forget_context(self, context: Any) -> None:
+        for k in [k for k, v in self.contexts.items() if v == context]:
+            self.contexts.pop(k, None)
+        for f in [f for f, (c, _) in self._handle.items() if c == context]:
+            self._handle.pop(f, None)
+
+    def _in_current_world(self, attempt, *, timeout: Optional[float]) -> Any:
+        """Run `attempt(deadline)`, and again in the frame's CURRENT world if
+        the one it was aimed at has gone, until it answers or the caller's
+        time is up.
+
+        ⛔ ONLY FOR A COMMAND THAT CARRIES NOTHING BUT VALUES. A refused command
+        never ran, so making it again is the same command and not a second
+        one; and values mean the same thing in any world. A command carrying
+        an element's objectId is not made again: the element belonged to the
+        world that is gone, and `ContextDestroyed` is the true answer for it.
+        Each turn waits for the frame's next world, which `_send_in` made
+        necessary by forgetting the dead one.
+        """
+        deadline = Deadline(timeout)
+        while True:
+            try:
+                return attempt(deadline)
+            except ContextDestroyed:
+                if deadline.passed():
+                    raise
+
     def context_id(self, frame_id: str, *, timeout: Optional[float] = 10.0) -> str:
         key = (frame_id, UTILITY_WORLD)
         deadline = Deadline(timeout)
@@ -189,27 +296,53 @@ class InjectedScript:
 
     def evaluate(self, frame_id: str, expression: str, *,
                 by_value: bool = True, timeout: Optional[float] = 30.0) -> Any:
-        r = self._result(self.c.send(
+        """An expression in the frame's utility world, made again in the
+        frame's current world if the one it was aimed at has gone."""
+        def attempt(deadline):
+            return self._evaluate_in(
+                self.context_id(frame_id, timeout=deadline.left()),
+                expression, by_value=by_value, timeout=deadline.left())
+        return self._in_current_world(attempt, timeout=timeout)
+
+    def _evaluate_in(self, context: str, expression: str, *, by_value: bool,
+                     timeout: Optional[float]) -> Any:
+        r = self._result(self._send_in(
             "Runtime.evaluate",
-            {"executionContextId": self.context_id(frame_id),
+            {"executionContextId": context,
              "expression": expression, "returnByValue": by_value},
-            session=self.session, timeout=timeout))
+            timeout=timeout))
         return r.get("value") if by_value else r.get("objectId")
 
     def call(self, frame_id: str, declaration: str, *arguments,
              by_value: bool = True, timeout: Optional[float] = 30.0) -> Any:
         """`declaration` is a JS declaration; the FIRST argument passed
-        is always the InjectedScript, the way the driver does it."""
-        args = [{"objectId": self.handle(frame_id)}]
-        for a in arguments:
-            args.append(a if isinstance(a, dict) and
-                        ("objectId" in a or "value" in a) else {"value": a})
-        r = self._result(self.c.send(
-            "Runtime.callFunction",
-            {"executionContextId": self.context_id(frame_id),
-             "functionDeclaration": declaration, "args": args,
-             "returnByValue": by_value},
-            session=self.session, timeout=timeout))
+        is always the InjectedScript, the way the driver does it.
+
+        Made again in the frame's current world when the one it was aimed at
+        has gone, unless an argument is an element's objectId: see
+        `_in_current_world`. The InjectedScript itself is not such an
+        argument - each world has its own, and `handle()` gives the one of the
+        world the call is sent to."""
+        values = [a if isinstance(a, dict) and ("objectId" in a or "value" in a)
+                  else {"value": a} for a in arguments]
+
+        def attempt(deadline):
+            script = self.handle(frame_id)
+            # The context the script was built in, not one read again: the
+            # objectId means something only there.
+            context = self._handle[frame_id][0]
+            return self._result(self._send_in(
+                "Runtime.callFunction",
+                {"executionContextId": context,
+                 "functionDeclaration": declaration,
+                 "args": [{"objectId": script}] + values,
+                 "returnByValue": by_value},
+                timeout=deadline.left()))
+
+        if any("objectId" in a for a in values):
+            r = attempt(Deadline(timeout))
+        else:
+            r = self._in_current_world(attempt, timeout=timeout)
         return r.get("value") if by_value else r.get("objectId")
 
     def handle(self, frame_id: str) -> str:
@@ -254,18 +387,20 @@ class InjectedScript:
                       "return new (module.exports.InjectedScript())"
                       "(globalThis, %s); })();"
                       % (source, json.dumps(options)))
-        # ⛔ THE CONTEXT IS READ AGAIN HERE, NOT REUSED FROM ABOVE. `evaluate`
-        # waits for the utility world to exist, so between the check at the top
-        # and this line the frame may have gained one, or gained a different
-        # one. Pairing the objectId with the context it was actually minted in
-        # is the whole point; pairing it with the context we hoped for would
-        # recreate the same class one layer down.
-        oid = self.evaluate(frame_id, expression, by_value=False)
+        # ⛔ THE CONTEXT IT IS STORED WITH IS THE ONE IT WAS BUILT IN. Until
+        # 41.36.0 the context was read again after the build, and a frame that
+        # navigated in between paired the objectId with a world it did not
+        # exist in. Pairing it with the context the build was sent to is exact;
+        # if that context is gone, the build raises `ContextDestroyed` and the
+        # caller's `_in_current_world` asks again.
+        context = self.context_id(frame_id)
+        oid = self._evaluate_in(context, expression, by_value=False,
+                                timeout=30.0)
         if not oid:
             raise EvaluationError(
                 "the InjectedScript did not return an object: "
                 "is the source the right one?")
-        self._handle[frame_id] = (self.context_id(frame_id), oid)
+        self._handle[frame_id] = (context, oid)
         return oid
 
     # ── the little needed on top ────────────────────────────────────────────
@@ -308,13 +443,11 @@ class InjectedScript:
         absent for the page's own context, which is why the key is `""` and not
         a missing lookup.
         """
-        context = self.main_context(frame_id, timeout=timeout)
-        r = self._result(self.c.send(
-            "Runtime.evaluate",
-            {"executionContextId": context,
-             "expression": expression, "returnByValue": by_value},
-            session=self.session, timeout=timeout))
-        return r.get("value") if by_value else r.get("objectId")
+        def attempt(deadline):
+            return self._evaluate_in(
+                self.main_context(frame_id, timeout=deadline.left()),
+                expression, by_value=by_value, timeout=deadline.left())
+        return self._in_current_world(attempt, timeout=timeout)
 
     def query_selector_all(self, frame_id: str, selector: str) -> list:
         """Every match, as a list of objectIds the caller must dispose.
@@ -421,21 +554,56 @@ class InjectedScript:
             "  return { ok: false, missing: r.missingState }; }",
             {"objectId": element}, states)
 
-    def text_content(self, frame_id: str, element: str) -> str:
-        """⛔ Goes through the utility world, hence through the Xray: the
-        same read done in the MAIN world would be accountable to the
-        site."""
-        return self.call(
-            frame_id,
-            "(injected, el) => el.textContent || ''",
-            {"objectId": element})
+    def read(self, frame_id: str, element: str, what: str, *args) -> Any:
+        """One of `_READS` on an element handle."""
+        self._check_read(what, args)
+        value = self.call(frame_id, _READS[what], {"objectId": element}, *args)
+        return self._state_answer(args, value) if what == "state" else value
 
-    # ── the "DOM read" group from item 6 (§6.5) ─────────────────────────────
-    #
-    # ⛔ Every read goes through the UTILITY world, hence through the
-    # Xray. The same lines run in the MAIN world would be accountable to
-    # a site that wrapped the accessor, and that is the defect measured
-    # in §3.9 and §3.10 of `31-client-fork.md`.
+    def read_match(self, frame_id: str, selector: str, what: str, *args,
+                   strict: bool = False,
+                   timeout: Optional[float] = 30.0) -> tuple:
+        """One of `_READS` on the element `selector` matches NOW:
+        `(True, value)`, or `(False, None)` when nothing matches.
+
+        ⛔ FOUND AND READ IN ONE COMMAND, AND THAT IS THE POINT. Resolving to a
+        handle and reading through it is two commands with a navigation able
+        to fall between them, and then the handle belongs to a world that is
+        gone: measured 2026-10-12, a read right after `goto` on a page that
+        replaces itself failed that way 5 times in 5. One command carries only
+        values, so a world that vanishes under it is not an error at all:
+        `call` makes it again in the frame's current world. Waiting for the
+        element to appear is the caller's loop, because only the caller knows
+        whether it waits (`inner_text`) or answers now (`is_visible`).
+        """
+        self._check_read(what, args)
+        r = self.call(
+            frame_id,
+            "(injected, sel, strict, ...args) => {"
+            "  const el = injected.querySelector("
+            "    injected.parseSelector(sel), document, strict);"
+            "  if (!el) return { found: false };"
+            "  return { found: true, value: (%s)(injected, el, ...args) }; }"
+            % _READS[what],
+            selector, bool(strict), *args, timeout=timeout)
+        if not r or not r.get("found"):
+            return False, None
+        value = r.get("value")
+        return True, (self._state_answer(args, value) if what == "state"
+                      else value)
+
+    def _check_read(self, what: str, args: tuple) -> None:
+        """A state outside the ones `elementState` knows is refused before
+        anything is sent: it would answer a value that means nothing."""
+        if what == "state" and args[0] not in self.KNOWN_STATES:
+            raise ValueError("unknown state: %r (the real ones are %s)"
+                             % (args[0], ", ".join(self.KNOWN_STATES)))
+
+    def text_content(self, frame_id: str, element: str) -> str:
+        return self.read(frame_id, element, "textContent")
+
+    # ── the "DOM read" group from item 6 (§6.5), on handles; the texts are
+    #    `_READS` ──────────────────────────────────────────────────────────
 
     #: The states that `injected.elementState` actually knows, read from
     #: its code and not assumed. Asking for one outside this set
@@ -445,13 +613,11 @@ class InjectedScript:
 
     def element_state(self, frame_id: str, element: str, state: str) -> bool:
         """`is_visible`, `is_enabled`, `is_checked` and their siblings."""
-        if state not in self.KNOWN_STATES:
-            raise ValueError("unknown state: %r (the real ones are %s)"
-                             % (state, ", ".join(self.KNOWN_STATES)))
-        r = self.call(
-            frame_id,
-            "(injected, el, s) => injected.elementState(el, s)",
-            {"objectId": element}, state)
+        return self.read(frame_id, element, "state", state)
+
+    def _state_answer(self, args: tuple, r: Any) -> bool:
+        """What `injected.elementState` answered, as a boolean."""
+        state = args[0]
         # ⛔ `elementState` does NOT return a boolean: it returns
         # `{matches, received}`, and on a detached node `received` is
         # `error:notconnected`. Reading it as a boolean would give
@@ -465,35 +631,16 @@ class InjectedScript:
         return bool(r)
 
     def inner_text(self, frame_id: str, element: str) -> str:
-        return self.call(frame_id, "(injected, el) => el.innerText",
-                         {"objectId": element})
+        return self.read(frame_id, element, "innerText")
 
     def inner_html(self, frame_id: str, element: str) -> str:
-        return self.call(frame_id, "(injected, el) => el.innerHTML",
-                         {"objectId": element})
+        return self.read(frame_id, element, "innerHTML")
 
     def input_value(self, frame_id: str, element: str) -> str:
-        """`input_value`. ⛔ Only valid on input, textarea and select: on
-        a div it would silently return `undefined`, so it REFUSES
-        instead."""
-        return self.call(
-            frame_id,
-            "(injected, el) => {"
-            "  const e = injected.retarget(el, 'follow-label');"
-            "  const n = e && e.nodeName.toLowerCase();"
-            "  if (n !== 'input' && n !== 'textarea' && n !== 'select')"
-            "    throw new Error('Node is not an <input>, <textarea> or <select> element');"
-            "  return e.value; }",
-            {"objectId": element})
+        return self.read(frame_id, element, "inputValue")
 
     def get_attribute(self, frame_id: str, element: str, name: str):
-        """⛔ An ABSENT attribute must return `None`, not the empty
-        string: `getAttribute` already returns `null` on its own, but an
-        empty value and an absence are two different things and the
-        reader must be able to tell them apart."""
-        return self.call(
-            frame_id, "(injected, el, n) => el.getAttribute(n)",
-            {"objectId": element}, name)
+        return self.read(frame_id, element, "attribute", name)
 
     def title(self, frame_id: str) -> str:
         return self.evaluate(frame_id, "document.title")
@@ -602,13 +749,13 @@ class InjectedScript:
         context = self.contexts.get(key)
         if context is None:
             return None
-        r = self._result(self.c.send(
+        r = self._result(self._send_in(
             "Runtime.callFunction",
             {"executionContextId": context,
              "functionDeclaration": "(v) => v",
              "args": [{"objectId": element}],
              "returnByValue": True},
-            session=self.session, timeout=10))
+            timeout=10))
         return r.get("value")
 
     def adopt(self, frame_id: str, element: Optional[str] = None, *,
@@ -633,8 +780,7 @@ class InjectedScript:
                   "executionContextId": self.context_id(into or frame_id)}
         if element is not None:
             params["objectId"] = element
-        answer = self.c.send("Page.adoptNode", params,
-                             session=self.session, timeout=10) or {}
+        answer = self._send_in("Page.adoptNode", params, timeout=10) or {}
         return ((answer.get("remoteObject") or {}).get("objectId")) or None
 
     def dispose(self, frame_id: str, element: str) -> None:
@@ -682,6 +828,19 @@ class InjectedScript:
             time.sleep(0.01)
         return self.contexts[key]
 
+    def evaluate_raw(self, context_id: str, expression: str, *,
+                     by_value: bool = False,
+                     timeout: Optional[float] = 30.0) -> dict:
+        """`Runtime.evaluate` in a given context, returning the raw
+        RemoteObject, as `call_raw` does for a function. Through `_send_in`
+        like every command aimed at a context, so a context that has gone is
+        `ContextDestroyed` and not the engine's raw text."""
+        return self._result(self._send_in(
+            "Runtime.evaluate",
+            {"executionContextId": context_id, "expression": expression,
+             "returnByValue": by_value},
+            timeout=timeout))
+
     def call_raw(self, context_id: str, declaration: str, args: list, *,
                  by_value: bool = False, timeout: Optional[float] = 30.0) -> dict:
         """`Runtime.callFunction` in a given context, returning the raw
@@ -690,21 +849,21 @@ class InjectedScript:
         ⛔ A returned promise is AWAITED by the engine (`_awaitPromise` in
         Juggler's Runtime.js), which is what W3C `execute_script` specifies.
         """
-        return self._result(self.c.send(
+        return self._result(self._send_in(
             "Runtime.callFunction",
             {"executionContextId": context_id,
              "functionDeclaration": declaration, "args": args,
              "returnByValue": by_value},
-            session=self.session, timeout=timeout))
+            timeout=timeout))
 
     def properties(self, context_id: str, object_id: str) -> list:
         """The enumerable properties of an object, own and inherited, each as
         `{"name", "value": RemoteObject}`. Read through the Debugger: no getter
         of the page runs, and an accessor comes back without a value."""
-        r = self.c.send("Runtime.getObjectProperties",
-                        {"executionContextId": context_id,
-                         "objectId": object_id},
-                        session=self.session, timeout=10) or {}
+        r = self._send_in("Runtime.getObjectProperties",
+                          {"executionContextId": context_id,
+                           "objectId": object_id},
+                          timeout=10) or {}
         return list(r.get("properties") or [])
 
     def by_value(self, context_id: str, object_id: str):
@@ -713,22 +872,22 @@ class InjectedScript:
         ⛔ `(v) => v` runs in the context the object lives in, but the
         serialization does not: Juggler stringifies in a separate global, so
         the page's `toJSON` overrides on built-ins are not consulted."""
-        r = self._result(self.c.send(
+        r = self._result(self._send_in(
             "Runtime.callFunction",
             {"executionContextId": context_id,
              "functionDeclaration": "(v) => v",
              "args": [{"objectId": object_id}], "returnByValue": True},
-            session=self.session, timeout=10))
+            timeout=10))
         return r.get("value")
 
     def node_to_main(self, frame_id: str, element: str) -> Optional[str]:
         """Carry a node from the utility world into the page's own world."""
-        answer = self.c.send(
+        answer = self._send_in(
             "Page.adoptNode",
             {"frameId": frame_id,
              "executionContextId": self.main_context(frame_id),
              "objectId": element},
-            session=self.session, timeout=10) or {}
+            timeout=10) or {}
         return ((answer.get("remoteObject") or {}).get("objectId")) or None
 
     def release(self, context_id: str, object_id: str) -> None:

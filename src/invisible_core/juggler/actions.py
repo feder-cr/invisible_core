@@ -31,7 +31,7 @@ from typing import Optional
 
 from . import _pacing
 from .deadline import Deadline
-from .injected import EvaluationError
+from .injected import ContextDestroyed, EvaluationError
 from .keyboard import BUTTON_MASK, Keyboard, UnknownKey
 
 #: The states a pointer action requires, in the order Playwright asks for
@@ -300,6 +300,10 @@ class Actions:
             turns += 1
             element = None
             ours = False
+            # Set the moment `run` is entered: from there on the action may
+            # have done something, and a world that vanished is no longer a
+            # reason to start over (see the `ContextDestroyed` branch below).
+            acting = False
             try:
                 if element_id is not None:
                     # The caller's node, fixed. Not re-queried and not ours.
@@ -332,6 +336,7 @@ class Actions:
                 if element and element_ok and not needs_point:
                     if trial:
                         return None
+                    acting = True
                     return run(f, element, None)
                 if element and element_ok:
                     # ⛔ SCROLL FIRST, and only when the point is not usable.
@@ -385,7 +390,19 @@ class Actions:
                                 raise WrongHitTarget(verdict)
                         return None
                     else:
+                        acting = True
                         return run(f, element, point)
+            except ContextDestroyed:
+                # ⛔ THE FRAME NAVIGATED UNDER THE RESOLUTION: the element
+                # belonged to a world that is gone, and nothing has been done
+                # yet, so starting over on the new document is the same as
+                # "notconnected" below. Inside `run` it is not: `check` reads
+                # the box again AFTER its click, and a click that submits a
+                # form destroys that world, so absorbing it there would click
+                # a second time on the next page. There it is the caller's.
+                if acting:
+                    raise
+                reason = "the frame navigated while the element was resolved"
             except EvaluationError as e:
                 # ⛔ "notconnected" means the node disappeared BETWEEN the
                 # resolution and the use: it's the case the loop exists to
@@ -613,7 +630,9 @@ class Actions:
                     if self.inj.element_state(frame, element, state):
                         return element
                     reason = "the element is not %s" % state
-                except EvaluationError as failure:
+                except (EvaluationError, ContextDestroyed) as failure:
+                    # A world that went is a document that went: the next
+                    # turn asks the new one.
                     reason = str(failure)
                 self.inj.dispose(frame, element)
             else:

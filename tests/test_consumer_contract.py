@@ -305,7 +305,9 @@ CONTRACT = {
     # Since 41.35.0: the one meaning of "no limit" (B278).
     "invisible_core.juggler.deadline": {"Deadline"},
     "invisible_core.juggler.injected": {
-        "EvaluationError", "InjectedScript", "UTILITY_WORLD",
+        # ContextDestroyed since 41.36.0: a world that went, typed once here
+        # instead of matched by its sentence in each client.
+        "ContextDestroyed", "EvaluationError", "InjectedScript", "UTILITY_WORLD",
     },
     "invisible_core.juggler.keyboard": {"BUTTON_MASK", "MODIFIER_MASK"},
     "invisible_core.juggler.lifecycle": {"Lifecycle", "NavigationError"},
