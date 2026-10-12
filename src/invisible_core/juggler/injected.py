@@ -48,26 +48,43 @@ class EvaluationError(RuntimeError):
 
 
 class ContextDestroyed(RuntimeError):
-    """The execution context a command was aimed at no longer exists: the
-    frame navigated, or its document was replaced, after the id was read.
+    """The execution context a command was aimed at went away before the
+    command answered: the frame navigated, or its document was replaced.
 
-    ⛔ NOT AN `EvaluationError`, which says the page's JavaScript raised.
-    Nothing ran here, and the clients translate the two differently: a
-    selector query that raised is an invalid selector to Selenium and
-    Puppeteer, a vanished world is a stale element or a navigation.
+    ⛔ NOT AN `EvaluationError`, which says the page's JavaScript raised, and
+    the clients translate the two differently: a selector query that raised is
+    an invalid selector to Selenium and Puppeteer, a vanished world is a stale
+    element or a navigation.
 
-    The engine checks the context BEFORE running anything (`Runtime.js`,
-    `findExecutionContext`), so a command refused this way never ran. The
-    text is Playwright's, and so is the reason for a type: until 41.36.0 this
-    arrived as the engine's raw `Failed to find execution context with id`,
-    which nothing above recognised, and a read right after a `goto` on a page
-    that replaces itself failed with it (5 in 5 on a local page that calls
-    `location.replace` from its `<head>`).
+    ⛔ AND IT DOES NOT SAY WHETHER THE COMMAND RAN. The engine answers it in
+    two shapes. `Failed to find execution context with id` is its check before
+    running anything (`Runtime.js`, `findExecutionContext`), but that is ALSO
+    the answer to a command that ran: Juggler's channel sends every message
+    still waiting for its answer again to the document that replaces the one it
+    went to (`SimpleChannel._markAsReady`), and the new document refuses an id
+    it does not have. Measured on firefox-41: a call waiting on a promise when
+    its page navigated came back that way after 1.03 s. `Execution context was
+    destroyed!` is the other shape, a call waiting on a promise whose context
+    the engine destroyed under it (`Runtime.destroyExecutionContext`). Until
+    41.38.0 this docstring said a refused command never ran, and the clients
+    sent the caller's own code again on that word: a script that awaited across
+    a navigation ran twice ([B285]). Every original answers both shapes the
+    same way and none sends the code again: Playwright raises "Execution context
+    was destroyed, most likely because of a navigation", pyppeteer raises
+    `NetworkError`, Marionette returns null for `executeScript`.
+
+    The text is Playwright's, and so is the reason for a type: until 41.36.0
+    this arrived as the engine's raw text, which nothing above recognised, and a
+    read right after a `goto` on a page that replaces itself failed with it (5
+    in 5 on a local page that calls `location.replace` from its `<head>`).
     """
 
 
-#: The engine's refusal of a command aimed at a context it does not have.
-_CONTEXT_GONE = "Failed to find execution context with id"
+#: The engine's two answers for a context that went away under a command: the
+#: refusal of an id it does not have, and the rejection of a call that was
+#: waiting on a promise when its context was destroyed.
+_CONTEXT_GONE = ("Failed to find execution context with id",
+                 "Execution context was destroyed!")
 
 #: The element reads, each a function of `(injected, el, ...args)`, in ONE
 #: table: a read on a handle (`read`) and a read on a selector (`read_match`)
@@ -221,10 +238,11 @@ class InjectedScript:
 
         ⛔ ONE PLACE KNOWS WHAT A VANISHED CONTEXT LOOKS LIKE. The id was read
         a moment ago and the frame may have navigated since; the engine then
-        refuses the command before running it. That refusal becomes
+        answers in one of the two shapes of `_CONTEXT_GONE`. Either becomes
         `ContextDestroyed`, and the dead id leaves the registry at once: its
         `executionContextDestroyed` can arrive after this answer, and until it
         does the registry would hand the same dead id to the next caller.
+        Whether the command ran is NOT known here (see `ContextDestroyed`).
         """
         try:
             return self.c.send(method, params, session=self.session,
@@ -232,7 +250,7 @@ class InjectedScript:
         except ReplyTimeout:
             raise
         except ProtocolError as exc:
-            if _CONTEXT_GONE not in str(exc):
+            if not any(shape in str(exc) for shape in _CONTEXT_GONE):
                 raise
             context = params.get("executionContextId")
             self._forget_context(context)
@@ -258,13 +276,18 @@ class InjectedScript:
         a refusal waits for the frame's next world, and decides what is final
         by raising anything but `ContextDestroyed`.
 
-        ⛔ ONLY FOR A COMMAND THAT CARRIES NOTHING BUT VALUES. A refused command
-        never ran, so making it again is the same command and not a second
-        one; and values mean the same thing in any world. A command carrying
-        an element's objectId is not made again: the element belonged to the
-        world that is gone, and `ContextDestroyed` is the true answer for it.
-        Each turn waits for the frame's next world, which `_send_in` made
-        necessary by forgetting the dead one.
+        ⛔ ONLY FOR A COMMAND THAT IS HARMLESS TO MAKE TWICE: this package's own
+        reads, which carry nothing but values. `ContextDestroyed` does not say
+        whether the command ran (a command waiting on a promise when its page
+        navigated is refused by the new document in the same words as one that
+        never ran), so what is made again here must be a command for which
+        running twice is the same as running once. NEVER THE CALLER'S CODE: a
+        script with an effect ran twice that way until 41.38.0 ([B285]), and no
+        original sends it again. A command carrying an element's objectId is
+        not made again either: the element belonged to the world that is gone,
+        and `ContextDestroyed` is the true answer for it. Each turn waits for
+        the frame's next world, which `_send_in` made necessary by forgetting
+        the dead one.
         """
         deadline = Deadline(timeout)
         while True:
@@ -321,7 +344,8 @@ class InjectedScript:
         return r.get("value") if by_value else r.get("objectId")
 
     def call(self, frame_id: str, declaration: str, *arguments,
-             by_value: bool = True, timeout: Optional[float] = 30.0) -> Any:
+             by_value: bool = True, timeout: Optional[float] = 30.0,
+             repeatable: bool = True) -> Any:
         """`declaration` is a JS declaration; the FIRST argument passed
         is always the InjectedScript, the way the driver does it.
 
@@ -329,7 +353,12 @@ class InjectedScript:
         has gone, unless an argument is an element's objectId: see
         `in_current_world`. The InjectedScript itself is not such an
         argument - each world has its own, and `handle()` gives the one of the
-        world the call is sent to."""
+        world the call is sent to.
+
+        ⛔ `repeatable=False` WHEN THE DECLARATION CARRIES THE CALLER'S CODE
+        (`$$eval`): it is sent once, and a world that went under it is
+        `ContextDestroyed`. Only the caller knows which kind of declaration it
+        passes; this package's own reads are the default. [B285]"""
         values = [a if isinstance(a, dict) and ("objectId" in a or "value" in a)
                   else {"value": a} for a in arguments]
 
@@ -346,7 +375,7 @@ class InjectedScript:
                  "returnByValue": by_value},
                 timeout=deadline.left()))
 
-        if any("objectId" in a for a in values):
+        if not repeatable or any("objectId" in a for a in values):
             r = attempt(Deadline(timeout))
         else:
             r = self.in_current_world(attempt, timeout=timeout)
@@ -449,12 +478,18 @@ class InjectedScript:
         ⛔ AND THE MAIN WORLD IS THE ONE WITH THE EMPTY NAME. `auxData.name` is
         absent for the page's own context, which is why the key is `""` and not
         a missing lookup.
+
+        ⛔ SENT ONCE. What runs here is the caller's code (`page.evaluate`,
+        `evaluate_handle`, `set_content`, a script tag): a world that went under
+        it is `ContextDestroyed`, as Playwright raises "Execution context was
+        destroyed, most likely because of a navigation". From 41.36.0 to 41.37.0
+        it was made again in the new world, and a script waiting on a promise
+        when its page navigated ran twice ([B285]).
         """
-        def attempt(deadline):
-            return self._evaluate_in(
-                self.main_context(frame_id, timeout=deadline.left()),
-                expression, by_value=by_value, timeout=deadline.left())
-        return self.in_current_world(attempt, timeout=timeout)
+        deadline = Deadline(timeout)
+        return self._evaluate_in(
+            self.main_context(frame_id, timeout=deadline.left()),
+            expression, by_value=by_value, timeout=deadline.left())
 
     def query_selector_all(self, frame_id: str, selector: str) -> list:
         """Every match, as a list of objectIds the caller must dispose.

@@ -8,12 +8,18 @@ with the engine's raw text reaching the caller:
 
     Runtime.callFunction: ... Failed to find execution context with id = id-35
 
-The id was read, the frame navigated, and the engine refused the command BEFORE
-running it (`Runtime.js`, `findExecutionContext`). Nothing recognised that
-answer. Now it is `ContextDestroyed`; a command of values only is made again in
-the frame's current world, within the caller's time; one carrying an element
+The id was read, the frame navigated, and the engine refused the command
+(`Runtime.js`, `findExecutionContext`). Nothing recognised that answer. Now it
+is `ContextDestroyed`; one of this package's reads (values only) is made again
+in the frame's current world, within the caller's time; one carrying an element
 is not, because the element went with its world; and the action loop starts
 over on it only while it has not acted.
+
+⛔ AND THE CALLER'S CODE IS NEVER MADE AGAIN ([B285]). The same refusal is the
+answer to a call that RAN and was waiting on a promise when its page navigated
+(Juggler sends the waiting message again to the new document), and the engine's
+other answer, `Execution context was destroyed!`, says so outright. Sending
+`page.evaluate` again made a script with an effect run twice.
 """
 from __future__ import annotations
 
@@ -41,6 +47,9 @@ class _Engine(EventListeners):
     def __init__(self):
         super().__init__()
         self.dead = set()
+        #: Contexts destroyed under a call that was waiting on a promise: the
+        #: engine rejects it with its other text.
+        self.interrupted = set()
         self.on_refusal = None
         self.sent = []
 
@@ -55,6 +64,11 @@ class _Engine(EventListeners):
         self.sent.append((method, context))
         if method == "Page.setInitScripts":
             return {}
+        if context in self.interrupted:
+            raise ProtocolError(
+                '%s: error in channel "content::1/2/3": exception while running '
+                'method "%s" in namespace "page": Execution context was '
+                'destroyed!' % (method, method.split(".")[1]))
         if context in self.dead:
             if self.on_refusal is not None:
                 hook, self.on_refusal = self.on_refusal, None
@@ -171,3 +185,35 @@ def test_the_action_loop_does_not_act_twice_when_the_world_goes_after_acting():
         actions._retry("#b", run, states=["visible"], needs_point=False,
                        timeout=5)
     assert acted == ["element"]
+
+
+def test_a_call_interrupted_while_it_waited_is_typed_and_its_world_forgotten():
+    """The engine's other answer for a context that went away under a call."""
+    engine, inj = _injected()
+    engine.interrupted.add("c1")
+    with pytest.raises(ContextDestroyed, match="Execution context was destroyed"):
+        inj.call_raw("c1", "() => new Promise(() => {})", [])
+    assert (F, UTILITY_WORLD) not in inj.contexts
+
+
+def test_the_callers_code_in_the_page_world_is_sent_once():
+    """`evaluate_in_main` runs `page.evaluate`: refused, it is not made again in
+    the new world, which would run a script that may have run already."""
+    engine, inj = _injected()
+    engine.world("m1", name="")
+    engine.dead.add("m1")
+    engine.on_refusal = lambda: engine.world("m2", name="")
+    with pytest.raises(ContextDestroyed):
+        inj.evaluate_in_main(F, "localStorage.runs = 1", timeout=5)
+    assert [c for m, c in engine.sent if m == "Runtime.evaluate"] == ["m1"]
+
+
+def test_a_declaration_carrying_the_callers_code_is_sent_once():
+    engine, inj = _injected()
+    inj.call(F, "(i) => 1")
+    engine.dead.add("c1")
+    engine.on_refusal = lambda: engine.world("c2")
+    engine.sent.clear()
+    with pytest.raises(ContextDestroyed):
+        inj.call(F, "(i, s) => { window.runs++ }", "body", repeatable=False)
+    assert not any(c == "c2" for m, c in engine.sent if m == "Runtime.callFunction")
