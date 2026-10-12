@@ -458,7 +458,8 @@ class InjectedScript:
             selector)
 
     def evaluate_in_main(self, frame_id: str, expression: str, *,
-                         by_value: bool = True, timeout: Optional[float] = 30.0):
+                         by_value: bool = True, timeout: Optional[float] = 30.0,
+                         repeatable: bool = False):
         """Evaluate in the PAGE's own world, deliberately and rarely.
 
         ⛔ THIS IS THE ONE PLACE THAT LEAVES THE XRAY, AND IT NEEDS A REASON
@@ -479,17 +480,23 @@ class InjectedScript:
         absent for the page's own context, which is why the key is `""` and not
         a missing lookup.
 
-        ⛔ SENT ONCE. What runs here is the caller's code (`page.evaluate`,
-        `evaluate_handle`, `set_content`, a script tag): a world that went under
-        it is `ContextDestroyed`, as Playwright raises "Execution context was
-        destroyed, most likely because of a navigation". From 41.36.0 to 41.37.0
-        it was made again in the new world, and a script waiting on a promise
-        when its page navigated ran twice ([B285]).
+        ⛔ SENT ONCE BY DEFAULT. What runs here is the caller's code
+        (`page.evaluate`, `evaluate_handle`, `set_content`, a script tag): a
+        world that went under it is `ContextDestroyed`, as Playwright raises
+        "Execution context was destroyed, most likely because of a navigation".
+        From 41.36.0 to 41.37.0 it was made again in the new world, and a script
+        waiting on a promise when its page navigated ran twice ([B285]).
+        `repeatable=True` is for a library's fixed read that has no effect (the
+        MCP's snapshot), which the caller declares: made again in the frame's
+        current world, as `call` makes this package's own reads.
         """
-        deadline = Deadline(timeout)
-        return self._evaluate_in(
-            self.main_context(frame_id, timeout=deadline.left()),
-            expression, by_value=by_value, timeout=deadline.left())
+        def attempt(deadline):
+            return self._evaluate_in(
+                self.main_context(frame_id, timeout=deadline.left()),
+                expression, by_value=by_value, timeout=deadline.left())
+        if repeatable:
+            return self.in_current_world(attempt, timeout=timeout)
+        return attempt(Deadline(timeout))
 
     def query_selector_all(self, frame_id: str, selector: str) -> list:
         """Every match, as a list of objectIds the caller must dispose.

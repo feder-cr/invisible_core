@@ -208,6 +208,19 @@ def test_the_callers_code_in_the_page_world_is_sent_once():
     assert [c for m, c in engine.sent if m == "Runtime.evaluate"] == ["m1"]
 
 
+def test_a_read_in_the_page_world_declared_repeatable_is_made_in_the_new_world():
+    """The MCP's snapshot is a fixed read without effects, run in the page's
+    world; its caller declares it, and the page moving on under it is answered
+    by the new document."""
+    engine, inj = _injected()
+    engine.world("m1", name="")
+    engine.dead.add("m1")
+    engine.on_refusal = lambda: engine.world("m2", name="")
+    assert inj.evaluate_in_main(F, "document.title", repeatable=True,
+                                timeout=5) == "ran in m2"
+    assert [c for m, c in engine.sent if m == "Runtime.evaluate"] == ["m1", "m2"]
+
+
 def test_a_declaration_carrying_the_callers_code_is_sent_once():
     engine, inj = _injected()
     inj.call(F, "(i) => 1")
