@@ -1866,6 +1866,12 @@ DEFAULT_SHOW_CURSOR = True
 #: listed where the prefs are emitted, in the occlusion block).
 OCCLUSION_TRACKING = False
 
+#: Whether a window keeps its activation when the SYSTEM takes it - another
+#: application, another session's window on the same display - and gives it
+#: up only to this session's own windows. True: the focus a page reads follows
+#: the session, not the desktop (B149; read by the engine from firefox-42 on).
+IGNORE_OS_DEACTIVATION = True
+
 
 def show_cursor_prefs(show_cursor: Any) -> Dict[str, Any]:
     """The `stealthfox.*` prefs implied by a `show_cursor=` value.
@@ -1969,6 +1975,17 @@ def compose_session_prefs(
     for name in ("widget.windows.window_occlusion_tracking.enabled",
                  "zoom.stealth.widget.occlusion_tracking.enabled"):
         prefs.setdefault(name, OCCLUSION_TRACKING)
+
+    # The focus, the other half of the same question (B149): a page reads
+    # `document.hasFocus()` and `blur`, and another session's window or an
+    # application on the host took them away. Measured on Windows, two
+    # sessions on one hidden desktop: the first ended without focus 4 times in
+    # 4, and 0 in 4 with this pref, with the same sequence of events a page
+    # sees when the session itself opens another page. The engine reads it in
+    # AppWindow::WindowDeactivated and WindowActivated from firefox-42 on.
+    # setdefault, so an explicit caller override still wins.
+    prefs.setdefault("zoom.stealth.focus.ignore_os_deactivation",
+                     IGNORE_OS_DEACTIVATION)
 
     # The launch counter's address, declared here for every session. The engine
     # fetches a five-byte release asset once at startup and the asset's download

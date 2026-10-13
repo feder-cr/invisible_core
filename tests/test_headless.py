@@ -349,6 +349,24 @@ def test_occlusion_is_one_decision_for_both_engines(monkeypatch):
         "one of the two names does not follow the declaration")
 
 
+@pytest.mark.unit
+def test_the_focus_follows_the_session_not_the_desktop(monkeypatch):
+    """B149: another session's window or an application on the host took the
+    focus a page reads (4 times in 4 with two sessions on one desktop). From
+    firefox-42 the engine keeps a window's activation when the SYSTEM takes it,
+    behind a pref that defaults to off; every session declares it on, from one
+    value, and a caller can still say otherwise."""
+    from invisible_core import prefs as P
+    from invisible_core._fpforge import generate_profile
+
+    key = "zoom.stealth.focus.ignore_os_deactivation"
+    profile = generate_profile(seed=4242)
+    assert P.compose_session_prefs(profile).prefs[key] is True
+
+    monkeypatch.setattr(P, "IGNORE_OS_DEACTIVATION", False)
+    assert P.compose_session_prefs(profile).prefs[key] is False
+
+
 
 #  _pick_display / start() - which number is chosen. These are selection and
 #  bookkeeping tests: Xvfb is not started, and _spawn is stubbed.
