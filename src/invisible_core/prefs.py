@@ -1300,6 +1300,12 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.pointer.all"]         = (2 | 4 | 1) if touch else (2 | 4)
     prefs["zoom.stealth.voices.list"]         = profile.hardware.voices
     prefs["media.navigator.streams.fake"]     = bool(profile.hardware.fake_media_devices)
+    #: [B300] With the fake devices the enumeration is declared: the engine
+    #: takes this long on the first one and does not ask the host's audio
+    #: stack for its speakers. 0, stock Firefox, when the devices are real.
+    prefs["zoom.stealth.media.enumeration_ms"] = (
+        int(profile.hardware.media_enumeration_ms)
+        if profile.hardware.fake_media_devices else 0)
     # The four storage booleans a page reads (cookieEnabled, localStorage,
     # sessionStorage, indexedDB) come out of these two levers. Gecko has no
     # dom.indexedDB.enabled: indexedDB availability is decided by the cookie

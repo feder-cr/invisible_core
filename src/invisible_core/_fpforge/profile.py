@@ -153,6 +153,11 @@ class HardwareProfile:
     #: pinnable, not inspectable and not overridable.
     fake_media_devices: bool = True
 
+    #: How long the session's first enumerateDevices() takes, in ms, with the
+    #: fake devices ([B300]): the engine answers after it instead of asking
+    #: the host's audio stack. See `_sampler.derive_media_enumeration_ms`.
+    media_enumeration_ms: int = 0
+
     #: Whether cookies, localStorage, sessionStorage and indexedDB all work.
     #:
     #: ONE field for four booleans on purpose: they are one decision - "this
@@ -314,7 +319,7 @@ _PIN_GROUPS = {
     # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
     "screen": {"width", "height", "dpr", "taskbar_px", "color_depth"},
     "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
-                 "voices", "fake_media_devices",
+                 "voices", "fake_media_devices", "media_enumeration_ms",
                  "storage_enabled", "generics",
                  "accessibility_overrides"},
     "audio": {"sample_rate", "output_latency_ms", "max_channel_count"},
@@ -436,6 +441,7 @@ _PIN_TO_RAW = {
     "screen.color_depth": "screen_color_depth",
     "screen.taskbar_px": "taskbar_px",
     "hardware.max_touch_points": "max_touch_points",
+    "hardware.media_enumeration_ms": "media_enumeration_ms",
     "hardware.voices": "voices",
     "hardware.fake_media_devices": "fake_media_devices",
     "hardware.storage_enabled": "storage_enabled",
@@ -743,6 +749,7 @@ def generate_profile(
             max_touch_points=int(raw["max_touch_points"]),
             voices=str(raw["voices"]),
             fake_media_devices=bool(raw["fake_media_devices"]),
+            media_enumeration_ms=int(raw["media_enumeration_ms"]),
             storage_enabled=bool(raw["storage_enabled"]),
             generics=str(raw["generics"]),
             accessibility_overrides=bool(raw["accessibility_overrides"]),

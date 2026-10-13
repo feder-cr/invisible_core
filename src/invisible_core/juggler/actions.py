@@ -105,6 +105,9 @@ class Actions:
     #: default so that a bench which builds this object without `__init__`
     #: gets "no rhythm", which is what None means.
     typing_persona = None
+    #: The session's input latency ([B299]), or None when humanising is off;
+    #: a class default for the same benches: None is "born at the dispatch".
+    input_latency = None
     #: No generator means every approach is one event, and no budget: class
     #: defaults for a bench that builds this object without `__init__`.
     motion = None
