@@ -264,10 +264,23 @@ _WEBGL2_EXTENSIONS = ",".join([
 #  Verified at the edges: avc1.644000 (level 0) and avc1.64403F (level 6.3)
 #  answer empty on retail, exactly as that function says they must.
 #
-#  ONLY THE TWO DIVERGENT NAMES ARE DECLARED. Every audio codec, VP8, VP9 and
-#  AV1 are bundled with the build, agree cross-OS in the measurement, and so
-#  carry nothing to declare away. A pref entry that cannot move a measurement is
-#  not a safety margin, it is an untested code path.
+#  ONLY THE DIVERGENT NAMES ARE DECLARED. VP8, VP9, AV1 and the other audio
+#  codecs are bundled with the build, agree cross-OS, and so carry nothing to
+#  declare away. A pref entry that cannot move a measurement is not a safety
+#  margin, it is an untested code path.
+#
+#  ⛔ AAC IS ONE OF THEM, AND THE MEASUREMENT THAT SAID IT WAS NOT READ TOO
+#  EARLY. The build's ffvpx has no AAC decoder (CONFIG_AAC_DECODER 0), so on
+#  Linux AAC comes only from the host's libavcodec, and a host without one
+#  answers canPlayType("audio/mp4;") "maybe" at 0 ms and "" from about 300 ms
+#  on, once the media process has reported its real decoders. Read at 1.5 s in
+#  a cross-origin iframe on 2026-10-13: retail Windows 151 answers maybe,
+#  maybe, maybe, probably for audio/mp4, audio/aac, audio/x-m4a and
+#  video/mp4;codecs="mp4a.40.2", and MediaSource true, false, false, true;
+#  our Linux "" and false for all four, while H.264 stays "probably" - "H.264
+#  yes, AAC no" is no Windows. The earlier "agree cross-OS" was read at 0 ms.
+#  `audio/mp4a-latm` is Gecko's track name for AAC, and Windows decodes audio
+#  in software (WMF), hence `sw`. 70-known-bugs [B295] in the workbench.
 #
 #  THE COST, recorded so nobody re-derives it as a surprise: declaring support
 #  for a codec the Linux build cannot decode means a site picks H.264 and the
@@ -281,6 +294,7 @@ _WEBGL2_EXTENSIONS = ",".join([
 _WIN_DECODE_SUPPORT = chr(10).join([
     "video/avc|swhw",
     "video/hevc|swhw",
+    "audio/mp4a-latm|sw",
 ])
 
 # ──────────────────────────────────────────────────────────────────────
