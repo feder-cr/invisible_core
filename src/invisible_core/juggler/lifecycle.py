@@ -57,7 +57,24 @@ STATES = ("commit", "domcontentloaded", "load", "networkidle", "networkidle2")
 
 
 class NavigationError(RuntimeError):
-    """The navigation was aborted by the browser, with its text."""
+    """The navigation was aborted by the browser, with its text. `navigation`
+    is the id of the navigation that ended so, when the browser named it: a
+    client that waits on through a stop, as Marionette does, waits for the
+    first navigation after THAT one, which may have started already."""
+
+    def __init__(self, text: str, navigation: Optional[str] = None) -> None:
+        super().__init__(text)
+        self.navigation = navigation
+
+
+#: How many navigations' request URLs `Lifecycle` keeps for `_check_landed`.
+_WENT_KEPT = 256
+
+
+class LandedElsewhere(NavigationError):
+    """The engine attributed to the navigation the commit of a document that
+    is not where its request went ([B302]): the page is not the one asked
+    for, and answering success would let the caller act on the wrong one."""
 
 
 class NavigationInterrupted(NavigationError):
@@ -99,6 +116,11 @@ class Frame:
         #: how many same-document navigations the browser has reported, so a
         #: `goto` that creates no document can wait for the one it caused.
         self.same_document = 0
+        #: how many navigations the CALLER has asked of this frame (`goto`),
+        #: and the address of the last: a navigation stopped after a later one
+        #: was asked for is interrupted by it, not an error of its own.
+        self.asked = 0
+        self.asked_url: Optional[str] = None
 
     def outcome(self, navigation: str, after: Optional[int] = None):
         """The document that decided `navigation`: `(navigation, url)` of its
@@ -163,6 +185,11 @@ class Lifecycle:
         self.main_frame: Optional[str] = None
         self.ready = False
         self._inflight = 0
+        # Where each navigation's document request went: the last URL of its
+        # chain, redirects included (`Network.requestWillBeSent` carries the
+        # navigationId for a main document and its redirects). `goto` checks
+        # its commit against it (`_check_landed`). Bounded: the oldest go.
+        self._went = {}
         self._last_activity = time.monotonic()
         #: The last moment more than two requests were in flight, which is
         #: where networkidle2's quiet is measured from.
@@ -417,6 +444,12 @@ class Lifecycle:
             return f
 
         if method == "Network.requestWillBeSent":
+            nav = p.get("navigationId")
+            if nav:
+                self._went.pop(nav, None)
+                self._went[nav] = p.get("url")
+                while len(self._went) > _WENT_KEPT:
+                    del self._went[next(iter(self._went))]
             self._inflight += 1
             self._last_activity = time.monotonic()
             if self._inflight > 2:
@@ -628,7 +661,8 @@ class Lifecycle:
                         url: Optional[str] = None,
                         began: Optional[int] = None,
                         replaced: str = "raise",
-                        children: bool = False) -> Optional[str]:
+                        children: bool = False,
+                        asked: Optional[int] = None) -> Optional[str]:
         """Wait until `frame_id` reaches `state`, and answer with the
         navigation of the document it was reached on. Given a `navigation`,
         only once its document has committed, and from then on on whichever
@@ -664,7 +698,18 @@ class Lifecycle:
                 decided = None
                 if f is not None:
                     if navigation and navigation in f.aborted:
-                        raise NavigationError(f.aborted[navigation])
+                        # Stopped by a navigation the caller asked for after
+                        # this one (`asked`, the frame's count when this one
+                        # was sent): upstream Playwright calls that
+                        # interrupted, naming the new address, and not an
+                        # error page (`second_goto_probe.py upstream`).
+                        if asked is not None and f.asked > asked:
+                            raise NavigationInterrupted(
+                                'Navigation %s is interrupted by another '
+                                'navigation to "%s"'
+                                % ('to "%s"' % url if url else navigation,
+                                   f.asked_url), navigation)
+                        raise NavigationError(f.aborted[navigation], navigation)
                     if navigation is not None:
                         decided = f.outcome(navigation, after)
                         if (decided is not None and decided[0] != navigation
@@ -762,8 +807,12 @@ class Lifecycle:
         # navigation before its reply arrives, and a dialog that opens while
         # the command is on its way ends the wait.
         with self._cv:
-            before = self._frame(fid).same_document
+            f = self._frame(fid)
+            before = f.same_document
             began = self._interruptions
+            f.asked += 1
+            f.asked_url = url
+            asked = f.asked
         # The reply's place in the event stream is the line `Frame.outcome`
         # decides on.
         result, after = self.c.send_placed("Page.navigate", params,
@@ -800,9 +849,41 @@ class Lifecycle:
             landed = self.wait_for_state(fid, until, navigation=nav,
                                          timeout=timeout, after=after, url=url,
                                          began=began, replaced=replaced,
-                                         children=children)
+                                         children=children, asked=asked)
+            if landed == nav:
+                self._check_landed(fid, nav, url)
         return {"navigationId": nav, "landed": landed,
                 "url": self.frames[fid].url}
+
+    def _check_landed(self, fid: str, nav: str, url: str) -> None:
+        """Refuse a success the engine made up: our navigation reported
+        committed on a document that is not where its request went.
+
+        ⛔ firefox-45 DID THIS 7 TIMES IN 40 ([B302]). The page being left
+        rewrote itself with document.open() while our goto was on its way; the
+        engine dropped the abort that causes and took the document.write() for
+        our commit, with the OLD page's address, and `goto` answered OK on the
+        old page. The engine is fixed in firefox-46. This is the client's own
+        line, so the next defect of the kind is an error instead of a page the
+        caller is not on. Judged only when the request was seen: data:,
+        about:blank and file: go to no network, and the fragment is never
+        sent."""
+        with self._cv:
+            f = self.frames.get(fid)
+            committed = None
+            if f is not None:
+                for _place, n, u in reversed(f._commits):
+                    if n == nav:
+                        committed = u
+                        break
+            went = self._went.get(nav)
+        if committed is None or went is None:
+            return
+        if committed.split("#", 1)[0] != went.split("#", 1)[0]:
+            raise LandedElsewhere(
+                'Navigation to "%s" was reported committed on "%s", which is '
+                'not where it went ("%s"): the page is not the one asked for'
+                % (url, committed, went))
 
     # ── inspection ──────────────────────────────────────────────────────────
     def frame_tree(self) -> dict:
