@@ -5,8 +5,8 @@ Measured on retail Windows Firefox 151 on 2026-10-13 (`speechSynthesis.
 getVoices()`): David, Mark, Zira, then David Desktop and Zira Desktop, every
 one `default` false and `localService` true. Gecko's SAPI backend never calls
 SetDefaultVoice (dom/media/webspeech/synth/windows/SapiService.cpp). Until
-43.39.0 the profile made David the default and listed Zira before Mark, which
-a bot-detection challenge reads.
+43.39.0 the profile made David the default and listed Zira before Mark, and a
+page reads both from `speechSynthesis.getVoices()`.
 """
 from __future__ import annotations
 

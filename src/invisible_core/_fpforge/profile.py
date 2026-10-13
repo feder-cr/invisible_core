@@ -495,8 +495,8 @@ from ..constants import TASKBAR_PX, WINDOW_FRAME_BY_DPR, WindowFrame  # noqa: E4
 #: Desktop voices, every one `default` false and `localService` true). Gecko's
 #: SAPI backend only ever calls AddVoice and never SetDefaultVoice
 #: (dom/media/webspeech/synth/windows/SapiService.cpp), so on Windows no voice
-#: is the default. Until 43.39.0 David was the default and Zira came second; a
-#: bot-detection challenge reads the default voice and the order.
+#: is the default. Until 43.39.0 David was the default and Zira came second,
+#: and a page reads both from `speechSynthesis.getVoices()`.
 VOICES = ",".join([
     "Microsoft David - English (United States)|en-US|0|1",
     "Microsoft Mark - English (United States)|en-US|0|1",
