@@ -2,7 +2,7 @@
 Do not edit by hand.
 
 Source: omni.ja!chrome/juggler/content/protocol/Protocol.js
-Commands: 77   Events: 35
+Commands: 79   Events: 35
 
 The browser enforces this schema in a CLOSED WORLD: an undeclared field is
 REJECTED at runtime, not ignored. It therefore serves to verify what WE
@@ -476,6 +476,13 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                    'y': {'k': 'Number'}},
                                         'k': 'Object'},
                              'returns': None},
+ 'Page.elementAtom': {'params': {'fields': {'atom': {'k': 'Enum',
+                                                     'values': ['getVisibleText',
+                                                                'isElementDisplayed']},
+                                            'frameId': {'k': 'String'},
+                                            'objectId': {'k': 'String'}},
+                                 'k': 'Object'},
+                      'returns': {'fields': {'result': {'k': 'Any'}}, 'k': 'Object'}},
  'Page.getContentQuads': {'params': {'fields': {'frameId': {'k': 'String'},
                                                 'objectId': {'k': 'String'}},
                                      'k': 'Object'},
@@ -641,6 +648,8 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                           'returns': {'fields': {'screencastId': {'k': 'String'}},
                                       'k': 'Object'}},
  'Page.stopScreencast': {'params': None, 'returns': None},
+ 'Page.title': {'params': {'fields': {}, 'k': 'Object'},
+                'returns': {'fields': {'title': {'k': 'String'}}, 'k': 'Object'}},
  'Runtime.callFunction': {'params': {'fields': {'args': {'k': 'Array',
                                                          'of': {'fields': {'objectId': {'k': 'Optional',
                                                                                         'of': {'k': 'String'}},
