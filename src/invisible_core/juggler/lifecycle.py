@@ -18,7 +18,7 @@ carry the navigationId**. So membership is established by ORDER: after the
 belongs to N. That is what makes it mandatory to clear the states on
 `navigationStarted`.
 
-THE FOUR WAITS, and which event closes each:
+THE WAITS, and which event closes each:
 
     commit             Page.navigationCommitted
     domcontentloaded   Page.eventFired name=DOMContentLoaded
@@ -29,7 +29,7 @@ THE FOUR WAITS, and which event closes each:
                        IDLE_QUIET seconds: pyppeteer's `networkidle2`, which
                        is Chrome's `networkAlmostIdle` (`_settle` too)
 
-⛔ networkidle IS A STATE LIKE THE OTHER THREE, kept in `Frame.states` and
+⛔ networkidle IS A STATE LIKE THE OTHERS, kept in `Frame.states` and
 cleared with them, and `announce` hands it to the page so the client hears it
 too. It used to be a predicate evaluated inside `wait_for_state`, which only a
 waiter in THIS process could see: the client's `wait_for_load_state(
@@ -784,7 +784,8 @@ class Lifecycle:
                             "the same-document navigation to %s was not "
                             "reported in %.0fs" % (url, timeout))
                     self._cv.wait(deadline.left())
-                return {"navigationId": None, "url": self.frames[fid].url}
+                return {"navigationId": None, "landed": None,
+                        "url": self.frames[fid].url}
 
         landed = nav
         if until is not None:

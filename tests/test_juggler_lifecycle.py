@@ -305,7 +305,8 @@ def test_a_NULL_navigationId_is_not_an_error():
         return real_send(method, params, session, timeout)
     c.send = send
     result = v.goto("http://a/#x", timeout=1)
-    assert result == {"navigationId": None, "url": "http://a/#x"}
+    assert result == {"navigationId": None, "landed": None,
+                      "url": "http://a/#x"}
 
 
 def test_goto_without_a_main_frame_SAYS_SO():
