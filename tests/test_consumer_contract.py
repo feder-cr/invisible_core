@@ -301,7 +301,10 @@ CONTRACT = {
         "SessionFiles",
     },
     "invisible_core.juggler.actions": {"Actions"},
-    "invisible_core.juggler.connection": {"ProtocolError", "TargetClosedError"},
+    # Interrupted since 43.39.0: invisible_selenium ends a command when a
+    # dialog opens, as Marionette does (`Page.end_waits_when`).
+    "invisible_core.juggler.connection": {"Interrupted", "ProtocolError",
+                                          "TargetClosedError"},
     # Since 41.35.0: the one meaning of "no limit" (B278).
     "invisible_core.juggler.deadline": {"Deadline"},
     "invisible_core.juggler.injected": {
