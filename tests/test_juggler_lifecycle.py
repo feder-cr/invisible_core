@@ -238,7 +238,9 @@ def test_an_invented_state_is_rejected_immediately():
     c, v = lifecycle()
     with pytest.raises(ValueError) as e:
         v.wait_for_state("F1", "whenIFeelLikeIt", timeout=0.1)
-    assert "four" in str(e.value)
+    # The state asked for, and the ones there are.
+    assert "whenIFeelLikeIt" in str(e.value)
+    assert "networkidle2" in str(e.value) and "domcontentloaded" in str(e.value)
 
 
 # ── networkidle ─────────────────────────────────────────────────────────────
@@ -439,7 +441,9 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
     time.sleep(IDLE_QUIET * 3)
     # The frame's birth is announced too, since 41.36.0: the frame tree is the
     # lifecycle's, and a client builds its frames from these announcements.
-    assert heard == [("frameAttached", "F1"), ("networkidle", "F1")], heard
+    # networkidle2 (at most two in flight) is born with it on a silent page.
+    assert heard == [("frameAttached", "F1"), ("networkidle", "F1"),
+                     ("networkidle2", "F1")], heard
     assert "networkidle" in v.frames["F1"].states
 
     # A later request does not take it back (Playwright fires it once per
@@ -448,7 +452,9 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
     assert "networkidle" in v.frames["F1"].states
     events(v, ("Page.navigationStarted", {"frameId": "F1", "navigationId": "N1"}))
     assert "networkidle" not in v.frames["F1"].states
-    assert heard == [("frameAttached", "F1"), ("networkidle", "F1")], heard
+    assert "networkidle2" not in v.frames["F1"].states
+    assert heard == [("frameAttached", "F1"), ("networkidle", "F1"),
+                     ("networkidle2", "F1")], heard
 
 
 def test_a_same_document_goto_answers_after_the_engine_reports_it():

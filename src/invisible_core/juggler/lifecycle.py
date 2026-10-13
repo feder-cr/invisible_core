@@ -25,6 +25,9 @@ THE FOUR WAITS, and which event closes each:
     load               Page.eventFired name=load
     networkidle        `load`, then zero inflight requests for IDLE_QUIET
                        seconds (`Lifecycle._settle`, the only place)
+    networkidle2       `load`, then at most two inflight requests for
+                       IDLE_QUIET seconds: pyppeteer's `networkidle2`, which
+                       is Chrome's `networkAlmostIdle` (`_settle` too)
 
 ⛔ networkidle IS A STATE LIKE THE OTHER THREE, kept in `Frame.states` and
 cleared with them, and `announce` hands it to the page so the client hears it
@@ -50,7 +53,7 @@ from .deadline import Deadline
 #: as quiet.
 IDLE_QUIET = 0.5
 
-STATES = ("commit", "domcontentloaded", "load", "networkidle")
+STATES = ("commit", "domcontentloaded", "load", "networkidle", "networkidle2")
 
 
 class NavigationError(RuntimeError):
@@ -155,6 +158,9 @@ class Lifecycle:
         self.ready = False
         self._inflight = 0
         self._last_activity = time.monotonic()
+        #: The last moment more than two requests were in flight, which is
+        #: where networkidle2's quiet is measured from.
+        self._last_crowded = self._last_activity
         self._cv = threading.Condition()
         #: How many events have ended this page's waits, and the last one,
         #: for the waits that began before it (`Connection.end_waits_when`,
@@ -269,22 +275,30 @@ class Lifecycle:
         Once given it stays until the next document, as in Playwright: a
         request the page makes later does not take it back.
         """
-        waiting = [f for f in self.frames.values()
-                   if "load" in f.states and "networkidle" not in f.states]
-        if not waiting or self._inflight:
-            return
-        quiet_for = time.monotonic() - self._last_activity
-        if quiet_for < IDLE_QUIET:
-            if self._settle_timer is None:
-                self._settle_timer = threading.Timer(
-                    IDLE_QUIET - quiet_for, self._settle_later)
-                self._settle_timer.daemon = True
-                self._settle_timer.start()
-            return
-        for f in waiting:
-            f.states.add("networkidle")
-            self._tell("networkidle", f.id)
-        self._cv.notify_all()
+        now = time.monotonic()
+        later = None
+        # The two quiets: networkidle counts from the last request event of
+        # any kind with nothing in flight, networkidle2 from the last moment
+        # more than two were in flight.
+        for state, most, since in (("networkidle", 0, self._last_activity),
+                                   ("networkidle2", 2, self._last_crowded)):
+            waiting = [f for f in self.frames.values()
+                       if "load" in f.states and state not in f.states]
+            if not waiting or self._inflight > most:
+                continue
+            quiet_for = now - since
+            if quiet_for < IDLE_QUIET:
+                left = IDLE_QUIET - quiet_for
+                later = left if later is None else min(later, left)
+                continue
+            for f in waiting:
+                f.states.add(state)
+                self._tell(state, f.id)
+            self._cv.notify_all()
+        if later is not None and self._settle_timer is None:
+            self._settle_timer = threading.Timer(later, self._settle_later)
+            self._settle_timer.daemon = True
+            self._settle_timer.start()
 
     def _settle_later(self) -> None:
         with self._cv:
@@ -399,7 +413,11 @@ class Lifecycle:
         if method == "Network.requestWillBeSent":
             self._inflight += 1
             self._last_activity = time.monotonic()
+            if self._inflight > 2:
+                self._last_crowded = self._last_activity
         elif method in ("Network.requestFinished", "Network.requestFailed"):
+            if self._inflight > 2:
+                self._last_crowded = time.monotonic()
             # It never drops below zero: a response without its request
             # does arrive for real, for instance for a load that started
             # before we hooked in, and a negative counter would make
@@ -597,7 +615,7 @@ class Lifecycle:
         carries it); an event after it ends the wait with `Interrupted`.
         Not given, it is read now."""
         if state not in STATES:
-            raise ValueError("unknown state: %r (the four are %s)"
+            raise ValueError("unknown state: %r (the states are %s)"
                               % (state, ", ".join(STATES)))
         deadline = Deadline(timeout)
         with self._cv:
@@ -667,7 +685,7 @@ class Lifecycle:
               until: Optional[str] = "load", timeout: Optional[float] = 30.0,
               referer: Optional[str] = None) -> dict:
         """Navigate `frame_id` (the main frame when not given) to `url` and
-        wait for `until` on its document, one of the four `STATES`.
+        wait for `until` on its document, one of the `STATES`.
 
         `until=None` waits for no state: it returns once the engine has
         started the navigation, its reply to `Page.navigate`. That is
@@ -677,7 +695,7 @@ class Lifecycle:
         it has no document to wait on, and the engine reports it at once.
         """
         if until is not None and until not in STATES:
-            raise ValueError("unknown state: %r (the four are %s)"
+            raise ValueError("unknown state: %r (the states are %s)"
                               % (until, ", ".join(STATES)))
         fid = frame_id or self.main_frame
         if fid is None:
