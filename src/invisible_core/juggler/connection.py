@@ -76,7 +76,11 @@ class Interrupted(Exception):
     dialog opens (`MarionetteCommandsParent.sendQuery` races every content
     query against `#deferredDialogOpened`), which invisible_selenium asks
     for; the reply that comes after is dropped like any reply nobody waits
-    for. `method` and `params` are the event that ended the wait."""
+    for. `method` and `params` are the event that ended the wait.
+
+    Not the `Interrupted` that 39.34.0 removed: that one was the polled
+    `abort` of the landing question after a click ([B230]), which the engine
+    now answers inside the dispatch."""
 
     def __init__(self, method: str, params: dict) -> None:
         super().__init__("%s ended the wait" % method)
