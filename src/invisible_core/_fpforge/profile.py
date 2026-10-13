@@ -487,11 +487,20 @@ SCREEN_COLOR_DEPTH = 24
 from ..constants import TASKBAR_PX, WINDOW_FRAME_BY_DPR, WindowFrame  # noqa: E402,F401
 
 #: The five Windows English (United States) voices, in the order the binary
-#: parses them. See HardwareProfile.voices for why this is not per-locale yet.
+#: parses them (`name|lang|default|local`). See HardwareProfile.voices for why
+#: this is not per-locale yet.
+#:
+#: ⛔ NONE IS THE DEFAULT, AND MARK COMES BEFORE ZIRA, as retail Windows
+#: Firefox 151 lists them (measured 2026-10-13: David, Mark, Zira, then the
+#: Desktop voices, every one `default` false and `localService` true). Gecko's
+#: SAPI backend only ever calls AddVoice and never SetDefaultVoice
+#: (dom/media/webspeech/synth/windows/SapiService.cpp), so on Windows no voice
+#: is the default. Until 43.39.0 David was the default and Zira came second; a
+#: bot-detection challenge reads the default voice and the order.
 VOICES = ",".join([
-    "Microsoft David - English (United States)|en-US|1|1",
-    "Microsoft Zira - English (United States)|en-US|0|1",
+    "Microsoft David - English (United States)|en-US|0|1",
     "Microsoft Mark - English (United States)|en-US|0|1",
+    "Microsoft Zira - English (United States)|en-US|0|1",
     "Microsoft David Desktop - English (United States)|en-US|0|1",
     "Microsoft Zira Desktop - English (United States)|en-US|0|1",
 ])
