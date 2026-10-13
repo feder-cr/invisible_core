@@ -66,6 +66,24 @@ class ReplyTimeout(ProtocolError, TimeoutError):
     """
 
 
+class Interrupted(Exception):
+    """A wait ended by an event its session was told to end waits on
+    (`Connection.end_waits_when`): a call that was still waiting for its
+    reply, or a lifecycle wait that began before the event arrived.
+
+    Not a ProtocolError: the browser refused nothing, and the command may
+    still be running in the page. It is how Marionette ends a command when a
+    dialog opens (`MarionetteCommandsParent.sendQuery` races every content
+    query against `#deferredDialogOpened`), which invisible_selenium asks
+    for; the reply that comes after is dropped like any reply nobody waits
+    for. `method` and `params` are the event that ended the wait."""
+
+    def __init__(self, method: str, params: dict) -> None:
+        super().__init__("%s ended the wait" % method)
+        self.method = method
+        self.params = params
+
+
 class TargetClosedError(Exception):
     """The thing a call was aimed at is gone: a disposed object, or the
     browser itself, whose pipe has closed.
@@ -228,6 +246,33 @@ class EventListeners:
         #: would outlive the browser. So the end is told to it, like a reply.
         self._close_listeners: list = []
         self.gone = False
+        #: session -> which of its events end its waits (`end_waits_when`)
+        self._ends_waits: dict = {}
+
+    def end_waits_when(self, session: str,
+                       predicate: Optional[Callable[[str, dict], bool]]) -> None:
+        """From now on, an event of `session` for which `predicate(method,
+        params)` is true ends every wait of that session that is still on:
+        the calls waiting for their reply (`Connection`), and the lifecycle's
+        waits that began before the event (`Lifecycle`). Each raises
+        `Interrupted`. None takes the rule away.
+
+        ⛔ ONE RULE PER SESSION, KEPT HERE AND ASKED BY BOTH. The calls and
+        the lifecycle end on the same events because they read the same
+        predicate, not two copies of it; and it is kept with the event
+        delivery, which the test fakes share, so a fake answers it as the
+        connection does."""
+        with self._listeners_lock:
+            if predicate is None:
+                self._ends_waits.pop(session, None)
+            else:
+                self._ends_waits[session] = predicate
+
+    def ends_waits(self, session: Optional[str], method: str,
+                   params: dict) -> bool:
+        """Does this event end the waits of its session (`end_waits_when`)?"""
+        predicate = self._ends_waits.get(session) if session else None
+        return bool(predicate and predicate(method, params))
 
     def add_close_listener(self, fn) -> None:
         """Call `fn()` once, when the connection ends. Registered after the
@@ -323,7 +368,8 @@ class Connection(EventListeners):
         self._from_browser = from_browser  # where WE read
         self._process = process
         self._next_id = 0
-        self._pending: dict[int, list] = {}
+        #: msg id -> (woken when the reply is in, the reply's box, session)
+        self._pending: dict[int, tuple] = {}
         self._lock = threading.Lock()
         # ⛔ ONE WRITER AT A TIME ON THE PIPE. `send` used to write outside
         # `_lock`, which was fine while every command came from one thread.
@@ -369,7 +415,7 @@ class Connection(EventListeners):
             with self._lock:
                 pending = list(self._pending.values())
                 self._pending.clear()
-            for ready, box in pending:
+            for ready, box, _ in pending:
                 # Named, so `send` raises the closed-target class and the
                 # client sees the browser is GONE rather than a refusal.
                 box.append(({"error": {"name": "TargetClosedError",
@@ -406,13 +452,26 @@ class Connection(EventListeners):
                 # and the recursion the listener registry replaced was found
                 # only by running Playwright's suite, because it too landed
                 # here and was recorded into a list nobody read.
-                self.dispatch_event(method, msg.get("params") or {},
-                                    msg.get("sessionId"))
+                params = msg.get("params") or {}
+                session = msg.get("sessionId")
+                self.dispatch_event(method, params, session)
+                # AFTER the subscribers: whoever is woken finds the event
+                # already recorded by its client (the dialog to answer).
+                if self.ends_waits(session, method, params):
+                    with self._lock:
+                        ended = [(k, v) for k, v in self._pending.items()
+                                 if v[2] == session]
+                        for k, _ in ended:
+                            del self._pending[k]
+                    for _, (ready, box, _) in ended:
+                        box.append(({"interrupted": [method, params]},
+                                    self.delivered))
+                        ready.set()
             return
         with self._lock:
             entry = self._pending.pop(msg_id, None)
         if entry is not None:
-            ready, box = entry
+            ready, box, _ = entry
             # Its place in the stream, read HERE, on the reader thread, before
             # the next message is delivered (`send_placed`).
             box.append((msg, self.delivered))
@@ -492,7 +551,7 @@ class Connection(EventListeners):
             # the transport.
             box: list = []
             ready = threading.Event()
-            self._pending[msg_id] = (ready, box)
+            self._pending[msg_id] = (ready, box, session)
         msg: dict = {"id": msg_id, "method": method, "params": params or {}}
         if session:
             msg["sessionId"] = session
@@ -507,6 +566,8 @@ class Connection(EventListeners):
                 "look at the readiness signal before the pipe."
                 % (method, timeout))
         response, place = box[0]
+        if "interrupted" in response:
+            raise Interrupted(*response["interrupted"])
         if "error" in response:
             e = response["error"]
             if e.get("name") == "TargetClosedError":

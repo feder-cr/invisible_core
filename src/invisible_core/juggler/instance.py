@@ -339,6 +339,15 @@ class Browser:
                 self._sessions.pop(target_id, None)
                 self._targets.pop(target_id, None)
                 self._sessions_ready.notify_all()
+            # ⛔ AND ITS `Page` IS RETIRED HERE, whoever closed it. Until
+            # 41.39.0 only `Page.close()` retired one, so a tab the site
+            # closed, or one closed after its `beforeunload` was answered,
+            # kept its lifecycle, its injected script and its listeners on
+            # the connection for the life of the browser.
+            for context in list(self.contexts):
+                for page in list(context.pages):
+                    if page.target_id == target_id:
+                        page.retire()
         if session:
             with self._buffer_lock:
                 if session not in self._live:
@@ -781,12 +790,24 @@ class Page:
         self._listeners.append(route)
         self.conn.add_listener(route)
 
+    def end_waits_when(self, predicate: Optional[Callable[[str, Dict], bool]]) -> None:
+        """From now on, an event of THIS page for which `predicate(method,
+        params)` is true ends its waits with `Interrupted`: the commands still
+        waiting for their reply and the lifecycle's waits that began before
+        it (`Connection.end_waits_when`). None takes the rule away; the
+        page's `detach` does too.
+
+        What a client asks for when its original ends a command on an event:
+        Marionette ends any command when a dialog opens."""
+        self.conn.end_waits_when(self.session, predicate)
+
     def detach(self) -> None:
         """Unsubscribe this page and everything it owns, ONCE."""
         if self._detached:
             return
         self._detached = True
         conn = self.conn
+        conn.end_waits_when(self.session, None)
         for route in self._listeners:
             conn.remove_listener(route)
         self._listeners.clear()
@@ -795,19 +816,33 @@ class Page:
         if self in self.context.pages:
             self.context.pages.remove(self)
 
-    def close(self) -> None:
+    def close(self, run_before_unload: bool = False) -> None:
         """Close THIS tab, and only this one.
 
         ⛔ `Page.close`, NOT `Browser.removeBrowserContext`. A caller who opens
         three pages in one context and closes one must not lose all three,
         plus its cookies and its storage.
+
+        With `run_before_unload` the page runs its `beforeunload` handlers and
+        may ask (a `Page.dialogOpened` of type `beforeunload`): the tab closes
+        when that is accepted and stays when it is dismissed, so nothing is
+        retired here; the browser retires it when the engine detaches it.
         """
         try:
-            self.send("Page.close", {"runBeforeUnload": False})
+            self.send("Page.close", {"runBeforeUnload": bool(run_before_unload)})
         except Exception:
             pass
-        # ⛔ The session leaves the browser's registry here, or a long-lived
-        # browser accumulates one entry per page it ever opened.
+        if not run_before_unload:
+            self.retire()
+
+    def retire(self) -> None:
+        """The tab is gone, or going: its session leaves the browser's
+        registry and everything this page subscribed goes with it. Once,
+        whoever calls first - `close`, or the browser on the engine's
+        `Browser.detachedFromTarget`.
+
+        ⛔ The session leaves the registry here, or a long-lived browser
+        accumulates one entry per page it ever opened."""
         try:
             self.browser.forget(self.session)
         except Exception:

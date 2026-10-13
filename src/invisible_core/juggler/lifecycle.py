@@ -42,7 +42,7 @@ import threading
 import time
 from typing import NamedTuple, Optional
 
-from .connection import TargetClosedError
+from .connection import Interrupted, TargetClosedError
 from .deadline import Deadline
 
 #: How much silence the network needs before it counts as "still". It is
@@ -66,10 +66,13 @@ class NavigationInterrupted(NavigationError):
 class NavigationMark(NamedTuple):
     """Where a frame stood before a command that navigates (`Lifecycle.mark`):
     the navigation then current, and the count of same-document navigations.
-    The next navigation of either kind moves one of the two."""
+    The next navigation of either kind moves one of the two. And how many
+    events had ended the page's waits (`Connection.end_waits_when`), so one
+    that arrives after the mark ends the wait for that navigation."""
 
     navigation: Optional[str]
     same_document: int
+    interruptions: int = 0
 
 
 class Frame:
@@ -153,6 +156,11 @@ class Lifecycle:
         self._inflight = 0
         self._last_activity = time.monotonic()
         self._cv = threading.Condition()
+        #: How many events have ended this page's waits, and the last one,
+        #: for the waits that began before it (`Connection.end_waits_when`,
+        #: which keeps the rule; `_check_alive` raises it).
+        self._interruptions = 0
+        self._interruption: Optional[tuple] = None
         #: Who hears what only this object can decide: `announce(what,
         #: frame_id, url=None)`, called UNDER the lock and BEFORE any waiter
         #: is woken, so whatever it sends upward is on its way before the
@@ -198,13 +206,21 @@ class Lifecycle:
             self._gone = True
             self._cv.notify_all()
 
-    def _check_alive(self, waiting_for: str) -> None:
+    def _check_alive(self, waiting_for: str,
+                     began: Optional[int] = None) -> None:
         """Raise if the connection ended: what is awaited can no longer come.
         Called under the lock, after the wait's own condition, so a wait
-        already satisfied answers rather than raising."""
+        already satisfied answers rather than raising.
+
+        And raise `Interrupted` when an event that ends this page's waits
+        arrived after the wait began (`began`, the count it read then): the
+        dialog that ends Marionette's navigation wait (`navigate.sys.mjs`,
+        `onPromptOpened`), for the client that asked for it."""
         if self._gone:
             raise TargetClosedError(
                 "the browser closed while waiting for %s" % waiting_for)
+        if began is not None and self._interruptions != began:
+            raise Interrupted(*self._interruption)
 
     def frame(self, frame_id: str):
         """The frame with this id, or None.
@@ -222,6 +238,10 @@ class Lifecycle:
     # ── event intake ────────────────────────────────────────────────────────
     def _on_event(self, method: str, p: dict) -> None:
         with self._cv:
+            if self.c.ends_waits(self.session, method, p):
+                self._interruptions += 1
+                self._interruption = (method, p)
+                self._cv.notify_all()
             f = self._apply(method, p)
             self._settle()
             if f is not None or method.startswith("Network."):
@@ -446,8 +466,9 @@ class Lifecycle:
         with self._cv:
             f = self.frames.get(frame_id)
             if f is None:
-                return NavigationMark(None, 0)
-            return NavigationMark(f.navigation, f.same_document)
+                return NavigationMark(None, 0, self._interruptions)
+            return NavigationMark(f.navigation, f.same_document,
+                                  self._interruptions)
 
     def wait_for_new_navigation(self, frame_id: str, since: "NavigationMark",
                                 state: Optional[str] = "load",
@@ -498,7 +519,8 @@ class Lifecycle:
                 if f is not None and f.navigation != since.navigation:
                     navigation = f.navigation
                     break
-                self._check_alive("the next navigation of frame %s" % frame_id)
+                self._check_alive("the next navigation of frame %s" % frame_id,
+                                  since.interruptions)
                 if deadline.passed():
                     raise TimeoutError(
                         "no new navigation on frame %s in %.0fs: the previous "
@@ -507,11 +529,13 @@ class Lifecycle:
                 self._cv.wait(deadline.slice(0.05))
         if state is not None:
             self.wait_for_state(frame_id, state, navigation=navigation,
-                                timeout=deadline.left(floor=0.05))
+                                timeout=deadline.left(floor=0.05),
+                                began=since.interruptions)
         return navigation
 
     def wait_for_navigation_start(self, frame_id: str, previous: Optional[str],
-                                  timeout: Optional[float]) -> Optional[str]:
+                                  timeout: Optional[float], *,
+                                  began: Optional[int] = None) -> Optional[str]:
         """The id of a navigation `frame_id` starts that is not `previous`, or
         None if none starts within `timeout`.
 
@@ -519,14 +543,17 @@ class Lifecycle:
         waits for the page a click unloads into and only if the click unloads
         one (Marionette, `clickElement`), so "did one start" is answered with
         no error either way. `wait_for_new_navigation` asks it too, and turns
-        the None into its timeout."""
+        the None into its timeout. `began`: as in `wait_for_state`."""
         deadline = Deadline(timeout)
         with self._cv:
+            if began is None:
+                began = self._interruptions
             while True:
                 f = self.frames.get(frame_id)
                 if f is not None and f.navigation != previous:
                     return f.navigation
-                self._check_alive("a new navigation of frame %s" % frame_id)
+                self._check_alive("a new navigation of frame %s" % frame_id,
+                                  began)
                 if deadline.passed():
                     return None
                 self._cv.wait(deadline.slice(0.05))
@@ -556,18 +583,26 @@ class Lifecycle:
                         navigation: Optional[str] = None,
                         timeout: Optional[float] = 30.0,
                         after: Optional[int] = None,
-                        url: Optional[str] = None) -> None:
+                        url: Optional[str] = None,
+                        began: Optional[int] = None) -> None:
         """Wait until `frame_id` reaches `state`. Given a `navigation`, only
         once its document has committed, and from then on on whichever
         document the frame carries; replaced by another before it committed,
         it is `NavigationInterrupted` at once (`Frame.outcome`, which says what
         `after` is), in upstream Playwright's words, naming `url`, the address
-        asked for, when the caller has one."""
+        asked for, when the caller has one.
+
+        `began`: the count of events that ended this page's waits, read
+        before the command whose outcome this waits for (a `NavigationMark`
+        carries it); an event after it ends the wait with `Interrupted`.
+        Not given, it is read now."""
         if state not in STATES:
             raise ValueError("unknown state: %r (the four are %s)"
                               % (state, ", ".join(STATES)))
         deadline = Deadline(timeout)
         with self._cv:
+            if began is None:
+                began = self._interruptions
             while True:
                 f = self.frames.get(frame_id)
                 decided = None
@@ -604,7 +639,7 @@ class Lifecycle:
                     if ((navigation is None or decided is not None)
                             and self._reached(f, state)):
                         return
-                self._check_alive("%s on frame %s" % (state, frame_id))
+                self._check_alive("%s on frame %s" % (state, frame_id), began)
                 if deadline.passed():
                     if f is None:
                         reason = "the frame does not exist"
@@ -653,9 +688,11 @@ class Lifecycle:
             params["referer"] = referer
         deadline = Deadline(timeout)
         # Counted BEFORE the command: the engine may report the same-document
-        # navigation before its reply arrives.
+        # navigation before its reply arrives, and a dialog that opens while
+        # the command is on its way ends the wait.
         with self._cv:
             before = self._frame(fid).same_document
+            began = self._interruptions
         # The reply's place in the event stream is the line `Frame.outcome`
         # decides on.
         result, after = self.c.send_placed("Page.navigate", params,
@@ -677,7 +714,8 @@ class Lifecycle:
         if nav is None:
             with self._cv:
                 while self._frame(fid).same_document == before:
-                    self._check_alive("the same-document navigation to %s" % url)
+                    self._check_alive("the same-document navigation to %s" % url,
+                                      began)
                     if deadline.passed():
                         raise TimeoutError(
                             "the same-document navigation to %s was not "
@@ -687,7 +725,7 @@ class Lifecycle:
 
         if until is not None:
             self.wait_for_state(fid, until, navigation=nav, timeout=timeout,
-                                after=after, url=url)
+                                after=after, url=url, began=began)
         return {"navigationId": nav, "url": self.frames[fid].url}
 
     # ── inspection ──────────────────────────────────────────────────────────
