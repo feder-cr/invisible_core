@@ -316,11 +316,22 @@ class InjectedScript:
         """⛔ An exception from the page does NOT arrive as a protocol
         error: it arrives as an `exceptionDetails` field inside a
         SUCCESSFUL response. Whoever only looks at the return code reads
-        `None` and moves on."""
-        exc = (response or {}).get("exceptionDetails")
-        if exc:
+        `None` and moves on.
+
+        ⛔ AND THE FIELD CAN BE EMPTY: IT IS ITS PRESENCE THAT SAYS SO (B291).
+        Juggler answers `{exceptionDetails}` only for an exception, and for a
+        promise rejected with a value that is not an Error - an Event from an
+        `onerror`, a plain object - it fills `text` and `stack` from
+        `e.message` and `e.stack`, both undefined, so the field arrives as
+        `{}`. Until 41.39.0 that empty dict was falsy here and the rejection
+        was read as a result of None, in all three clients: a script tag
+        that failed to load "loaded"."""
+        response = response or {}
+        if "exceptionDetails" in response:
+            exc = response["exceptionDetails"] or {}
             raise EvaluationError(
-                "%s%s" % (exc.get("text") or exc.get("value") or "exception",
+                "%s%s" % (exc.get("text") or exc.get("value")
+                          or "the page threw or rejected with a value that is not an Error",
                           ("\n" + exc["stack"]) if exc.get("stack") else ""))
         return (response or {}).get("result") or {}
 
