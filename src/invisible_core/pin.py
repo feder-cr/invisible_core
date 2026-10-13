@@ -23,8 +23,11 @@ measured:
     environment healthy. The files are what actually runs.
 
 WHAT IS COMPARED, and why this pair rather than the obvious one.
-  WANT     the `==` version parsed back out of the CONSUMER's metadata, i.e.
-           out of its pyproject. One source, no constant in code to drift.
+  WANT     the `==` version the CONSUMER declares in its pyproject: read from
+           the pyproject itself when the consumer is an editable checkout,
+           whose metadata is frozen at install time, and from its metadata
+           otherwise (pin_declaration). One source, no constant in code to
+           drift.
   HAVE     invisible_core._version.__version__, recomputed from the packaged
            seal.json on every import. This is the truth of the code that will
            execute, and it is read by importing this package's own sibling
@@ -371,7 +374,21 @@ def pin_from_requirements(
 
 
 def pin_declaration(dist_name: str) -> PinDeclaration:
-    """Parse the `invisible-core==` requirement out of dist_name's metadata."""
+    """Parse the `invisible-core==` requirement dist_name declares.
+
+    ⛔ FROM THE SOURCE'S pyproject WHEN dist_name IS AN EDITABLE CHECKOUT, and
+    from its metadata otherwise. The metadata of an editable install is written
+    at install time and does not follow the checkout: a clone moved to a newer
+    release keeps the old pin there until it is reinstalled. Read from the
+    metadata, the pin of a moved clone named the core of the release before,
+    and the repair below put that old core back over the right one (2026-10-13,
+    the workbench's global python after the wrapper's 0.35.4; 70-known-bugs
+    [B296] in the workbench). The source is the declaration that will run."""
+    source = _editable_path(dist_name)
+    if source:
+        reqs = _source_requirements(source)
+        if reqs is not None:
+            return pin_from_requirements(reqs, dist_name=dist_name)
     try:
         reqs = _requires(dist_name) or []
     except PackageNotFoundError:
@@ -382,6 +399,21 @@ def pin_declaration(dist_name: str) -> PinDeclaration:
     except Exception as e:  # unreadable metadata is not a pass either
         return PinDeclaration(None, "no_record", f"{dist_name} metadata unreadable: {e}")
     return pin_from_requirements(reqs, dist_name=dist_name)
+
+
+def _source_requirements(source: str) -> Optional[list]:
+    """`[project].dependencies` of the pyproject.toml at `source`, or None
+    when there is none to read (no file, unreadable, or dependencies left to
+    the build backend)."""
+    try:
+        import tomllib
+
+        with open(os.path.join(source, "pyproject.toml"), "rb") as f:
+            project = tomllib.load(f).get("project") or {}
+    except (OSError, ValueError):
+        return None
+    deps = project.get("dependencies")
+    return list(deps) if isinstance(deps, list) else None
 
 
 def declared_core_pin(dist_name: str) -> Optional[str]:
@@ -438,16 +470,22 @@ def recorded_core_version() -> Optional[str]:
 def editable_core_path() -> Optional[str]:
     """The source tree an editable core points at, or None.
 
-    PEP 610: pip records direct_url.json for anything not installed from an
-    index, and marks dir_info.editable for `pip install -e`. An install with no
-    direct_url.json is by definition not editable.
-
     Read BEFORE any repair runs: the install replaces the .dist-info, so
     afterwards there is nothing left to read and the reattach command could not
     be printed.
     """
+    return _editable_path(CORE_NAME)
+
+
+def _editable_path(dist_name: str) -> Optional[str]:
+    """The source tree an editable install of `dist_name` points at, or None.
+
+    PEP 610: pip records direct_url.json for anything not installed from an
+    index, and marks dir_info.editable for `pip install -e`. An install with no
+    direct_url.json is by definition not editable.
+    """
     try:
-        raw = _distribution(CORE_NAME).read_text("direct_url.json")
+        raw = _distribution(dist_name).read_text("direct_url.json")
     except Exception:
         return None
     if not raw:

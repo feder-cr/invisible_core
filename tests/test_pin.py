@@ -1330,3 +1330,37 @@ def test_an_unevaluatable_marker_is_not_checkable_rather_than_violated():
         builtins.__import__ = vero_import
     assert d.status == "no_pin", d
     assert "cannot evaluate" in (d.detail or ""), d
+
+
+class _Record:
+    """A distribution record whose direct_url.json says what the test wants."""
+
+    def __init__(self, direct_url):
+        self.direct_url = direct_url
+
+    def read_text(self, name):
+        if name == "direct_url.json" and self.direct_url:
+            return json.dumps(self.direct_url)
+        return None
+
+
+def test_an_editable_consumer_declares_what_its_checkout_says(monkeypatch, tmp_path):
+    """[B296] in the workbench: an editable consumer's metadata is written at
+    install time and does not follow the checkout. A clone moved to a newer
+    release kept the old pin there, and the repair put the old core back.
+    The known-bad input is a metadata pin that disagrees with the pyproject."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "some-consumer"\n'
+        'dependencies = ["platformdirs>=4", "invisible_core==43.39.0"]\n',
+        encoding="utf-8")
+    monkeypatch.setattr(_pin, "_distribution", lambda name: _Record(
+        {"url": tmp_path.as_uri(), "dir_info": {"editable": True}}))
+    monkeypatch.setattr(_pin, "_requires", lambda name: ["invisible-core==42.39.0"])
+    got = _pin.pin_declaration("some-consumer")
+    assert (got.version, got.status) == ("43.39.0", "pinned"), got
+
+
+def test_an_installed_consumer_declares_what_its_metadata_says(monkeypatch):
+    monkeypatch.setattr(_pin, "_distribution", lambda name: _Record(None))
+    monkeypatch.setattr(_pin, "_requires", lambda name: ["invisible-core==42.39.0"])
+    assert _pin.pin_declaration("some-consumer").version == "42.39.0"
