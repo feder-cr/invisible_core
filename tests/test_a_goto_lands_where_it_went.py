@@ -235,3 +235,27 @@ def test_an_interrupted_navigation_names_itself():
         _goto([_request(OURS, NEW), _started(OURS), _started("nav-8"),
                _committed("nav-8", "http://127.0.0.1/landed"), _DCL])
     assert e.value.navigation == OURS
+
+
+def test_a_load_before_our_commit_is_not_our_load():
+    """C7 of the event-filter audit: the states were cleared when a navigation
+    STARTED, so an event of the document being left that arrived between our
+    start and our commit - its `load`, when our navigation stops its loads -
+    counted for ours, and goto(until="load") could answer at our commit,
+    before our document loaded. Not seen on firefox-46
+    (`C:/tmp/b230/c7_load_probe.py`), but nothing in the client stopped it;
+    Playwright clears the lifecycle at the commit, and so does this."""
+    engine = _Engine(after=[_request(OURS, NEW), _started(OURS),
+                            ("Page.eventFired", {"frameId": F, "name": "load"}),
+                            _committed(OURS, NEW)])
+    life = Lifecycle(engine, S)
+    engine.emit([("Page.frameAttached", {"frameId": F}), _started("nav-6"),
+                 _committed("nav-6", OLD), _DCL])
+    with pytest.raises(TimeoutError):
+        life.goto(NEW, frame_id=F, until="load", timeout=0.6)
+
+
+def test_our_own_load_after_our_commit_still_counts():
+    out = _goto([_request(OURS, NEW), _started(OURS), _committed(OURS, NEW), _DCL,
+                 ("Page.eventFired", {"frameId": F, "name": "load"})])
+    assert out["landed"] == OURS

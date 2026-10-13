@@ -410,6 +410,14 @@ class Lifecycle:
             if nav is not None:
                 f.navigation = nav
                 f._commits.append((self.c.delivered, nav, f.url))
+                # A new document's states start HERE. Cleared at the start
+                # only, an event of the document being left that arrived
+                # between our start and our commit - its `load`, when our
+                # navigation stops its loads - counted for ours, and
+                # goto(until="load") could answer before our document loaded
+                # (C7 of the event-filter audit, [B302]). Playwright clears
+                # the lifecycle at the commit too.
+                f.states = set()
             f.states.add("commit")
             return f
 

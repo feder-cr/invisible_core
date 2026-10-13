@@ -108,6 +108,9 @@ class Actions:
     #: The session's input latency ([B299]), or None when humanising is off;
     #: a class default for the same benches: None is "born at the dispatch".
     input_latency = None
+    #: The page's counter of draws, which `born` reads only with a latency;
+    #: None for the same benches.
+    acts = None
     #: No generator means every approach is one event, and no budget: class
     #: defaults for a bench that builds this object without `__init__`.
     motion = None

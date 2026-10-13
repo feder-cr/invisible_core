@@ -323,7 +323,10 @@ CONTRACT = {
     # NavigationInterrupted since 41.36.0: another document committed in the
     # navigation's place, which Selenium must not word as an error page.
     "invisible_core.juggler.lifecycle": {"Lifecycle", "NavigationError",
-                                         "NavigationInterrupted"},
+                                         "NavigationInterrupted",
+                                         # invisible-selenium waits through a
+                                         # stop from the one stopped ([B302])
+                                         "NavigationMark"},
     # The one seed mixer: the wrapper's cursor seeds its per-action streams
     # with it, as it did with the pointer planner's copy before 38.34.0.
     "invisible_core.seedmix": {"sub_seed"},
