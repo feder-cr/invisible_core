@@ -1400,8 +1400,9 @@ class Actions:
             self._landings[event_type] = answer.get("landing")
         self.position = (point[0], point[1])
 
-    def _type(self, text: str):
-        """Character-by-character typing.
+    def _type(self, text: str, delay_ms: Optional[float] = None):
+        """Character-by-character typing, with the session's rhythm, or
+        `delay_ms` between keys when the caller gives one.
 
         ⛔ It's a handoff to the keyboard, and the reason it isn't written
         here anymore is a measured defect: this function used to send
@@ -1417,7 +1418,10 @@ class Actions:
         is exactly the defect above, in a form that's harder to see.
         """
         try:
-            self.keyboard.type(text)
+            if delay_ms is None:
+                self.keyboard.type(text)
+            else:
+                self.keyboard.type(text, delay_ms=delay_ms)
         except UnknownKey:
             # ⛔ ONLY this exception, and not `Exception`: a transport
             # error mid-typing would get swallowed and the text
