@@ -727,7 +727,7 @@ class Lifecycle:
                                 'Navigation %s is interrupted by another '
                                 'navigation to "%s"'
                                 % ('to "%s"' % url if url else navigation,
-                                   decided[1]))
+                                   decided[1]), navigation)
                     # ⛔ CLEARING THE STATES ON `navigationStarted` IS NOT
                     # ENOUGH, and this is the real defect measured on
                     # 2026-08-27.

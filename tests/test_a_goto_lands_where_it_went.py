@@ -225,3 +225,13 @@ def test_following_a_navigation_stopped_with_nothing_in_its_place_raises():
     with pytest.raises(NavigationError) as e:
         _goto_following([_request(OURS, NEW), _started(OURS), _ABORT])
     assert str(e.value) == "NS_BINDING_ABORTED"
+
+
+def test_an_interrupted_navigation_names_itself():
+    """The same for a navigation another document replaced: a client that
+    waits on, as Marionette does, waits for the document after it."""
+    from invisible_core.juggler.lifecycle import NavigationInterrupted
+    with pytest.raises(NavigationInterrupted) as e:
+        _goto([_request(OURS, NEW), _started(OURS), _started("nav-8"),
+               _committed("nav-8", "http://127.0.0.1/landed"), _DCL])
+    assert e.value.navigation == OURS
