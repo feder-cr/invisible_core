@@ -77,6 +77,7 @@ class Frame:
         self.id = frame_id
         self.parent = parent
         self.url = ""
+        self.name = ""
         #: the current navigation, and ONLY its states
         self.navigation: Optional[str] = None
         self.states: set = set()
@@ -334,6 +335,9 @@ class Lifecycle:
             f = self._frame(p["frameId"])
             nav = p.get("navigationId")
             f.url = p.get("url", f.url)
+            # The frame's name (the iframe's `name`, or its `id`), which the
+            # engine sends with every commit and pyppeteer's `frame.name` reads.
+            f.name = p.get("name", f.name)
             # Without an id it is a document already committed, re-announced
             # by a new PageAgent (its constructor), not a new one.
             if nav is not None:
