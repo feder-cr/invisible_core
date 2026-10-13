@@ -40,7 +40,10 @@ def test_the_generated_protocol_has_the_five_domains():
     # until all three came from the core.
     # 77 since firefox-39: `Page.pointerLanded` left, because where an event
     # landed now comes back with its own dispatch (`landsOn`). [B230]
-    assert len(COMMANDS) == 77, "commands: %d" % len(COMMANDS)
+    # 79 since firefox-44: `Page.elementAtom` (Firefox's own WebDriver atoms,
+    # run against the page through an Xray) and `Page.title` (read in the
+    # parent), both for invisible_selenium.
+    assert len(COMMANDS) == 79, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
 
@@ -54,7 +57,10 @@ def test_the_commands_the_client_will_use_are_declared():
                  # How a picked value, an option and a file reach a control:
                  # through Firefox's own user paths, which fire the events.
                  "Page.setUserInput", "Page.selectOptions",
-                 "Page.setFileInputFiles"):
+                 "Page.setFileInputFiles",
+                 # Selenium's text, is_displayed and title, as Marionette
+                 # answers them (firefox-44).
+                 "Page.elementAtom", "Page.title"):
         assert name in COMMANDS, name
     # Where a click or a hover LANDED comes back with the dispatch, for the
     # events that name their element (firefox-39, [B230]); the separate
