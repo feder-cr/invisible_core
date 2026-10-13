@@ -316,7 +316,10 @@ CONTRACT = {
     # copy of, here once.
     "invisible_core.juggler.instance": {"launch", "MOTION_BUDGET_PREF",
                                         "SESSION_SEED_PREF"},
-    "invisible_core.juggler.keyboard": {"BUTTON_MASK", "MODIFIER_MASK"},
+    # UnknownKey since 44.39.0: invisible-puppeteer words a key that is not on
+    # the layout as pyppeteer does ("Unknown key: X").
+    "invisible_core.juggler.keyboard": {"BUTTON_MASK", "MODIFIER_MASK",
+                                        "UnknownKey"},
     # NavigationInterrupted since 41.36.0: another document committed in the
     # navigation's place, which Selenium must not word as an error page.
     "invisible_core.juggler.lifecycle": {"Lifecycle", "NavigationError",

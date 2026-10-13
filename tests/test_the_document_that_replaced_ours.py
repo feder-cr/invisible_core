@@ -159,7 +159,8 @@ def test_ours_still_wins_when_it_is_the_document_that_commits():
     life = _previous_page(engine)
     out = life.goto("http://127.0.0.1/r50?i=34", frame_id=F,
                     until="domcontentloaded", timeout=5)
-    assert out == {"navigationId": OURS, "url": "http://127.0.0.1/r50?i=34"}
+    assert out == {"navigationId": OURS, "landed": OURS,
+                   "url": "http://127.0.0.1/r50?i=34"}
 
 
 def test_a_document_committed_before_the_reply_is_the_past():
