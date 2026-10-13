@@ -492,3 +492,20 @@ def test_a_same_document_goto_answers_after_the_engine_reports_it():
     order.append(("returned", result["url"]))
     assert order == [("sameDocument", "http://a/#x"),
                      ("returned", "http://a/#x")], order
+
+
+def test_a_navigation_that_started_and_never_ended_is_named_as_ours():
+    """A Dot's goto waited 45 s and said "the current navigation is nav-165,
+    not our nav-165, which has not committed": the frame's navigation WAS
+    ours, started and then neither committed nor aborted (the engine dropped
+    the abort that document.open() caused, [B302]). The message has to say
+    that, not contradict itself."""
+    c, v = lifecycle()
+    events(v,
+           ("Page.frameAttached", {"frameId": "F1"}),
+           ("Page.navigationStarted", {"frameId": "F1", "navigationId": "B"}))
+    with pytest.raises(TimeoutError) as e:
+        v.wait_for_state("F1", "domcontentloaded", navigation="B", timeout=0.3)
+    msg = str(e.value)
+    assert "not our B" not in msg, msg
+    assert "our navigation B started and has neither committed nor been aborted" in msg, msg

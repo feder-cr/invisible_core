@@ -256,9 +256,8 @@ class Keyboard:
         one: the engine creates the event, waits that long and hands it
         over, so the page's handler runs after the event's birth as it does
         for a real keyboard ([B299])."""
-        if self.latency is not None:
-            params["latency"] = self.latency.draw(self.acts.next("latency"))
-        return params
+        from ._behaviour import born
+        return born(params, self.latency, self.acts)
 
     def press(self, key: str, *, dwell_ms: Optional[float] = None) -> None:
         """`press("a")`, `press("Enter")`, `press("Control+Shift+KeyA")`.

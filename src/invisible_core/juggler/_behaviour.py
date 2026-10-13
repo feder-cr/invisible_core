@@ -582,6 +582,16 @@ class InputLatency:
                             2.0, 30.0), 2)
 
 
+def born(params: dict, latency: Optional[InputLatency], acts) -> dict:
+    """One input event's parameters with the latency it is born with, when
+    the session has one: the ONE place an event is given it, for the keyboard
+    and the mouse ([B299]) and the wheel ([B301], `Page.dispatchWheelEvent`
+    takes it from firefox-46), each draw on the page's `acts` counter."""
+    if latency is not None:
+        params["latency"] = latency.draw(acts.next("latency"))
+    return params
+
+
 def plan_click(persona: PointerPersona, clicks: int = 1,
                nonce: int = 0) -> List[Tuple[float, float]]:
     """One `(dwell_ms, gap_ms)` per press of a click or a double click.

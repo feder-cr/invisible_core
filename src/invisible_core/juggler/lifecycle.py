@@ -706,10 +706,18 @@ class Lifecycle:
                         # The message must say THIS, because it is the
                         # case where the states are there but are not
                         # ours, and without this line it would look like
-                        # the browser is not responding.
-                        reason = ("the current navigation is %s, not our "
-                                  "%s, which has not committed"
-                                  % (f.navigation, navigation))
+                        # the browser is not responding. And when the
+                        # frame's navigation IS ours, it started and never
+                        # ended: "nav-165, not our nav-165" was what a Dot
+                        # read when the engine dropped its abort [B302].
+                        if f.navigation == navigation:
+                            reason = ("our navigation %s started and has "
+                                      "neither committed nor been aborted"
+                                      % navigation)
+                        else:
+                            reason = ("the current navigation is %s, not "
+                                      "our %s, which has not committed"
+                                      % (f.navigation, navigation))
                     else:
                         reason = ("states reached: %s"
                                   % (sorted(f.states) or "none"))

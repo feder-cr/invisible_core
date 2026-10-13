@@ -80,3 +80,24 @@ def test_with_humanising_off_no_mouse_event_carries_one():
     actions = Actions(c, "S", None, None, acts=PageActs(1))
     actions._mouse_event("mousemove", (10, 20))
     assert all("latency" not in p for m, p in c.sent)
+
+
+def test_every_wheel_event_carries_a_latency_when_humanising_is_on():
+    # [B301]: the wheel was born at its dispatch, 0 to 2 ms before the page's
+    # handler, where a real wheel is 6 to 14 ms (retail Windows Firefox 151,
+    # SendInput) and the keys and moves of firefox-45 are 4 to 22.
+    c = _Fake()
+    actions = Actions(c, "S", None, None, acts=PageActs(1), session_seed=42)
+    actions.wheel(0, 100)
+    actions.wheel(0, 100)
+    wheel = [p for m, p in c.sent if m == "Page.dispatchWheelEvent"]
+    assert len(wheel) == 2
+    assert all(2.0 <= p["latency"] <= 30.0 for p in wheel), wheel
+    assert wheel[0]["latency"] != wheel[1]["latency"]
+
+
+def test_with_humanising_off_no_wheel_event_carries_one():
+    c = _Fake()
+    actions = Actions(c, "S", None, None, acts=PageActs(1))
+    actions.wheel(0, 100)
+    assert all("latency" not in p for m, p in c.sent)
