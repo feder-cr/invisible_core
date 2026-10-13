@@ -439,6 +439,24 @@ class Connection(EventListeners):
         return ("\n  " + "\n  ".join(parts)) if parts else ""
 
     # ── writing ─────────────────────────────────────────────────────────────
+    def post(self, method: str, params: Optional[dict] = None,
+             session: Optional[str] = None) -> None:
+        """Send a command and do not wait for its reply, for a command whose
+        answer nobody needs: releasing an object. Its reply, when it comes,
+        matches no waiter and is dropped by the reader. A bound on a wait
+        nobody needed is a number that can only make a cleanup slower or a
+        hung page's cleanup hang; until 41.38.0 these waited up to 5 s."""
+        if self._closed:
+            raise TargetClosedError("the pipe is closed: %s%s"
+                                    % (self._error or "", self._why_closed()))
+        with self._lock:
+            self._next_id += 1
+            msg_id = self._next_id
+        msg: dict = {"id": msg_id, "method": method, "params": params or {}}
+        if session:
+            msg["sessionId"] = session
+        self._write(msg)
+
     def send(self, method: str, params: Optional[dict] = None,
              session: Optional[str] = None,
              timeout: Optional[float] = 30.0) -> Any:

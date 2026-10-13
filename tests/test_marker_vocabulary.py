@@ -799,7 +799,11 @@ def test_no_string_LITERAL_evaluates_to_a_control_character():
     allowed = {chr(10), chr(9), chr(13)}
     offenders = []
     for repo in _REPOS:
-        root = _RELEASE / repo
+        # ⛔ THIS REPO IS THE TREE UNDER TEST, not the shared checkout (see
+        # `_release_dir`): judged through `_RELEASE` it was whatever commit the
+        # shared clone sat on, and turned red in every worktree the day that
+        # clone moved to a release carrying a literal this tree had fixed.
+        root = _SELF if repo == "invisible_core" else _RELEASE / repo
         if not root.is_dir():
             pytest.skip("not the workbench - the sibling repos are not here")
         listing = subprocess.run(["git", "-C", str(root), "ls-files", "*.py"],

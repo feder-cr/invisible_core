@@ -431,7 +431,7 @@ class InjectedScript:
         # caller's `in_current_world` asks again.
         context = self.context_id(frame_id)
         oid = self._evaluate_in(context, expression, by_value=False,
-                                timeout=30.0)
+                                timeout=None)
         if not oid:
             raise EvaluationError(
                 "the InjectedScript did not return an object: "
@@ -779,7 +779,7 @@ class InjectedScript:
         """
         r = self.c.send("Page.getContentQuads",
                         {"frameId": frame_id, "objectId": element},
-                        session=self.session, timeout=10) or {}
+                        session=self.session, timeout=None) or {}
         quads = r.get("quads") or []
         if not quads:
             return None
@@ -826,7 +826,7 @@ class InjectedScript:
              "functionDeclaration": "(v) => v",
              "args": [{"objectId": element}],
              "returnByValue": True},
-            timeout=10))
+            timeout=None))
         return r.get("value")
 
     def adopt(self, frame_id: str, element: Optional[str] = None, *,
@@ -851,7 +851,7 @@ class InjectedScript:
                   "executionContextId": self.context_id(into or frame_id)}
         if element is not None:
             params["objectId"] = element
-        answer = self._send_in("Page.adoptNode", params, timeout=10) or {}
+        answer = self._send_in("Page.adoptNode", params, timeout=None) or {}
         return ((answer.get("remoteObject") or {}).get("objectId")) or None
 
     def dispose(self, frame_id: str, element: str) -> None:
@@ -862,10 +862,10 @@ class InjectedScript:
         can exist in two contexts.
         """
         try:
-            self.c.send("Runtime.disposeObject",
+            self.c.post("Runtime.disposeObject",
                         {"executionContextId": self.context_id(frame_id),
                          "objectId": element},
-                        session=self.session, timeout=5)
+                        session=self.session)
         except Exception:
             pass
 
@@ -934,7 +934,7 @@ class InjectedScript:
         r = self._send_in("Runtime.getObjectProperties",
                           {"executionContextId": context_id,
                            "objectId": object_id},
-                          timeout=10) or {}
+                          timeout=None) or {}
         return list(r.get("properties") or [])
 
     def by_value(self, context_id: str, object_id: str):
@@ -948,7 +948,7 @@ class InjectedScript:
             {"executionContextId": context_id,
              "functionDeclaration": "(v) => v",
              "args": [{"objectId": object_id}], "returnByValue": True},
-            timeout=10))
+            timeout=None))
         return r.get("value")
 
     def node_to_main(self, frame_id: str, element: str) -> Optional[str]:
@@ -958,15 +958,15 @@ class InjectedScript:
             {"frameId": frame_id,
              "executionContextId": self.main_context(frame_id),
              "objectId": element},
-            timeout=10) or {}
+            timeout=None) or {}
         return ((answer.get("remoteObject") or {}).get("objectId")) or None
 
     def release(self, context_id: str, object_id: str) -> None:
         """`Runtime.disposeObject` in an explicit context. Never raises."""
         try:
-            self.c.send("Runtime.disposeObject",
+            self.c.post("Runtime.disposeObject",
                         {"executionContextId": context_id,
                          "objectId": object_id},
-                        session=self.session, timeout=5)
+                        session=self.session)
         except Exception:
             pass

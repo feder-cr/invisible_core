@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from .connection import TargetClosedError
 from .deadline import Deadline
@@ -61,6 +61,15 @@ class NavigationInterrupted(NavigationError):
     """Another document committed in the navigation's place before it did
     (`Frame.outcome`): the browser went elsewhere, and nothing failed to load.
     Its own type so a client words it as what it is, not as an error page."""
+
+
+class NavigationMark(NamedTuple):
+    """Where a frame stood before a command that navigates (`Lifecycle.mark`):
+    the navigation then current, and the count of same-document navigations.
+    The next navigation of either kind moves one of the two."""
+
+    navigation: Optional[str]
+    same_document: int
 
 
 class Frame:
@@ -425,11 +434,36 @@ class Lifecycle:
         # others at event intake, and all of them live in `f.states`.
         return state in f.states
 
-    def wait_for_new_navigation(self, frame_id: str, previous: Optional[str],
-                                state: str = "load",
+    def mark(self, frame_id: str) -> "NavigationMark":
+        """Where `frame_id` stands now: its current navigation, and how many
+        same-document navigations it has had. Taken BEFORE a command that
+        navigates, it is what `wait_for_new_navigation` waits to move; taken
+        after, it could already include the navigation it is meant to see."""
+        with self._cv:
+            f = self.frames.get(frame_id)
+            if f is None:
+                return NavigationMark(None, 0)
+            return NavigationMark(f.navigation, f.same_document)
+
+    def wait_for_new_navigation(self, frame_id: str, since: "NavigationMark",
+                                state: Optional[str] = "load",
                                 timeout: Optional[float] = 30.0) -> Optional[str]:
-        """Wait for a navigation that is NOT the one already in progress, and
-        answer with the id of the one it waited for.
+        """Wait for the frame's next navigation after the mark `since`, and
+        answer with the id of the new document's navigation, or None when the
+        next navigation stayed in the same document.
+
+        ⛔ A SAME-DOCUMENT NAVIGATION ENDS THE WAIT AT ONCE (B290). History has
+        same-document entries - a hash, a `pushState` - and going to one starts
+        no navigation: there is no id and no document to load. Until 41.38.0
+        this waited only for a navigation id, so `go_back` to a hash entry
+        waited out its whole timeout and raised, in all three clients, where
+        Playwright and pyppeteer answer null at once (their navigation watchers
+        complete on `navigatedWithinDocument`) and Marionette ends its wait on
+        `hashchange` and `popstate`. The frame counts those navigations
+        (`Page.sameDocumentNavigation`), so the mark carries the count.
+
+        With `state` None the answer comes when the new document's navigation
+        has started, which is what Selenium's "none" strategy waits for.
 
         ⛔ THE ID IS RETURNED BECAUSE ONLY THIS FUNCTION KNOWS IT. The caller
         needs it to answer `reload` / `go_back` with a Response, and reading
@@ -452,14 +486,24 @@ class Lifecycle:
         anchor on is that the frame's CURRENT navigation has changed.
         """
         deadline = Deadline(timeout)
-        navigation = self.wait_for_navigation_start(frame_id, previous,
-                                                    timeout=timeout)
-        if navigation is None:
-            raise TimeoutError(
-                "no new navigation on frame %s in %.0fs: the previous one (%s) "
-                "is still current" % (frame_id, timeout, previous))
-        self.wait_for_state(frame_id, state, navigation=navigation,
-                            timeout=deadline.left(floor=0.05))
+        with self._cv:
+            while True:
+                f = self.frames.get(frame_id)
+                if f is not None and f.same_document != since.same_document:
+                    return None
+                if f is not None and f.navigation != since.navigation:
+                    navigation = f.navigation
+                    break
+                self._check_alive("the next navigation of frame %s" % frame_id)
+                if deadline.passed():
+                    raise TimeoutError(
+                        "no new navigation on frame %s in %.0fs: the previous "
+                        "one (%s) is still current"
+                        % (frame_id, timeout, since.navigation))
+                self._cv.wait(deadline.slice(0.05))
+        if state is not None:
+            self.wait_for_state(frame_id, state, navigation=navigation,
+                                timeout=deadline.left(floor=0.05))
         return navigation
 
     def wait_for_navigation_start(self, frame_id: str, previous: Optional[str],

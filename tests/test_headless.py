@@ -829,7 +829,8 @@ def _x_open(display: str, cookie: bytes = b""):
                + padded(name) + padded(cookie))
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        s.connect("\0/tmp/.X11-unix/X" + display[1:])
+        # chr(0): the abstract socket's name starts with a NUL, on purpose.
+        s.connect(chr(0) + "/tmp/.X11-unix/X" + display[1:])
         s.sendall(request)
         return s.recv(1)[0], s
     except BaseException:

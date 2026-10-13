@@ -228,7 +228,7 @@ class Keyboard:
                       "keyCode": d["keyCodeWithoutLocation"],
                       "location": d["location"], "repeat": repeat,
                       "text": text},
-                     session=self.session, timeout=10)
+                     session=self.session, timeout=None)
 
     def up(self, key: str) -> None:
         d = self.describe(key)
@@ -241,7 +241,7 @@ class Keyboard:
                      {"type": "keyup", "key": d["key"], "code": d["code"],
                       "keyCode": d["keyCodeWithoutLocation"],
                       "location": d["location"], "repeat": False},
-                     session=self.session, timeout=10)
+                     session=self.session, timeout=None)
         if d["code"] in self._implicit_shift:
             self._implicit_shift.discard(d["code"])
             self.up("Shift")
@@ -406,4 +406,4 @@ class Keyboard:
         """The text goes in without key events. This is what is needed for
         a character that is not on the layout."""
         self.c.send("Page.insertText", {"text": text},
-                     session=self.session, timeout=10)
+                     session=self.session, timeout=None)

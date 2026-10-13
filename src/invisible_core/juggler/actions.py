@@ -30,6 +30,7 @@ import time
 from typing import Optional
 
 from . import _pacing
+from .connection import ReplyTimeout
 from .deadline import Deadline
 from .injected import ContextDestroyed, EvaluationError
 from .keyboard import BUTTON_MASK, Keyboard, UnknownKey
@@ -209,7 +210,8 @@ class Actions:
             return True
         return 0 <= point[0] <= w and 0 <= point[1] <= h
 
-    def _center_point(self, frame_id: str, element: str, position=None):
+    def _center_point(self, frame_id: str, element: str, position=None,
+                      deadline: Optional[Deadline] = None):
         """Where the event lands: the quad's centre, or the caller's offset.
 
         ⛔ No quad is NOT an error to propagate: it means "not visible
@@ -234,9 +236,17 @@ class Actions:
         quad is in main-frame coordinates like everything else on this path,
         so the offset is added to its minimum x and y rather than to the mean.
         """
+        # ⛔ BOUNDED BY THE ACTION'S DEADLINE, OR BY NOTHING. Until 41.38.0
+        # every one of these reads had a 10 s bound of its own, which neither
+        # Playwright nor the originals of the other clients have: an action
+        # with a 30 s timeout on a loaded host failed in 10. Inside `_retry`
+        # it gets what is left of the action's time; called by a client with
+        # no deadline it waits for the answer, which a closed pipe still ends.
         r = self.c.send("Page.getContentQuads",
                         {"frameId": frame_id, "objectId": element},
-                        session=self.session, timeout=10) or {}
+                        session=self.session,
+                        timeout=None if deadline is None
+                        else deadline.left(floor=0.05)) or {}
         quads = r.get("quads") or []
         if not quads:
             return None
@@ -253,8 +263,18 @@ class Actions:
                timeout: Optional[float] = 30.0, frame_id: Optional[str] = None,
                position=None, element_id: Optional[str] = None,
                trial: bool = False, strict: bool = False,
-               force: bool = False, needs_point: bool = True):
+               force: bool = False, needs_point: bool = True,
+               once: bool = False):
         """Resolve, check, act, and if something doesn't match, START OVER.
+
+        ⛔ `once` IS FOR A CLIENT WHOSE ORIGINAL DOES NOT START OVER. Selenium
+        (Marionette) and pyppeteer try an action once and raise what they
+        found; only Playwright waits for the element to become actionable. A
+        turn that does not act raises at once with its reason, while
+        `timeout` keeps bounding what the action itself waits for, such as the
+        typing persona's pause before the first key (`_reach_field`): one
+        attempt is not no time. A scroll that brings the point into view is
+        part of the same attempt, as it is in Marionette's click.
 
         ⛔ `needs_point=False` IS FOR AN ACTION THAT DOES NOT TOUCH THE SCREEN.
         Setting a file input's files goes through the engine, not the pointer,
@@ -348,13 +368,13 @@ class Actions:
                     # the quad is measured first and the scroll happens only if
                     # it lands outside - then the loop recomputes, because the
                     # geometry has just changed underneath.
-                    point = self._center_point(f, element, position)
+                    point = self._center_point(f, element, position, deadline)
                     if point is not None and not self._in_viewport(point):
                         if self.inj.scroll_into_view(f, element):
                             reason = ("the element was outside the viewport; "
                                       "scrolled it in and starting over")
                             continue
-                        point = self._center_point(f, element, position)
+                        point = self._center_point(f, element, position, deadline)
                     if point is None:
                         reason = "the element has no quad (it isn't visible)"
                     elif trial:
@@ -410,6 +430,13 @@ class Actions:
                 if "notconnected" not in str(e):
                     raise
                 reason = "the node detached while I was using it"
+            except ReplyTimeout as e:
+                # The page did not answer a question of this turn within what
+                # was left of the action's time: the action's own timeout,
+                # reported as one. Inside `run` something may have happened.
+                if acting:
+                    raise
+                reason = "the page did not answer in time (%s)" % e
             except WrongHitTarget as e:
                 # ⛔ This too is a condition of the WORLD, not a failure: the
                 # point stopped belonging to the element before we committed,
@@ -439,6 +466,9 @@ class Actions:
                 if element and ours:
                     self.inj.dispose(f, element)
 
+            if once:
+                raise ElementNotActionable(
+                    "%r not actionable: %s" % (selector, reason))
             if deadline.passed():
                 raise ElementNotActionable(
                     "%r not actionable in %.0fs after %d attempts. Last "
@@ -807,7 +837,7 @@ class Actions:
             self.c.send("Page.selectOptions",
                         {"frameId": f, "objectId": element,
                          "indices": r["indices"]},
-                        session=self.session, timeout=10)
+                        session=self.session, timeout=None)
             return r["values"]
         return self._retry(selector, run,
                            states=["visible", "stable", "enabled"],
@@ -924,7 +954,7 @@ class Actions:
             self.c.send("Page.setFileInputFiles",
                         {"frameId": f, "objectId": element,
                          "files": [str(p) for p in files]},
-                        session=self.session, timeout=30)
+                        session=self.session, timeout=None)
             return list(files)
         return self._retry(selector, run, states=[], timeout=timeout,
                            frame_id=frame_id, element_id=element_id,
@@ -941,7 +971,7 @@ class Actions:
             self.c.send("Page.dispatchTapEvent",
                         {"x": point[0], "y": point[1],
                          "modifiers": self.keyboard.modifier_mask()},
-                        session=self.session, timeout=10)
+                        session=self.session, timeout=None)
             return point
         return self._retry(selector, run, timeout=timeout,
                            frame_id=frame_id, position=position, **opts)
@@ -1134,7 +1164,7 @@ class Actions:
                     {"x": self.position[0], "y": self.position[1],
                      "deltaX": dx, "deltaY": dy, "deltaZ": 0,
                      "modifiers": self.keyboard.modifier_mask()},
-                    session=self.session, timeout=10)
+                    session=self.session, timeout=None)
 
     def _click_at_point(self, point, *, button: int = 0,
                         clicks: int = 1, modifiers: int = 0,
@@ -1249,7 +1279,7 @@ class Actions:
                 self.c.send("Page.setUserInput",
                             {"frameId": f, "objectId": element,
                              "value": result["setUserInput"]},
-                            session=self.session, timeout=10)
+                            session=self.session, timeout=None)
             elif result == "needsinput":
                 if text:
                     self._type(text)
@@ -1361,8 +1391,10 @@ class Actions:
         if self._landing_target is not None:
             frame_id, element = self._landing_target
             p["landsOn"] = {"frameId": frame_id, "objectId": element}
+        # No bound of its own: the engine answers once the page has handled
+        # the event, and bounds that wait itself (`_awaitInputHandled`, 5 s).
         answer = self.c.send("Page.dispatchMouseEvent", p,
-                             session=self.session, timeout=10) or {}
+                             session=self.session, timeout=None) or {}
         if self._landing_target is not None:
             # None when a dialog the event opened ended the engine's wait.
             self._landings[event_type] = answer.get("landing")
