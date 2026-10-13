@@ -303,11 +303,14 @@ class Keyboard:
     def type(self, text: str, *, delay_ms: float = 0.0) -> None:
         """One key per character, with the rhythm of a hand.
 
-        ⛔ This is NOT `insert_text`: a character the layout does not know
-        (an ideogram, an emoji) has no key, so here it is REJECTED and
-        deferred to `insert_text`. Typing something with no key would mean
-        sending `code: ""`, which is exactly the defect this file exists
-        to not have.
+        ⛔ A CHARACTER THE LAYOUT HAS NO KEY FOR IS INSERTED IN ITS PLACE, and
+        the keys around it are still pressed, as Playwright's `keyboard.type`
+        and pyppeteer's do, character by character. Its key is never faked:
+        typing something with no key would mean sending `code: ""`, which is
+        exactly the defect this file exists to not have. Until 44.39.0 the
+        whole text was refused here, and of the three callers one inserted
+        all of it without a key event ("café" typed with no keystroke at all)
+        and two raised to the user: `page.type("#i", "café")` failed.
 
         ⛔ THE UNIT IS IN THE NAME, AND IT IS A FIX. The parameter used to be
         called `delay` and was handed straight to `time.sleep`, which takes
@@ -325,13 +328,6 @@ class Keyboard:
         links them. The persona is per-session and is what runs when nobody
         asks for anything.
         """
-        for ch in text:
-            if ch not in LAYOUT_CLOSURE:
-                raise UnknownKey(
-                    "%r has no key on the US layout: use `insert_text`, "
-                    "which goes through `Page.insertText` and does not "
-                    "fake a keypress." % ch)
-
         plan = self._plan(text)
         # ⛔ A RUN OF CHARACTERS THAT ONLY EXIST WITH SHIFT IS TYPED UNDER ONE
         # SHIFT, the way a hand types `ABC` or `!!` (B270). Shift goes down
@@ -356,7 +352,10 @@ class Keyboard:
             if starts[i]:
                 self.down("Shift")
                 _sleep_ms(lead_at[i])
-            self.press(ch, dwell_ms=dwell_ms)
+            if ch in LAYOUT_CLOSURE:
+                self.press(ch, dwell_ms=dwell_ms)
+            else:
+                self.insert_text(ch)
             if i == len(text) - 1:
                 if ends[i]:
                     _sleep_ms(lag_at[i])

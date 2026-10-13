@@ -108,20 +108,24 @@ def test_the_layout_carries_the_keycode_WITHOUT_location():
     assert LAYOUT_CLOSURE["Shift"]["code"] == "ShiftLeft"
 
 
-def test_a_key_that_does_not_exist_gets_REJECTED_instead_of_coming_out_empty():
+def test_a_key_that_does_not_exist_never_comes_out_empty():
     """⛔ The defect that made `keyboard.py` come into being.
 
     The first `_type` sent `code: ""` and `keyCode: 0` for every character:
     the event goes out, the text goes in, the action succeeds and the tests
     pass, while the page reads an empty `event.code` on a key that every
-    real Firefox names.
+    real Firefox names. A character with no key is inserted instead
+    (`Page.insertText`, the only event it sends), and pressing it is refused.
     """
     from invisible_core.juggler.keyboard import Keyboard, UnknownKey
     c = _Fake()
     t = Keyboard(c, "S", acts=PageActs(1))
+    t.type(chr(0x4E2D))
+    assert c.events == [{"text": chr(0x4E2D)}], (
+        "a character with no key went out as something other than its text")
     with pytest.raises(UnknownKey):
-        t.type(chr(0x4E2D))
-    assert not c.events, "sent an event for a key that does not exist"
+        t.press(chr(0x4E2D))
+    c.events.clear()
     t.press("a")
     assert all(e["code"] and e["keyCode"] for e in c.events), (
         "an event came out with empty code or keyCode: %r" % c.events)

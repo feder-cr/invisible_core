@@ -33,7 +33,7 @@ from . import _pacing
 from .connection import ReplyTimeout
 from .deadline import Deadline
 from .injected import ContextDestroyed, EvaluationError
-from .keyboard import BUTTON_MASK, Keyboard, UnknownKey
+from .keyboard import BUTTON_MASK, Keyboard
 
 #: The states a pointer action requires, in the order Playwright asks for
 #: them. `stable` is the most expensive (waits two frames) and comes first
@@ -1412,18 +1412,13 @@ class Actions:
         key that every real Firefox names. The real layout lives in
         `keylayout.py`, generated from the bundle.
 
-        ⛔ And characters the US layout doesn't have (an ideogram, an
-        emoji) are not TYPED: `keyboard.type` rejects them and they go to
-        `Page.insertText`. Faking a keypress for a key that doesn't exist
-        is exactly the defect above, in a form that's harder to see.
+        ⛔ And a character the US layout doesn't have (an ideogram, an emoji)
+        is not TYPED: `Keyboard.type` inserts it in its place and presses the
+        keys around it. Until 44.39.0 the keyboard refused the whole text and
+        this function inserted ALL of it, so "café" went in without a single
+        key event.
         """
-        try:
-            if delay_ms is None:
-                self.keyboard.type(text)
-            else:
-                self.keyboard.type(text, delay_ms=delay_ms)
-        except UnknownKey:
-            # ⛔ ONLY this exception, and not `Exception`: a transport
-            # error mid-typing would get swallowed and the text
-            # reinserted from scratch, doubling what had already gone in.
-            self.keyboard.insert_text(text)
+        if delay_ms is None:
+            self.keyboard.type(text)
+        else:
+            self.keyboard.type(text, delay_ms=delay_ms)
