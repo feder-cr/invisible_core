@@ -146,6 +146,12 @@ class Frame:
                 return nav, url
         return None
 
+    @property
+    def started_loading(self) -> bool:
+        """Whether a navigation has ever started in this frame. A
+        `loading=lazy` iframe below the fold never starts one."""
+        return bool(self._started)
+
 
 class Lifecycle:
     """Follows a single page. Hooks into a `Connection`'s events."""
@@ -476,6 +482,17 @@ class Lifecycle:
         # others at event intake, and all of them live in `f.states`.
         return state in f.states
 
+    def _children_reached(self, f: Frame, state: str) -> bool:
+        """`state` on every descendant of `f` that has started loading:
+        pyppeteer's `_checkLifecycle`, with puppeteer's later rule that a
+        frame which never started (a lazy iframe out of view) is not waited
+        for, since it never would be."""
+        for c in self.frames.values():
+            if c.parent == f.id and c.started_loading and not (
+                    self._reached(c, state) and self._children_reached(c, state)):
+                return False
+        return True
+
     def mark(self, frame_id: str) -> "NavigationMark":
         """Where `frame_id` stands now: its current navigation, and how many
         same-document navigations it has had. Taken BEFORE a command that
@@ -490,10 +507,14 @@ class Lifecycle:
 
     def wait_for_new_navigation(self, frame_id: str, since: "NavigationMark",
                                 state: Optional[str] = "load",
-                                timeout: Optional[float] = 30.0) -> Optional[str]:
+                                timeout: Optional[float] = 30.0, *,
+                                replaced: str = "raise",
+                                children: bool = False) -> Optional[str]:
         """Wait for the frame's next navigation after the mark `since`, and
         answer with the id of the new document's navigation, or None when the
-        next navigation stayed in the same document.
+        next navigation stayed in the same document. `replaced` and `children`
+        as in `wait_for_state`; with `replaced="follow"` the answer is the
+        document the wait ended on.
 
         ⛔ A SAME-DOCUMENT NAVIGATION ENDS THE WAIT AT ONCE (B290). History has
         same-document entries - a hash, a `pushState` - and going to one starts
@@ -546,9 +567,12 @@ class Lifecycle:
                         % (frame_id, timeout, since.navigation))
                 self._cv.wait(deadline.slice(0.05))
         if state is not None:
-            self.wait_for_state(frame_id, state, navigation=navigation,
-                                timeout=deadline.left(floor=0.05),
-                                began=since.interruptions)
+            landed = self.wait_for_state(frame_id, state, navigation=navigation,
+                                         timeout=deadline.left(floor=0.05),
+                                         began=since.interruptions,
+                                         replaced=replaced, children=children)
+            if replaced == "follow":
+                return landed
         return navigation
 
     def wait_for_navigation_start(self, frame_id: str, previous: Optional[str],
@@ -602,13 +626,24 @@ class Lifecycle:
                         timeout: Optional[float] = 30.0,
                         after: Optional[int] = None,
                         url: Optional[str] = None,
-                        began: Optional[int] = None) -> None:
-        """Wait until `frame_id` reaches `state`. Given a `navigation`, only
-        once its document has committed, and from then on on whichever
+                        began: Optional[int] = None,
+                        replaced: str = "raise",
+                        children: bool = False) -> Optional[str]:
+        """Wait until `frame_id` reaches `state`, and answer with the
+        navigation of the document it was reached on. Given a `navigation`,
+        only once its document has committed, and from then on on whichever
         document the frame carries; replaced by another before it committed,
         it is `NavigationInterrupted` at once (`Frame.outcome`, which says what
         `after` is), in upstream Playwright's words, naming `url`, the address
         asked for, when the caller has one.
+
+        `replaced="follow"` waits on the replacing document instead, as
+        pyppeteer's `NavigatorWatcher` does: it completes on whatever document
+        the frame carries once one has committed after the wait began, and
+        never says interrupted. `children=True` wants `state` on every
+        descendant frame that has started loading too, its `_checkLifecycle`
+        (`Lifecycle._children_reached`). Both are the defaults' opposite only
+        for the client that asks.
 
         `began`: the count of events that ended this page's waits, read
         before the command whose outcome this waits for (a `NavigationMark`
@@ -617,6 +652,9 @@ class Lifecycle:
         if state not in STATES:
             raise ValueError("unknown state: %r (the states are %s)"
                               % (state, ", ".join(STATES)))
+        if replaced not in ("raise", "follow"):
+            raise ValueError("replaced is 'raise' or 'follow', not %r"
+                             % (replaced,))
         deadline = Deadline(timeout)
         with self._cv:
             if began is None:
@@ -629,7 +667,8 @@ class Lifecycle:
                         raise NavigationError(f.aborted[navigation])
                     if navigation is not None:
                         decided = f.outcome(navigation, after)
-                        if decided is not None and decided[0] != navigation:
+                        if (decided is not None and decided[0] != navigation
+                                and replaced == "raise"):
                             raise NavigationInterrupted(
                                 'Navigation %s is interrupted by another '
                                 'navigation to "%s"'
@@ -655,8 +694,10 @@ class Lifecycle:
                     # document count too). A document from BEFORE ours is
                     # not ours, no matter what it says.
                     if ((navigation is None or decided is not None)
-                            and self._reached(f, state)):
-                        return
+                            and self._reached(f, state)
+                            and (not children
+                                 or self._children_reached(f, state))):
+                        return f.navigation
                 self._check_alive("%s on frame %s" % (state, frame_id), began)
                 if deadline.passed():
                     if f is None:
@@ -683,9 +724,13 @@ class Lifecycle:
     # ── navigation ──────────────────────────────────────────────────────────
     def goto(self, url: str, *, frame_id: Optional[str] = None,
               until: Optional[str] = "load", timeout: Optional[float] = 30.0,
-              referer: Optional[str] = None) -> dict:
+              referer: Optional[str] = None, replaced: str = "raise",
+              children: bool = False) -> dict:
         """Navigate `frame_id` (the main frame when not given) to `url` and
-        wait for `until` on its document, one of the `STATES`.
+        wait for `until` on its document, one of the `STATES`. `replaced` and
+        `children` as in `wait_for_state`; the answer's `landed` is the
+        navigation of the document the wait ended on, `navigationId` the one
+        the command started.
 
         `until=None` waits for no state: it returns once the engine has
         started the navigation, its reply to `Page.navigate`. That is
@@ -741,10 +786,14 @@ class Lifecycle:
                     self._cv.wait(deadline.left())
                 return {"navigationId": None, "url": self.frames[fid].url}
 
+        landed = nav
         if until is not None:
-            self.wait_for_state(fid, until, navigation=nav, timeout=timeout,
-                                after=after, url=url, began=began)
-        return {"navigationId": nav, "url": self.frames[fid].url}
+            landed = self.wait_for_state(fid, until, navigation=nav,
+                                         timeout=timeout, after=after, url=url,
+                                         began=began, replaced=replaced,
+                                         children=children)
+        return {"navigationId": nav, "landed": landed,
+                "url": self.frames[fid].url}
 
     # ── inspection ──────────────────────────────────────────────────────────
     def frame_tree(self) -> dict:
