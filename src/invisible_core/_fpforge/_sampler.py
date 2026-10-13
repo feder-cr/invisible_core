@@ -348,14 +348,16 @@ def derive_media_enumeration_ms(seed: int) -> int:
     no longer asks the host's audio stack for its speakers, whose time it was:
     measured 287-351 ms on our Windows build and 15-38 ms on our Linux one.
 
-    The range is one machine's, said as such: retail Windows Firefox 151 on the
-    machine of the measurement took 249-278 ms on the first enumeration of a
-    session, and 251-255 ms with fake devices too (2026-10-13). The spread
-    around it is the variation between machines' audio stacks, which is real
-    and not measured, kept narrow for that reason. Its own stream, like
-    `derive_max_touch_points`, so it moves no other field.
+    The range is what retail Windows Firefox 151 took on the machine of the
+    measurement, in the two states that machine was found in on the same day
+    (2026-10-13): 249-278 ms on the first enumeration of a session in the
+    morning (251-255 with fake devices), 510-637 ms in the evening (510-521
+    with fake devices), eight runs each, no change to Firefox in between. The
+    time is the audio stack's, so it moves with the host's state, and one
+    machine already spans 240-640; other machines are not measured. Its own
+    stream, like `derive_max_touch_points`, so it moves no other field.
     """
-    return random.Random("media_enumeration_ms:%d" % int(seed)).randint(240, 290)
+    return random.Random("media_enumeration_ms:%d" % int(seed)).randint(240, 640)
 
 
 class Forge:

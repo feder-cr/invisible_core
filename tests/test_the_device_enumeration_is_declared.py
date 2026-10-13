@@ -4,8 +4,8 @@
 With fake cameras and microphones the only part of an enumeration that went
 to the machine was its speakers, through the host's audio stack, and the first
 enumeration took the host's time: 287-351 ms on our Windows build, 15-38 on
-our Linux one, 249-278 on retail Windows (251-255 with fake devices too). The
-core declares it per session (`zoom.stealth.media.enumeration_ms`) and the
+our Linux one, and on retail Windows 249-278 or 510-637 depending on the state
+of the same machine. The core declares it per session (`zoom.stealth.media.enumeration_ms`) and the
 engine answers after it without asking the host, from firefox-45.
 """
 from __future__ import annotations
@@ -24,9 +24,11 @@ def _prefs(seed, **pin):
     return translate_profile_to_prefs(generate_profile(seed, pin=pin or None))
 
 
-def test_the_time_is_one_machine_s_range_and_one_seed_keeps_it():
+def test_the_time_is_the_measured_range_and_one_seed_keeps_it():
     values = [_prefs(seed)[PREF] for seed in range(1, 120)]
-    assert all(240 <= v <= 290 for v in values), values
+    assert all(240 <= v <= 640 for v in values), values
+    # Both states of the measured machine are drawn, not only one.
+    assert min(values) < 300 and max(values) > 500, (min(values), max(values))
     assert len(set(values)) > 20, "every session the same time is a constant"
     assert _prefs(7)[PREF] == _prefs(7)[PREF]
 
