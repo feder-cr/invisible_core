@@ -191,3 +191,37 @@ def test_a_goto_another_goto_stops_is_interrupted_by_it():
     assert isinstance(first.get("error"), NavigationInterrupted), first
     assert str(first["error"]) == ('Navigation to "%s" is interrupted by another '
                                    'navigation to "%s"' % (first_url, second_url))
+
+
+def _goto_following(after):
+    engine = _Engine(after=after)
+    life = Lifecycle(engine, S)
+    engine.emit([("Page.frameAttached", {"frameId": F}), _started("nav-6"),
+                 _committed("nav-6", OLD), _DCL])
+    return life.goto(NEW, frame_id=F, until="domcontentloaded", timeout=5,
+                     replaced="follow")
+
+
+_ABORT = ("Page.navigationAborted", {"frameId": F, "navigationId": OURS,
+                                     "errorText": "NS_BINDING_ABORTED"})
+
+
+def test_following_a_navigation_the_page_stopped_by_navigating_waits_on_its_navigation():
+    """pyppeteer's NavigatorWatcher never says interrupted: a document that
+    took the frame in place of the one asked for is waited on in its place.
+    From firefox-46 the engine reports the stop the page's own navigation
+    causes ([B302]), after that navigation has started (the engine reports a
+    stop at the end of its task); following, that is the document to wait on,
+    not an error."""
+    landed = "http://127.0.0.1/landed"
+    out = _goto_following([_request(OURS, NEW), _started(OURS), _started("nav-8"),
+                           _ABORT, _committed("nav-8", landed), _DCL])
+    assert out["landed"] == "nav-8" and out["url"] == landed
+
+
+def test_following_a_navigation_stopped_with_nothing_in_its_place_raises():
+    """document.open(), window.stop(): nothing takes the frame, and waiting on
+    would be the timeout."""
+    with pytest.raises(NavigationError) as e:
+        _goto_following([_request(OURS, NEW), _started(OURS), _ABORT])
+    assert str(e.value) == "NS_BINDING_ABORTED"

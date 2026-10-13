@@ -697,7 +697,16 @@ class Lifecycle:
                 f = self.frames.get(frame_id)
                 decided = None
                 if f is not None:
-                    if navigation and navigation in f.aborted:
+                    if (navigation and navigation in f.aborted
+                            and replaced == "follow"
+                            and f.navigation != navigation):
+                        # Following: another navigation took the frame after
+                        # ours was stopped (the page's own, which the engine
+                        # starts before it reports the stop, [B302]), and
+                        # pyppeteer's NavigatorWatcher waits on the document
+                        # in its place; `outcome` finds it once it commits.
+                        pass
+                    elif navigation and navigation in f.aborted:
                         # Stopped by a navigation the caller asked for after
                         # this one (`asked`, the frame's count when this one
                         # was sent): upstream Playwright calls that
