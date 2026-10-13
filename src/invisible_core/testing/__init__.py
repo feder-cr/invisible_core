@@ -31,6 +31,9 @@ extraction reverted later:
     Related, not duplicated, and NOT extracted - a shared abstraction over four
     partial overlaps would fit none of them.
 
+`testing.e2e` is the clients' full e2e run against a binary, one copy for the
+three of them since 44.39.0; each keeps `scripts/run_e2e.py` as its entry.
+
 MAINTAINER-FACING. Nothing here is part of the product's public API and nothing
 in `invisible_core/` imports it. It carries no third-party dependency, so it
 costs a wheel almost nothing; that is the price of the consumers being able to
