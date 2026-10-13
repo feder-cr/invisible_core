@@ -135,7 +135,8 @@ class Keyboard:
     remember that Shift is down between Shift's keydown and `a`'s.
     """
 
-    def __init__(self, connection, session: str, persona=None, *, acts):
+    def __init__(self, connection, session: str, persona=None, *, acts,
+                 latency=None):
         self.c = connection
         self.session = session
         self.modifiers: set = set()
@@ -167,6 +168,10 @@ class Keyboard:
         #: required for the reason given there: a default is how a page would
         #: quietly be numbered as the first one again.
         self.acts = acts
+        #: How long after its birth each key reaches the page
+        #: (`_behaviour.InputLatency`, [B299]), drawn per key event; None
+        #: sends none, and the engine hands the key over as it is born.
+        self.latency = latency
 
     # ── the resolution ──────────────────────────────────────────────────────
     def describe(self, key: str) -> dict:
@@ -223,11 +228,11 @@ class Keyboard:
         # it twice. Read in `RawKeyboardImpl3.keydown`.
         if text == "\r":
             text = ""
-        self.c.send("Page.dispatchKeyEvent",
+        self.c.send("Page.dispatchKeyEvent", self._born(
                      {"type": "keydown", "key": d["key"], "code": d["code"],
                       "keyCode": d["keyCodeWithoutLocation"],
                       "location": d["location"], "repeat": repeat,
-                      "text": text},
+                      "text": text}),
                      session=self.session, timeout=None)
 
     def up(self, key: str) -> None:
@@ -237,14 +242,23 @@ class Keyboard:
         self.pressed.discard(d["code"])
         # ⛔ NO `text` here: Juggler raises `keyup does not support text
         # option` and typing dies halfway through.
-        self.c.send("Page.dispatchKeyEvent",
+        self.c.send("Page.dispatchKeyEvent", self._born(
                      {"type": "keyup", "key": d["key"], "code": d["code"],
                       "keyCode": d["keyCodeWithoutLocation"],
-                      "location": d["location"], "repeat": False},
+                      "location": d["location"], "repeat": False}),
                      session=self.session, timeout=None)
         if d["code"] in self._implicit_shift:
             self._implicit_shift.discard(d["code"])
             self.up("Shift")
+
+    def _born(self, params: dict) -> dict:
+        """A key event's parameters with its latency, when the session has
+        one: the engine creates the event, waits that long and hands it
+        over, so the page's handler runs after the event's birth as it does
+        for a real keyboard ([B299])."""
+        if self.latency is not None:
+            params["latency"] = self.latency.draw(self.acts.next("latency"))
+        return params
 
     def press(self, key: str, *, dwell_ms: Optional[float] = None) -> None:
         """`press("a")`, `press("Enter")`, `press("Control+Shift+KeyA")`.

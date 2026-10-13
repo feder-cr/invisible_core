@@ -93,6 +93,7 @@ __all__ = [
     "Step",
     "PointerPersona",
     "TypingPersona",
+    "InputLatency",
     "plan_typing",
     "plan_hesitation",
     "plan_click",
@@ -543,6 +544,42 @@ class TypingPersona:
         and `plan_hesitation` both draw through here.
         """
         return _log_normal(rng, self.hesitation_median_ms, self.hesitation_sigma)
+
+
+@dataclass(frozen=True)
+class InputLatency:
+    """How long after its birth in the system an input event reaches a page's
+    handler, on one session's machine. Drawn from the session seed on a tag of
+    its own, so no number of the two hands moves.
+
+    ⛔ AN INPUT EVENT IS BORN BEFORE THE PAGE SEES IT, and a page can read by
+    how much: its `timeStamp` against `performance.now()` in the handler.
+    Measured on retail Windows Firefox 151 with a real keyboard and mouse
+    (2026-10-13): 3 to 18 ms. A synthesized event was born at its dispatch,
+    so the two were equal, and a tracker that keeps only events from the past
+    dropped 25 keys of 30 [B299]. The engine takes the number per event
+    (`latency` on `Page.dispatchKeyEvent` and `Page.dispatchMouseEvent`, from
+    firefox-45): a key is born and handed over that much later, a mouse
+    event is born that much earlier.
+    """
+
+    seed: int
+    median_ms: float
+    sigma: float
+
+    @classmethod
+    def from_seed(cls, seed: int) -> "InputLatency":
+        r = _rng(seed, "input-latency")
+        return cls(seed=seed, median_ms=r.uniform(6.0, 11.0),
+                   sigma=r.uniform(0.30, 0.45))
+
+    def draw(self, nonce: int) -> float:
+        """One event's latency, in milliseconds: the median's log-normal
+        spread, kept between 2 and 30 ms, which is 95% of the draws between
+        about 3 and 19."""
+        r = _rng(self.seed, "latency", nonce)
+        return round(_clamp(_log_normal(r, self.median_ms, self.sigma),
+                            2.0, 30.0), 2)
 
 
 def plan_click(persona: PointerPersona, clicks: int = 1,

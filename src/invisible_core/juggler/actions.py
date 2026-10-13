@@ -140,6 +140,10 @@ class Actions:
         self.session_seed = session_seed
         self.pointer_persona = None
         self.typing_persona = None
+        #: How long after its birth each input event reaches the page
+        #: (`InputLatency`, [B299]); None, as the two hands, when humanising
+        #: is off.
+        self.input_latency = None
         #: ⛔ THE ONE POINTER PATH THE CLIENT CANNOT DRAW. The client's cursor
         #: wrapper does "approach THEN act", which is every action except the
         #: drag: there the movement IS the action, it happens with the button
@@ -151,9 +155,10 @@ class Actions:
         self.motion_budget_s = motion_budget_s
         if session_seed is not None:
             from ..seedmix import sub_seed
-            from ._behaviour import PointerPersona, TypingPersona
+            from ._behaviour import InputLatency, PointerPersona, TypingPersona
             self.pointer_persona = PointerPersona.from_seed(session_seed)
             self.typing_persona = TypingPersona.from_seed(session_seed)
+            self.input_latency = InputLatency.from_seed(session_seed)
             try:
                 from ._motion import CursorMotion
             except Exception:  # noqa: BLE001 - see `_cursor`: motion is optional
@@ -173,7 +178,7 @@ class Actions:
         #: "Shift is down" between a `down` and the next key, and
         #: `Shift+a` would type `a`.
         self.keyboard = Keyboard(connection, session, self.typing_persona,
-                                 acts=acts)
+                                 acts=acts, latency=self.input_latency)
         #: The last pointer position. Used by the wheel and by drag and
         #: drop, which start from where the mouse IS - not from 0,0.
         self.position = (0.0, 0.0)
@@ -1391,6 +1396,10 @@ class Actions:
         if self._landing_target is not None:
             frame_id, element = self._landing_target
             p["landsOn"] = {"frameId": frame_id, "objectId": element}
+        # Born a few ms before the page sees it, as a system's event is
+        # (`InputLatency`, [B299]); the engine keeps the births in order.
+        if self.input_latency is not None:
+            p["latency"] = self.input_latency.draw(self.acts.next("latency"))
         # No bound of its own: the engine answers once the page has handled
         # the event, and bounds that wait itself (`_awaitInputHandled`, 5 s).
         answer = self.c.send("Page.dispatchMouseEvent", p,
