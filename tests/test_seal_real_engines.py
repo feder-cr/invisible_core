@@ -28,6 +28,7 @@ import pytest
 
 from invisible_core.seal import (
     DEFAULT_ENTRY_REL,
+    JUGGLER_DIR_REL,
     JUGGLER_ENTRIES,
     EngineMismatch,
     load_seal,
@@ -90,12 +91,16 @@ def real_cache_dirs() -> list[Path]:
 # ------------------------------------------------- the provenance-only refusal
 
 def test_stock_firefox_of_the_sealed_base_version_is_refused_on_provenance(tmp_path):
-    """This is the test that makes the marker earn its place.
+    """The seal is built to agree with the stock tree on Version AND BuildID, so
+    both ini checks pass. The tree is still refused on provenance.
 
-    The seal is built to agree with the stock tree on Version AND BuildID, so
-    both ini checks pass. The tree is still refused, because a stock build
-    carries neither `stealthfox` nor `zoom.stealth` in any of the four juggler
-    entries while ours carry one in each.
+    Until firefox-47 the refusal was the marker's: a stock Playwright build
+    ships its juggler where ours was (chrome/juggler/) and carries neither
+    `stealthfox` nor `zoom.stealth` in it. Since firefox-47 ours lives in
+    modules/juggler/, because a page probes a registered chrome package by name,
+    so a stock tree has no juggler where we look and is refused on that before
+    the marker is read. The marker's own refusal is the synthetic case
+    test_seal_engine_guard.py::test_a_loose_stock_tree_is_still_refused_on_provenance.
     """
     trees = stock_firefox_trees()
     if not trees:
@@ -113,15 +118,15 @@ def test_stock_firefox_of_the_sealed_base_version_is_refused_on_provenance(tmp_p
     # A naive Version-only check, and even a Version+BuildID check, passes here:
     assert ident.version == seal.upstream_version
     assert ident.build_id == seal.build_id
-    assert ident.juggler_present is True, "a stock Playwright build does ship juggler"
+    assert ident.juggler_present is False, (
+        f"a stock Playwright build has a juggler under {JUGGLER_DIR_REL}/, where only ours is")
     assert ident.marked_entries == 0, (
         f"a stock build must score 0/{len(JUGGLER_ENTRIES)} on the provenance marker; "
         f"got {ident.marked_entries} at {entry}")
 
     with pytest.raises(EngineMismatch) as exc:
         verify_engine(entry, seal, source=f"binary_path={entry}")
-    msg = str(exc.value).lower()
-    assert "marker" in msg or "patched" in msg, str(exc.value)
+    assert f"no {JUGGLER_DIR_REL}/" in str(exc.value), str(exc.value)
 
 
 def test_every_stock_firefox_on_this_machine_is_refused_by_the_packaged_seal(tmp_path):

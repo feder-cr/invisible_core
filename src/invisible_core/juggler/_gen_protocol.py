@@ -15,7 +15,8 @@ the closed-world way. The default is therefore a binary, not a source
 path.
 
 ⛔ AND JUGGLER LIVES IN TWO LAYOUTS: `omni.ja` (Windows) and the loose tree
-`./chrome/juggler/` (Linux). Both are tried, and it says which one
+`./modules/juggler/` (Linux; `./chrome/juggler/` until firefox-47, when it
+stopped being a chrome package). Both are tried, and it says which one
 answered.
 
 ⛔ THIS DOES NOT REPLACE `protocol_drift_check.py`. That gate compares
@@ -37,8 +38,8 @@ import re
 import sys
 import zipfile
 
-JAR_MEMBER = "chrome/juggler/content/protocol/Protocol.js"
-LOOSE_TREE = "chrome/juggler/content/protocol/Protocol.js"
+JAR_MEMBER = "modules/juggler/protocol/Protocol.js"
+LOOSE_TREE = "modules/juggler/protocol/Protocol.js"
 
 # The combinators that `Protocol.js` actually uses. The vocabulary
 # declared in PrimitiveTypes.js has 11; these 8 are the ones exercised. If

@@ -26,6 +26,7 @@ import pytest
 
 from invisible_core.seal import (
     DEFAULT_ENTRY_REL,
+    JUGGLER_DIR_REL,
     JUGGLER_ENTRIES,
     EngineMismatch,
     SealError,
@@ -368,7 +369,7 @@ def test_an_asset_without_a_build_id_is_refused(tmp_path):
 # ------------------------------------- the unpacked juggler layout (defect 2)
 #
 # Measured on firefox-18: the two Linux archives contain ZERO *.ja members and
-# ship chrome/juggler/ loose in the tree (linux_release.sh tars the pre-package
+# ship the juggler loose in the tree (linux_release.sh tars the pre-package
 # dist/bin layout). A reader that only knows omni.ja refuses every Linux launch.
 
 def test_a_loose_juggler_tree_is_read_not_refused(tmp_path, five_legs):
@@ -396,10 +397,10 @@ def test_a_loose_stock_tree_is_still_refused_on_provenance(tmp_path, five_legs):
 
 
 def test_a_tree_with_neither_layout_is_refused(tmp_path, five_legs):
-    """No omni.ja AND no chrome/juggler/: the absence is not a pass."""
+    """No omni.ja AND no juggler directory: the absence is not a pass."""
     root = tmp_path / "empty"
     entry = build_leg_tree(root, "firefox", build_id=LEG_BUILDS["linux-x86_64"], omni=False)
-    shutil.rmtree(root / "chrome")
+    shutil.rmtree(root / JUGGLER_DIR_REL)
     ident = read_engine_identity(entry)
     assert ident.juggler_layout == "none" and ident.juggler_present is False
     with pytest.raises(EngineMismatch) as exc:
@@ -408,7 +409,7 @@ def test_a_tree_with_neither_layout_is_refused(tmp_path, five_legs):
 
 
 def test_the_refusal_for_that_tree_does_not_contradict_itself(tmp_path, five_legs):
-    """It used to say "no chrome/juggler/ in omni.ja" about a tree with no omni.ja.
+    """It used to say "no <juggler dir>/ in omni.ja" about a tree with no omni.ja.
 
     `where` was `"omni.ja" if layout != "loose" else "the unpacked tree"`, which
     folds THREE layout values into two branches, and `none` landed on the omni.ja
@@ -422,12 +423,12 @@ def test_the_refusal_for_that_tree_does_not_contradict_itself(tmp_path, five_leg
     """
     root = tmp_path / "neither"
     entry = build_leg_tree(root, "firefox", build_id=LEG_BUILDS["linux-x86_64"], omni=False)
-    shutil.rmtree(root / "chrome")
+    shutil.rmtree(root / JUGGLER_DIR_REL)
     assert read_engine_identity(entry).juggler_layout == "none"
     with pytest.raises(EngineMismatch) as exc:
         verify_engine(entry, five_legs, source="unit")
     juggler_lines = [ln for ln in str(exc.value).splitlines()
-                     if "chrome/juggler" in ln and "no " in ln]
+                     if JUGGLER_DIR_REL in ln and "no " in ln]
     assert juggler_lines, str(exc.value)
     for line in juggler_lines:
         assert "omni.ja" not in line.replace("no omni.ja", ""), (
