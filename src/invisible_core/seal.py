@@ -16,7 +16,7 @@ published firefox-18 archives on 2026-07-25:
     BuildID therefore lives in the PER-ASSET record: a client verifies the leg
     it actually runs. A single top-level build_id refused every launch that was
     not on the platform whose leg happened to be copied into it.
-  * The Linux archives ship the juggler UNPACKED at chrome/juggler/ and carry
+  * The Linux archives ship the juggler UNPACKED at modules/juggler/ and carry
     no omni.ja at all (scripts/linux_release.sh tars the pre-package dist/bin
     layout). Provenance is therefore read from EITHER layout, and a missing
     omni.ja is never by itself a pass: the marker count is what decides.
@@ -88,12 +88,16 @@ CORE_REINSTALL_HINT = "pip install --force-reinstall invisible-core"
 # The paths are the same in both layouts: inside omni.ja (win, macOS) and loose
 # under the tree root (linux), which is why one tuple serves both.
 JUGGLER_ENTRIES = (
-    "chrome/juggler/content/protocol/PageHandler.js",
-    "chrome/juggler/content/TargetRegistry.js",
-    "chrome/juggler/content/content/main.js",
-    "chrome/juggler/content/content/Runtime.js",
+    "modules/juggler/protocol/PageHandler.js",
+    "modules/juggler/TargetRegistry.js",
+    "modules/juggler/content/main.js",
+    "modules/juggler/content/Runtime.js",
 )
-JUGGLER_DIR_REL = "chrome/juggler"
+# Since firefox-47 the juggler is not a chrome package: it loads from
+# resource://gre/modules/juggler/, because a page probes a registered chrome
+# package by name (`new Worker("chrome://juggler/...")` returned on every build
+# until then and throws on retail; invisible_playwright #336).
+JUGGLER_DIR_REL = "modules/juggler"
 JUGGLER_MARKERS = (b"stealthfox", b"zoom.stealth")
 JUGGLER_MIN_MARKED = 2
 
@@ -411,7 +415,7 @@ class EngineIdentity:
     marked_entries: int
     notes: Tuple[str, ...]
     # "omni.ja" (win/macOS packaged tree), "loose" (the Linux archives, which
-    # ship chrome/juggler/ unpacked and no omni.ja), or "none".
+    # ship modules/juggler/ unpacked and no omni.ja), or "none".
     juggler_layout: str = "none"
 
 
@@ -492,7 +496,7 @@ def _read_juggler_provenance(root: Path) -> Tuple[str, bool, int, list]:
             notes.append(f"omni.ja unreadable ({e})")
             return ("omni.ja", False, 0, notes)
 
-    jdir = root / "chrome" / "juggler"
+    jdir = root / JUGGLER_DIR_REL
     if jdir.is_dir():
         marked = 0
         found = 0
@@ -602,7 +606,7 @@ def engine_problems(ident: EngineIdentity, seal: Seal,
     # Three layout values, three branches. This was
     #     "omni.ja" if ident.juggler_layout != "loose" else "the unpacked tree"
     # which folded `none` in with `omni.ja`, so a tree carrying NEITHER produced
-    # "no chrome/juggler/ in omni.ja" two lines below a note saying there is no
+    # "no <juggler dir>/ in omni.ja" two lines below a note saying there is no
     # omni.ja at all. The block contradicted itself, and this is the message a
     # user pastes into an issue when their engine will not drive.
     where = {

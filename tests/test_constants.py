@@ -32,7 +32,7 @@ def test_broken_versions_is_retired_but_still_importable():
     It used to carry firefox-8, published without the juggler and therefore
     undrivable by Playwright. Two things replaced it, and neither is a list:
     ensure_binary refuses every tag but the sealed one, and verify_engine refuses
-    any tree with no chrome/juggler/ on every route into a launch. The assertion
+    any tree with no juggler directory on every route into a launch. The assertion
     that a superseded build cannot be handed to a user now lives in
     invisible_core/tests/test_seal_engine_guard.py::test_tree_without_juggler_is_refused
     and invisible_core/tests/test_seal_cache.py
