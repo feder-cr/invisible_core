@@ -857,7 +857,8 @@ def test_the_existing_report_survives_the_new_command(env, capsys, tmp_path):
     out = capsys.readouterr().out
 
     assert "seal      : firefox-18" in out
-    assert "cache root:" in out
+    # Two roots since 47.41.0: the engine store and the machine's state.
+    assert "engines   :" in out and "state     :" in out
     assert "firefox-14_150.0.1_20260624073725: Firefox 150.0.1 build 20260624073725" in out
     assert "-> MISMATCH" in out
     assert "version 150.0.1, the seal says 151.0" in out

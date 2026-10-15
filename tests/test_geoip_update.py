@@ -30,8 +30,10 @@ import invisible_core._geoip_db as dl
 
 @pytest.fixture
 def cache(tmp_path, monkeypatch):
-    """Point the cache at tmp_path and clear the env override."""
-    monkeypatch.setattr(dl, "cache_root", lambda: tmp_path)
+    """Point the machine's state at tmp_path and clear the env override. The
+    variable, not a monkeypatch of a helper: the GeoIP database lives under
+    the state root (download.state_dir), whatever the engine store says."""
+    monkeypatch.setenv("INVISIBLE_PLAYWRIGHT_CACHE_DIR", str(tmp_path))
     monkeypatch.delenv("STEALTHFOX_GEOIP_MMDB", raising=False)
     return tmp_path
 

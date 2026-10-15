@@ -12,12 +12,14 @@ Precedence (see ``resolve_session_timezone``):
                                   egress IP; without a proxy, from the host's
                                   own public IP. This is the default.
 
-On failure:
-    with a proxy    → raise       a foreign proxy paired with the host TZ is
-                                  the precise ``timezone_mismatch`` signal, so
-                                  we fail loudly rather than fall back silently.
-    without a proxy → "" (host)   the host TZ is a safe default, so a transient
-                                  lookup failure must not break the launch.
+On failure: raise, with a proxy or without one. "auto" promises the zone of
+the egress, and the success path resolves it from the egress IP even without a
+proxy BECAUSE the host's zone can be wrong: a server kept in UTC whose public
+address is in another country. Until 47.41.0 a failure without a proxy fell
+back to the host's zone in silence - offline, or a GeoIP database that could
+not be written (invisible_dots, a read-only cache) - which handed exactly that
+server a zone contradicting its address, with no warning. The error names the
+cause and the remedy: an explicit IANA zone, or a writable cache.
 """
 from __future__ import annotations
 
@@ -915,15 +917,11 @@ def prepare_session_geo(
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
         lat, lon = _coordinate(ip)
         zone = ip_to_timezone(ip, _geoip_database(ip, proxy_set))
-    except Exception as exc:
-        if proxy_set:
-            raise  # fail-early behind a proxy (timezone_mismatch trap)
-        # No proxy: host TZ is a safe fallback. The language reuses the address
-        # if discovery got that far, and otherwise does NOT ask the network a
-        # second time for the same answer: it falls back, naming this failure.
-        return SessionGeo("", None, locale=_decide(
-            locale, egress_ip=ip, proxy=proxy, may_discover=False,
-            discovery_failure=exc))
+    except GeoTimezoneError:
+        raise  # "auto" could not be honoured: see the module docstring
+    except Exception as exc:  # noqa: BLE001
+        raise GeoTimezoneError(f"the egress timezone could not be resolved: {exc}",
+                               kind="geoip_unavailable") from exc
     # ⛔ IT CARRIES `ip`, NOT `egress_ip`. Behind a proxy they are the same
     # value; without one, `ip` is the fact this round-trip has just paid for
     # and `egress_ip` is `None`. Carrying the second meant throwing the
@@ -935,7 +933,8 @@ def prepare_session_geo(
 def resolve_session_timezone(
     timezone: str, proxy: Optional[Dict[str, str]]
 ) -> str:
-    """Map the user's ``timezone`` setting to a concrete IANA zone (or ``""``).
+    """Map the user's ``timezone`` setting to a concrete IANA zone, or raise
+    GeoTimezoneError when "auto" cannot be resolved (never the host's zone).
 
     Timezone-only path (no WebRTC side effects): an explicit IANA zone wins and
     triggers NO network call; ``""``/``"auto"`` resolve from the egress IP. The
@@ -949,10 +948,6 @@ def resolve_session_timezone(
         return tz  # explicit IANA wins - no egress lookup
 
     proxy_set = _proxy_is_set(proxy)
-    try:
-        ip = discover_egress_ip(proxy if proxy_set else None)
-        return ip_to_timezone(ip, _geoip_database(ip, proxy_set))
-    except Exception:
-        if proxy_set:
-            raise  # fail-early behind a proxy (timezone_mismatch trap)
-        return ""  # no proxy: host TZ is a safe fallback
+    # A failure raises, with a proxy or without one: see the module docstring.
+    ip = discover_egress_ip(proxy if proxy_set else None)
+    return ip_to_timezone(ip, _geoip_database(ip, proxy_set))

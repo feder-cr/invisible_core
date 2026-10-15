@@ -51,8 +51,19 @@ def _parse_owner_repo(template: str) -> tuple[str, str]:
     return m.group(1), m.group(2)
 
 
+#: The variable that puts the engine store somewhere of its own.
+ENGINE_DIR_ENV = "INVISIBLE_PLAYWRIGHT_ENGINE_DIR"
+#: The machine's own state under cache_root(), by directory name. One list,
+#: read by state_dir() and by iter_cached_engines(): when the engine store is
+#: the cache root (the default) these must never be taken for engine trees.
+#: Until 47.41.0 only geoip/ was excluded, so `doctor` listed fonts/ as an
+#: unreadable engine and clear_cache(everything=True) removed it.
+STATE_DIRS = ("geoip", "fonts")
+
+
 def cache_root() -> Path:
-    """Directory where all cached binaries live.
+    """The machine's WRITABLE state: geoip/ and fonts/ (STATE_DIRS), and the
+    engine store too unless INVISIBLE_PLAYWRIGHT_ENGINE_DIR puts it elsewhere.
 
     INVISIBLE_PLAYWRIGHT_CACHE_DIR overrides it. It was set by the test suite
     and read nowhere, so "isolated" cache tests were operating on the
@@ -64,6 +75,32 @@ def cache_root() -> Path:
     return Path(platformdirs.user_cache_dir("invisible-playwright"))
 
 
+def engine_root() -> Path:
+    """Where sealed engine trees live: INVISIBLE_PLAYWRIGHT_ENGINE_DIR, or the
+    cache root when it is not set.
+
+    ⛔ TWO ROOTS BECAUSE THEY HOLD TWO KINDS OF THING. An engine tree is a fact
+    of a release: sealed, stamped when it is fetched, the same on every
+    machine, and never written again for the core that stamped it. geoip/ and
+    fonts/ are this machine's state: refreshed from the network, written at a
+    launch. One root for both made a read-only engine disk impossible - a host
+    that mounts the browser per release (invisible_dots) failed its first
+    launch on `Permission denied: .../cache/fonts` - and is why fonts/ was ever
+    mistaken for an engine. Only ensure_binary's download path writes here.
+    """
+    override = os.environ.get(ENGINE_DIR_ENV)
+    if override:
+        return Path(override)
+    return cache_root()
+
+
+def state_dir(name: str) -> Path:
+    """One directory of the machine's writable state (STATE_DIRS)."""
+    if name not in STATE_DIRS:
+        raise ValueError(f"{name!r} is not a state directory: {STATE_DIRS}")
+    return cache_root() / name
+
+
 def cache_dir_for_seal(seal: Seal | None = None) -> Path:
     """The cache directory IS the identity: tag, base version and BuildID.
 
@@ -71,7 +108,7 @@ def cache_dir_for_seal(seal: Seal | None = None) -> Path:
     different expectation is not rejected, it is never looked at.
     """
     s = seal or active_seal()
-    return cache_root() / f"{s.tag}_{s.upstream_version}_{s.build_id}"
+    return engine_root() / f"{s.tag}_{s.upstream_version}_{s.build_id}"
 
 
 def cache_dir_for_version(version: str | None = None) -> Path:
@@ -80,7 +117,7 @@ def cache_dir_for_version(version: str | None = None) -> Path:
     s = active_seal()
     if version is None or version == s.tag:
         return cache_dir_for_seal(s)
-    return cache_root() / version
+    return engine_root() / version
 
 
 def _resolve_asset_url(tag: str, asset_name: str) -> str:
@@ -432,7 +469,7 @@ def _extract(archive: Path, dst: Path) -> None:
 def _adopt_existing_cache(seal: Seal, asset: Asset, version_dir: Path) -> Path | None:
     """Use a tree that is already on disk if it IS the sealed build.
 
-    Covers every warm cache in the field (flat cache_root()/<tag> layout) and a
+    Covers every warm cache in the field (flat engine_root()/<tag> layout) and a
     content-keyed tree whose stamp was lost. Verified -> moved onto the
     content-keyed name and stamped, no download. Not verified -> left exactly
     where it is (it may belong to the other product) and the cold path runs.
@@ -440,7 +477,7 @@ def _adopt_existing_cache(seal: Seal, asset: Asset, version_dir: Path) -> Path |
     candidates = []
     if version_dir.exists():
         candidates.append(version_dir)
-    legacy = cache_root() / seal.tag
+    legacy = engine_root() / seal.tag
     if legacy != version_dir and legacy.exists():
         candidates.append(legacy)
 
@@ -501,7 +538,7 @@ def sweep_orphaned_tmp(root: Path | None = None, alive=None) -> list:
     or another, and is left alone. A reused pid keeps an orphan for one more
     round, which is the conservative side. Returns what was removed.
     """
-    root = root or cache_root()
+    root = root or engine_root()
     if not root.is_dir():
         return []
     alive = alive or psutil.pid_exists
@@ -597,10 +634,6 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
     version_dir = cache_dir_for_seal(seal)
     entry = version_dir / asset.entry_rel
 
-    # On every call, warm path included: a cache that never misses again would
-    # otherwise keep a killed download's tree for good.
-    sweep_orphaned_tmp(cache_root())
-
     stamp = read_stamp(version_dir)
     if stamp and stamp.get("seal_digest") == seal.digest and entry.exists():
         return verify_engine(entry, seal, source=f"cache hit {version_dir.name}", asset=asset)
@@ -609,8 +642,14 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
     if adopted is not None:
         return adopted
 
+    # Only a download writes into the engine store, so its housekeeping runs
+    # here and not on a warm launch: a store mounted read-only is never written
+    # by a launch whose tree is already stamped (it used to be swept on every
+    # call). A killed download's tree is removed by the next download, which is
+    # the only thing that could reuse its space.
+    sweep_orphaned_tmp(engine_root())
     url_archive = _resolve_asset_url(seal.tag, asset.name)
-    tmp_dir = cache_root() / f".tmp-{seal.tag}-{os.getpid()}"
+    tmp_dir = engine_root() / f".tmp-{seal.tag}-{os.getpid()}"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     with tempfile.TemporaryDirectory() as td:
         archive_path = Path(td) / asset.name
@@ -692,12 +731,12 @@ def engine_status(seal: Seal | None = None) -> tuple:
 
 
 def iter_cached_engines():
-    """Yield (dir, identity_or_None) for every engine tree in the cache root."""
-    root = cache_root()
+    """Yield (dir, identity_or_None) for every engine tree in the engine store."""
+    root = engine_root()
     if not root.exists():
         return
     for d in sorted(root.iterdir()):
-        if not d.is_dir() or d.name in {"geoip"} or d.name.startswith(".tmp-"):
+        if not d.is_dir() or d.name in STATE_DIRS or d.name.startswith(".tmp-"):
             continue
         ident = None
         for rel in set(BINARY_ENTRY_REL.values()):
@@ -722,7 +761,7 @@ def _tree_belongs_to_tag(name: str, tag: str) -> bool:
 
 
 def clear_cache(tag: str | None = None, *, everything: bool = False) -> list:
-    """Remove engine trees only. Never the cache root, never geoip/."""
+    """Remove engine trees only. Never a root, never a STATE_DIRS directory."""
     want = None if everything else (tag if tag is not None else active_seal().tag)
     removed = []
     for d, _ident in iter_cached_engines():

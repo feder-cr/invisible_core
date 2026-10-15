@@ -3,7 +3,7 @@
 SPLIT OUT OF download.py ON 2026-07-27. That file was 568 lines covering two
 subjects that share nothing but the words "download something from GitHub": the
 patched Firefox engine, and this. Measured before the split - the geoip half
-calls four helpers from the engine half (`cache_root`, `_github_token`,
+calls four helpers from the engine half (`state_dir`, `_github_token`,
 `_download_file`, `_extract`) and the engine half calls NOTHING here. A
 one-directional dependency across a seam is a seam.
 
@@ -34,13 +34,13 @@ from .constants import (
     GEOIP_REPO,
 )
 from .download import (DOWNLOAD_ATTEMPTS, _download_file, _extract,
-                       _github_token, cache_root)
+                       _github_token, state_dir)
 
 __all__ = ["ensure_geoip_mmdb", "geoip_mmdb_path"]
 
 
 def _geoip_root() -> Path:
-    return cache_root() / "geoip"
+    return state_dir("geoip")
 
 
 def _cached_geoip_mmdb() -> Path | None:

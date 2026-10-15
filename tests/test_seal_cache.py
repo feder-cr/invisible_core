@@ -133,6 +133,9 @@ def cache(tmp_path, monkeypatch):
     root = tmp_path / "Cache"
     root.mkdir()
     monkeypatch.setenv("INVISIBLE_PLAYWRIGHT_CACHE_DIR", str(root))
+    # The engine store follows the cache root only while this is unset; a
+    # machine that sets it would otherwise point these tests at its real store.
+    monkeypatch.delenv(download.ENGINE_DIR_ENV, raising=False)
     got = cache_root()
     assert got == root, f"cache_root() ignored the override: {got}"
     assert str(got).startswith(str(tmp_path)), "refusing to run against a real cache"
@@ -242,24 +245,49 @@ def test_stamped_matching_tree_is_served_with_no_network(cache, no_network, seal
     assert ensure_binary(seal=sealed) == entry
 
 
-def test_an_orphaned_tmp_tree_is_swept_on_the_warm_path(cache, no_network, sealed):
-    """A download killed during extraction left its `.tmp-<tag>-<pid>` tree in
-    the cache root for good, because only a fresh download by the SAME pid
-    ever removed it. The sweep runs on every call, warm path included, so a
-    cache that never misses again is still cleaned. The pid is one that has
-    provably exited: a child spawned and waited for here."""
-    version_dir = cache_dir_for_seal(sealed)
-    entry = build_tree(version_dir)
-    stamp_for(version_dir, sealed)
+def _orphan(cache, sealed):
+    """The `.tmp-<tag>-<pid>` tree a download killed during extraction leaves,
+    under a pid that has provably exited: a child spawned and waited for here."""
     gone = subprocess.Popen([sys.executable, "-c", "pass"])
     gone.wait()
     orphan = cache / (".tmp-%s-%d" % (sealed.tag, gone.pid))
     (orphan / "firefox").mkdir(parents=True)
     (orphan / "firefox" / "omni.ja").write_bytes(b"half-extracted")
+    return orphan
 
+
+def test_an_orphaned_tmp_tree_is_swept_by_the_next_download(cache, no_network, sealed):
+    """Only a fresh download by the SAME pid used to remove its tree, so a
+    killed download's tree stayed for good. The next download sweeps it before
+    it writes anything: the network is reached (the cold path), the orphan is
+    gone."""
+    orphan = _orphan(cache, sealed)
+
+    with pytest.raises(NetworkTouched):
+        ensure_binary(seal=sealed)
+
+    assert not orphan.exists(), "the orphan survived a download"
+
+
+def test_a_warm_launch_writes_nothing_in_the_engine_store(cache, no_network, sealed):
+    """A store mounted read-only (one disk per release, invisible_dots) must
+    serve a tree the same core stamped without a single write. Until 47.41.0
+    the orphan sweep ran on every call, warm path included: here an orphan is
+    left in place, and nothing in the store changes, not a name, a size or a
+    modification time."""
+    version_dir = cache_dir_for_seal(sealed)
+    entry = build_tree(version_dir)
+    stamp_for(version_dir, sealed)
+    orphan = _orphan(cache, sealed)
+
+    def snapshot():
+        return sorted((p.relative_to(cache).as_posix(), p.stat().st_size, p.stat().st_mtime_ns)
+                      for p in cache.rglob("*"))
+
+    before = snapshot()
     assert ensure_binary(seal=sealed) == entry
-
-    assert not orphan.exists(), "the orphan survived a warm ensure_binary"
+    assert snapshot() == before
+    assert orphan.exists()
 
 
 # --------------------------------------------------------- adoption and D5
