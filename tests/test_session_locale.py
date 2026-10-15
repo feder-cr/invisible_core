@@ -229,10 +229,10 @@ def test_prepare_session_geo_takes_an_explicit_language_without_a_lookup(monkeyp
     assert asked["locale"] == 0
 
 
-def test_a_failed_discovery_is_not_asked_again_for_the_language(monkeypatch, capsys):
-    """Without a proxy a failed discovery keeps the host timezone, and the
-    language falls back at once, naming the failure, instead of asking the
-    network the same question a second time in the same launch."""
+def test_a_failed_discovery_is_not_asked_again_and_the_launch_says_why(monkeypatch):
+    """Without a proxy a failed discovery used to keep the host timezone (until
+    47.41.0). It raises now, naming the failure, and the network is still asked
+    once: nothing retries the same question in the same launch."""
     count = {"n": 0}
 
     def boom(proxy=None, **kw):
@@ -240,13 +240,9 @@ def test_a_failed_discovery_is_not_asked_again_for_the_language(monkeypatch, cap
         raise _geo.GeoTimezoneError("offline for the test")
 
     monkeypatch.setattr(_geo, "discover_egress_ip", boom)
-    geo = _geo.prepare_session_geo("auto", None)
-    assert geo.timezone == ""
-    assert geo.locale == decide_session_locale("en-US")
+    with pytest.raises(_geo.GeoTimezoneError, match="offline for the test"):
+        _geo.prepare_session_geo("auto", None)
     assert count["n"] == 1
-    err = capsys.readouterr().err
-    assert "could not resolve the session locale" in err
-    assert "offline for the test" in err, "the cause must be named"
 
 
 # ──────────────────────────────────────────────────────────────────────

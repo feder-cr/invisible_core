@@ -239,6 +239,9 @@ CONTRACT = {
     },
     "invisible_core.download": {
         "cache_root", "ensure_binary",
+        # The engine store's root, printed by the wrapper's `version` beside the
+        # state root since 47.41.0 (the two roots of [B311]).
+        "engine_root",
         # ⛔ LEFT on 2026-08-28 with the deletion of Node. `_download_file`,
         # `_parse_checksums` and `_sha256_file` had come in on 2026-08-24 for
         # `invisible_playwright._node`, which downloaded from nodejs.org the Node

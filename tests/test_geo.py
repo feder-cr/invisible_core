@@ -346,14 +346,18 @@ def test_resolve_direct_proxy_resolves_via_host(stub_egress):
 
 
 @pytest.mark.unit
-def test_resolve_no_proxy_failure_falls_back_to_host(monkeypatch):
-    # Without a proxy, a lookup failure must NOT break the launch → host TZ ("").
+def test_resolve_no_proxy_failure_raises_instead_of_using_the_host_zone(monkeypatch):
+    # "auto" is the zone of the egress. Until 47.41.0 a failure without a proxy
+    # returned "" (the host's zone) in silence, which on a server kept in UTC
+    # contradicts its own address; it raises now, as behind a proxy.
     def boom(proxy=None, **kw):
         raise GeoTimezoneError("offline")
 
     monkeypatch.setattr(_geo, "discover_egress_ip", boom)
-    assert resolve_session_timezone("auto", None) == ""
-    assert resolve_session_timezone("", None) == ""
+    with pytest.raises(GeoTimezoneError):
+        resolve_session_timezone("auto", None)
+    with pytest.raises(GeoTimezoneError):
+        resolve_session_timezone("", None)
 
 
 @pytest.mark.unit

@@ -95,7 +95,7 @@ from ._pin import CORE_NAME as CORE_DIST
 from ._pin import format_command
 from ._pin import pin_from_requirements
 from ._version import __version__ as DERIVED_CORE_VERSION
-from .download import (cache_root, clear_cache, engine_status, ensure_binary,
+from .download import (cache_root, clear_cache, engine_root, engine_status, ensure_binary,
                        iter_cached_engines)
 from .seal import (JUGGLER_ENTRIES, SUPPORTED_SEAL_SCHEMA, active_seal,
                    engine_problems, read_engine_identity, resource_root)
@@ -420,7 +420,8 @@ def _cmd_doctor(a) -> int:
     print(f"seal      : {seal.describe()}  [{seal.origin}]")
     ok, detail = engine_status(seal)
     print(f"engine    : {'OK' if ok else 'PROBLEM'} - {detail}")
-    print(f"cache root: {cache_root()}")
+    print(f"engines   : {engine_root()}")
+    print(f"state     : {cache_root()}")
     for d, ident in iter_cached_engines():
         if ident is None:
             print(f"  {d.name}: no readable engine (incomplete tree?)")

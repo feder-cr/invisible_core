@@ -259,7 +259,7 @@ def cached_font_manifest_path(manifest: str) -> "Path | None":
         return None
     raw = manifest.encode("ascii")
     digest = hashlib.sha256(raw).hexdigest()[:16]
-    d = cache_root() / "fonts"
+    d = state_dir("fonts")
     d.mkdir(parents=True, exist_ok=True)
     out = d / f"bundle-fonts-{digest}.list"
     if not out.is_file() or out.stat().st_size != len(raw):
@@ -304,7 +304,7 @@ def write_font_manifest(profile_dir: "str | os.PathLike[str]",
 # Imported here rather than at module scope: download.py imports seal.py,
 # and pulling that chain in at import time would make launch.py the heavy
 # module in a package whose consumers import it first.
-from .download import cache_root
+from .download import state_dir
 
 from .process import SessionToken
 
