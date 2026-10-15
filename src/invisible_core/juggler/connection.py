@@ -368,6 +368,17 @@ class Connection(EventListeners):
 
     def __init__(self, to_browser, from_browser, process=None):
         super().__init__()
+        # ⛔ EACH END HAS ONE OWNER, AND IS RELEASED ONCE. These are fd
+        # NUMBERS, and the process hands a released number to the next pipe it
+        # opens - another browser's, when one process drives several. Through
+        # 47.39.0 `close` closed both numbers on every call, and the Playwright
+        # driver calls it twice (`Browser.close` and the server's shutdown
+        # hook), so the second call closed another Firefox's pipe and its
+        # launch died with EISDIR. The write end belongs to `_write_lock`:
+        # `close` releases it there and sets it to -1, and `_write` refuses a
+        # -1. The read end belongs to the reader thread, the only one that
+        # reads it: it releases it when the pipe ends, which is what closing
+        # the write end makes the browser do.
         self._to_browser = to_browser      # where WE write
         self._from_browser = from_browser  # where WE read
         self._process = process
@@ -428,6 +439,9 @@ class Connection(EventListeners):
                 ready.set()
             # And the waits on an event, which no reply would ever wake.
             self.announce_closed()
+            # The read end is this thread's alone (see `__init__`).
+            fd, self._from_browser = self._from_browser, -1
+            os.close(fd)
 
     def _deliver(self, raw: bytes) -> None:
         try:
@@ -533,8 +547,7 @@ class Connection(EventListeners):
         dispatch. [B230])
         """
         if self._closed:
-            raise TargetClosedError("the pipe is closed: %s%s"
-                                    % (self._error or "", self._why_closed()))
+            raise self._closed_error()
         with self._lock:
             self._next_id += 1
             msg_id = self._next_id
@@ -559,7 +572,11 @@ class Connection(EventListeners):
         msg: dict = {"id": msg_id, "method": method, "params": params or {}}
         if session:
             msg["sessionId"] = session
-        self._write(msg)
+        if not self._write(msg):
+            # `close` ran between the check above and the write.
+            with self._lock:
+                self._pending.pop(msg_id, None)
+            raise self._closed_error()
 
         arrived = ready.wait(timeout)
         if not arrived:
@@ -631,10 +648,19 @@ class Connection(EventListeners):
             msg["sessionId"] = session
         self._write(msg)
 
-    def _write(self, msg: dict) -> None:
+    def _closed_error(self) -> TargetClosedError:
+        return TargetClosedError("the pipe is closed: %s%s"
+                                 % (self._error or "", self._why_closed()))
+
+    def _write(self, msg: dict) -> bool:
+        """Writes one message; False, writing nothing, once `close` has
+        released the write end (see `__init__`)."""
         data = json.dumps(msg).encode("utf-8") + NUL
         with self._write_lock:
+            if self._to_browser < 0:
+                return False
             os.write(self._to_browser, data)
+        return True
 
     def close(self, timeout: float = 5.0) -> None:
         """Closes the pipe and waits for the browser to exit on its own.
@@ -650,13 +676,18 @@ class Connection(EventListeners):
         read returns zero, and Juggler shuts the browser down. Closing
         the pipe IS the exit command. `terminate()` remains only as a
         last resort, for whatever did not die on its own.
+
+        Idempotent, and only the first call releases anything: a session has
+        more than one way out, and a later call must not close a number that
+        now belongs to another pipe. The read end is not closed here at all:
+        the reader releases it when the browser, told by this close, ends the
+        pipe (see `__init__`).
         """
         self._closed = True
-        for fd in (self._to_browser, self._from_browser):
-            try:
+        with self._write_lock:
+            fd, self._to_browser = self._to_browser, -1
+            if fd >= 0:
                 os.close(fd)
-            except OSError:
-                pass
         p = self._process
         if not p:
             return
@@ -687,11 +718,24 @@ class _WindowsProcess:
 
     STILL_ACTIVE = 259
 
+    # ⛔ THE HANDLE IS HELD FOR THE OBJECT'S WHOLE LIFE AND CLOSED ONCE, in
+    # `__del__`. Through 47.39.0 `poll` closed it as soon as the process had
+    # exited and zeroed the field, with nothing ordering that against another
+    # thread: `Connection.close` polls in a loop, the Playwright driver calls it
+    # from two ways out, and Windows reuses handle values - so a second poller
+    # could close, and `terminate` could kill, whatever had been given that
+    # value since. An open handle to an exited process costs nothing and keeps
+    # every call here pointing at this process.
     def __init__(self, handle: int, pid: int, stdout) -> None:
         self._handle = handle
         self.pid = pid
         self.stdout = stdout
         self.returncode: Optional[int] = None
+        # Resolved now: `__del__` may run while the interpreter exits, when
+        # an import inside it raises instead of closing anything.
+        from ctypes import wintypes
+        close, as_handle = self._kernel32().CloseHandle, wintypes.HANDLE
+        self._close_handle = lambda h: close(as_handle(h))
 
     def _kernel32(self):
         import ctypes
@@ -707,9 +751,12 @@ class _WindowsProcess:
                                       ctypes.byref(code)) and \
                     code.value != self.STILL_ACTIVE:
                 self.returncode = int(code.value)
-                k32.CloseHandle(wintypes.HANDLE(self._handle))
-                self._handle = 0
         return self.returncode
+
+    def __del__(self) -> None:
+        handle, self._handle = self._handle, 0
+        if handle:
+            self._close_handle(handle)
 
     def wait(self, timeout: Optional[float] = None) -> int:
         from ctypes import wintypes
@@ -1036,6 +1083,9 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     # PREVIOUS engine - all to recover information the browser had already
     # written and nobody had kept.
     if p.poll() is not None:
+        # No Connection will own these two ends: released here, once.
+        os.close(to_browser)
+        os.close(from_browser)
         coda = "\n".join(("    " + r) for r in output.tail()) or "    (nothing)"
         raise RuntimeError(
             "the browser exited during startup, before the protocol could be "
