@@ -347,7 +347,7 @@ _PIN_GROUPS = {
              "cleartype_pixel_structure", "cleartype_rendering_mode",
              "freetype_gamma", "freetype_contrast"},
 }
-_PIN_TOP = {"dark_theme"}
+_PIN_TOP = {"dark_theme", "branding"}
 
 
 def _validate_pin_key(key: str) -> None:
@@ -387,6 +387,8 @@ class Profile:
     webgl: WebGLProfile
     font: FontProfile
     dark_theme: bool
+    # The branding set a page reads; one of BRANDING_SETS.
+    branding: str
     # Bayesian browsing-history: list of {name, category, cookie_profile}
     # dicts sampled from data/browsing_pool.json with per-class CPT. Used
     # by _recaptcha_seed.py to build a coherent cookie pre-seed when the
@@ -448,6 +450,7 @@ _PIN_TO_RAW = {
     "hardware.generics": "generics",
     "hardware.accessibility_overrides": "accessibility_overrides",
     "dark_theme": "dark_theme",
+    "branding": "branding",
 }
 
 #: The rasterisation parameters a Windows machine reports, and the FreeType
@@ -521,6 +524,21 @@ STORAGE_ENABLED = True
 #: An ordinary desktop with no accessibility overrides turned on.
 ACCESSIBILITY_OVERRIDES = False
 
+#: The branding sets the engine ships, i.e. every value a page can be shown
+#: under chrome://branding/content/ and resource://usercontext-content/branding/.
+#: A page reads that branding - the about dialog's stylesheet rules, the
+#: wordmarks' boxes, the images' sizes - and it tells a build from the retail
+#: one. The domain is finite and known, so by engine rule 7 which set a page
+#: sees is declared here and nowhere else (`zoom.stealth.branding.set`); the
+#: engine serves it and refuses to launch without it. The names are the
+#: directories of browser/branding/stealth/jar.mn in the Firefox tree.
+BRANDING_SETS = ("official", "unofficial")
+
+#: "official" is the retail brand, byte for byte, which is what a page
+#: expects of a Firefox. "unofficial" is the brand an unbranded build ships,
+#: and a page can tell it from the retail one.
+BRANDING = "official"
+
 #: The generic-family table a Windows Firefox resolves to. Moved out of C++ on
 #: 2026-08-09; the engine keeps the same rows compiled in as the floor for a
 #: browser launched without this package.
@@ -567,6 +585,21 @@ FONT_MONOSPACE_SIZE = 13     # Firefox ships 13 on Windows, 12 in its Unix block
 FONT_ALPHA_LADDER = (
     0, 18, 35, 53, 70, 87, 104, 121, 138, 153, 169, 185, 200, 215, 230, 243, 255,
 )
+
+
+def _branding_set(value: Any) -> str:
+    """The declared branding set, refused here if the engine does not ship it.
+
+    The engine would refuse too, but only once a page asked for the branding,
+    as a failed load; here it is the caller who passed the value that hears
+    about it, at the moment it is passed.
+    """
+    if value not in BRANDING_SETS:
+        raise ValueError(
+            f"branding {value!r} is not a set the engine ships. "
+            f"Known sets: {list(BRANDING_SETS)}."
+        )
+    return str(value)
 
 
 def _apply_pins_to_raw(raw: Dict[str, Any], pin: Dict[str, Any]) -> Dict[str, Any]:
@@ -705,6 +738,7 @@ def generate_profile(
     raw.setdefault("storage_enabled", STORAGE_ENABLED)
     raw.setdefault("generics", GENERICS)
     raw.setdefault("accessibility_overrides", ACCESSIBILITY_OVERRIDES)
+    raw.setdefault("branding", BRANDING)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
         # The sampler derives screen_avail_h from the DEFAULT taskbar, and the
@@ -783,6 +817,7 @@ def generate_profile(
             freetype_contrast=int(raw["font_freetype_contrast"]),
         ),
         dark_theme=bool(raw["dark_theme"]),
+        branding=_branding_set(raw["branding"]),
         browsing_history=list(raw.get("browsing_history") or []),
         _raw=raw,
     )

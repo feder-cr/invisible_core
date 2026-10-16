@@ -1512,6 +1512,18 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
 # StealthGenericWindowsFont).
 
 
+def _apply_branding(prefs: Dict[str, Any], profile: Profile) -> None:
+    """The branding set a page reads (Profile.branding).
+
+    Read by the engine where chrome://branding/content/ and
+    resource://usercontext-content/branding/ resolve
+    (netwerk/protocol/res/StealthBranding.h), and required by its declaration
+    gate: with the engine on and this missing, the browser refuses to launch
+    rather than serve the build's own brand.
+    """
+    prefs["zoom.stealth.branding.set"] = profile.branding
+
+
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     """Dark mode, plus the Windows colours palette when the theme is light."""
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
@@ -1744,6 +1756,7 @@ def translate_profile_to_prefs(
     _apply_rasterisation(prefs, profile)
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
+    _apply_branding(prefs, profile)
     _apply_locale(prefs, SessionLocale.of(locale))
     _apply_timezone(prefs, timezone)
     _apply_render_seed(prefs, profile)
