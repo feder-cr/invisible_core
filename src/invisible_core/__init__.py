@@ -46,7 +46,7 @@ from ._cookies import persona_cookies
 from ._headless import DESKTOP_ENV, make_virtual_display
 from ._proxy import configure_proxy, parse_proxy, ProxyEndpoint
 from .config import get_default_args, get_default_stealth_prefs
-from .session_seed import resolve_session_seed
+from .session_seed import record_session_seed, resolve_session_seed
 from .constants import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
 # The engine identity. Every consumer imports these three from
 # `invisible_core.seal` already; naming them here makes the package's declared
@@ -79,6 +79,7 @@ except PackageNotFoundError:
     __install_record_version__ = ""
 
 __all__ = [
+    "record_session_seed",
     "resolve_session_seed",
     # fingerprint generation
     "generate_profile",
