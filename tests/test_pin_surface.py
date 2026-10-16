@@ -63,7 +63,7 @@ def _perturb(key, value, profile):
         return next(c for c in classes if c != value)
     if key == "branding":
         # A closed domain like the GPU class: the perturbation is another set
-        # the engine ships, since a made-up name is refused at birth.
+        # this package ships, since a made-up name is refused at birth.
         from invisible_core._fpforge.profile import BRANDING_SETS
         return next(b for b in BRANDING_SETS if b != value)
     if isinstance(value, bool):

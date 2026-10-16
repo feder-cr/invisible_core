@@ -1,6 +1,7 @@
 """Public dataclass surface for fpforge."""
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass, field, replace as _dc_replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -389,7 +390,7 @@ class Profile:
     font: FontProfile
     dark_theme: bool
     # The branding a page reads: one of BRANDING_SETS, or the absolute path
-    # of a directory holding exactly BRANDING_FILES.
+    # of a zip archive holding exactly BRANDING_FILES at its root.
     branding: str
     # Bayesian browsing-history: list of {name, category, cookie_profile}
     # dicts sampled from data/browsing_pool.json with per-class CPT. Used
@@ -531,8 +532,8 @@ ACCESSIBILITY_OVERRIDES = False
 #: package of Firefox 151 answers. A page reads them (the about dialog's
 #: stylesheet rules, the wordmarks' boxes, the images' sizes) and they tell a
 #: build from the retail one, so by engine rule 7 they live here and nowhere
-#: else: the engine keeps no stealth copy and serves the declared directory
-#: (`zoom.stealth.branding.dir`, netwerk/protocol/res/StealthBranding.h).
+#: else: the engine keeps no stealth copy and serves the declared archive
+#: (`zoom.stealth.branding.archive`, netwerk/protocol/res/StealthBranding.h).
 BRANDING_FILES = (
     "about.png", "about-logo.png", "about-logo.svg", "about-logo@2x.png",
     "about-wordmark.svg", "about-logo-private.png", "about-logo-private@2x.png",
@@ -541,10 +542,14 @@ BRANDING_FILES = (
     "aboutDialog.css",
 )
 
-#: The sets this package ships, in invisible_core/branding/<set>/files/:
+#: The sets this package ships, as invisible_core/branding/<set>/branding.zip:
 #: "official" is the retail brand byte for byte, "unofficial" the one an
-#: unbranded build ships. Each set's licence sits beside `files/`, not in it,
-#: because whatever is in `files/` a page can load.
+#: unbranded build ships. An ARCHIVE, not a directory: the engine serves it as
+#: jar:, the channel class the retail serves its own branding with out of
+#: omni.ja, and a file: channel is told apart by a page (it keeps the type a
+#: loader suggests, so a PNG loaded as a script or a stylesheet LOADS). Each
+#: set's licence sits beside the archive, not in it, because whatever is in the
+#: archive a page can load.
 BRANDING_SETS = ("official", "unofficial")
 
 #: The retail brand, which is what a page expects of a Firefox.
@@ -598,32 +603,38 @@ FONT_ALPHA_LADDER = (
 )
 
 
-def branding_dir(branding: str) -> Path:
-    """The directory holding the files of a declared branding."""
+def branding_archive(branding: str) -> Path:
+    """The zip archive holding the files of a declared branding."""
     if branding in BRANDING_SETS:
-        return Path(__file__).resolve().parent.parent / "branding" / branding / "files"
+        return (Path(__file__).resolve().parent.parent / "branding" / branding
+                / "branding.zip")
     return Path(branding)
 
 
-def check_branding_dir(directory: Path) -> None:
-    """Refuse a branding directory that is not exactly BRANDING_FILES.
+def check_branding_archive(archive: Path) -> None:
+    """Refuse a branding archive that is not exactly BRANDING_FILES at its root.
 
     A missing file is a load a page sees fail where the retail answers; an extra
-    one is a file a page can load where the retail has none. Either is a
-    difference from the browser the session claims to be, so neither is
-    accepted.
+    one, or one under a directory, is a file a page can load where the retail
+    has none. Either is a difference from the browser the session claims to be,
+    so neither is accepted; the engine refuses the same archives.
     """
-    if not directory.is_dir():
-        raise ValueError(f"branding directory {str(directory)!r} does not exist")
-    present = {p.name for p in directory.iterdir()}
-    not_files = sorted(n for n in present if not (directory / n).is_file())
-    missing = sorted(set(BRANDING_FILES) - present)
-    extra = sorted(present - set(BRANDING_FILES))
-    if not_files or missing or extra:
+    if not archive.is_file():
+        raise ValueError(f"branding archive {str(archive)!r} does not exist")
+    try:
+        with zipfile.ZipFile(archive) as z:
+            names = z.namelist()
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"branding archive {str(archive)!r} is not a zip: {exc}") from exc
+    nested = sorted(n for n in names if "/" in n)
+    duplicated = sorted({n for n in names if names.count(n) > 1})
+    missing = sorted(set(BRANDING_FILES) - set(names))
+    extra = sorted(set(names) - set(BRANDING_FILES) - set(nested))
+    if nested or duplicated or missing or extra:
         raise ValueError(
-            f"branding directory {str(directory)!r} must hold exactly the "
-            f"{len(BRANDING_FILES)} branding files: missing {missing}, extra "
-            f"{extra}, not regular files {not_files}")
+            f"branding archive {str(archive)!r} must hold exactly the "
+            f"{len(BRANDING_FILES)} branding files at its root: missing {missing}, "
+            f"extra {extra}, not at the root {nested}, duplicated {duplicated}")
 
 
 def _branding(value: Any) -> str:
@@ -638,10 +649,10 @@ def _branding(value: Any) -> str:
     if not isinstance(value, (str, Path)) or not Path(value).is_absolute():
         raise ValueError(
             f"branding {value!r} is neither a set this package ships "
-            f"({list(BRANDING_SETS)}) nor the absolute path of a directory")
-    directory = Path(value).resolve()
-    check_branding_dir(directory)
-    return str(directory)
+            f"({list(BRANDING_SETS)}) nor the absolute path of a zip archive")
+    archive = Path(value).resolve()
+    check_branding_archive(archive)
+    return str(archive)
 
 
 def _apply_pins_to_raw(raw: Dict[str, Any], pin: Dict[str, Any]) -> Dict[str, Any]:
