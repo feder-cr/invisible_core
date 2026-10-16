@@ -443,8 +443,16 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
     # The frame's birth is announced too, since 41.36.0: the frame tree is the
     # lifecycle's, and a client builds its frames from these announcements.
     # networkidle2 (at most two in flight) is born with it on a silent page.
-    assert heard == [("frameAttached", "F1"), ("networkidle", "F1"),
-                     ("networkidle2", "F1")], heard
+    # ⛔ In no fixed order between the two: networkidle's quiet counts from the
+    # last request event, networkidle2's from the last moment more than two
+    # were in flight, which is earlier, so networkidle2 can fall due first and
+    # the settle timer, set for the nearer deadline, announces it first (as
+    # pyppeteer's networkidle2 comes before networkidle0). On a loaded runner
+    # the two instants are milliseconds apart: main's CI on 946d1b8 heard
+    # networkidle2 first, while every other run heard them in one settle.
+    assert heard[0] == ("frameAttached", "F1"), heard
+    assert sorted(heard[1:]) == [("networkidle", "F1"), ("networkidle2", "F1")], heard
+    announced = list(heard)
     assert "networkidle" in v.frames["F1"].states
 
     # A later request does not take it back (Playwright fires it once per
@@ -454,8 +462,7 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
     events(v, ("Page.navigationStarted", {"frameId": "F1", "navigationId": "N1"}))
     assert "networkidle" not in v.frames["F1"].states
     assert "networkidle2" not in v.frames["F1"].states
-    assert heard == [("frameAttached", "F1"), ("networkidle", "F1"),
-                     ("networkidle2", "F1")], heard
+    assert heard == announced, heard  # born once: nothing announced again
 
 
 def test_a_same_document_goto_answers_after_the_engine_reports_it():
