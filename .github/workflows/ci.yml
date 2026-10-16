@@ -174,8 +174,8 @@ jobs:
   # failing it - and a skipped context is not a red context, it is a context
   # that never arrives. That would be the same hole, one floor up.
   # THE BRANDING A PAGE READS IS THIS PACKAGE'S, so it is judged here. The
-  # engine serves branding/<set>/files from the directory the profile declares
-  # (zoom.stealth.branding.dir), and the official set must read, to a page, as
+  # engine serves branding/<set>/branding.zip, the archive the profile declares
+  # (zoom.stealth.branding.archive), and the official set must read, to a page, as
   # the retail Firefox the seal claims: before this job the only comparison ran
   # in the engine's release, so a release of this package that changed a file of
   # the set was judged by nobody. The judge is the engine's own code, not a copy:
@@ -225,7 +225,7 @@ jobs:
       - name: the official set reads as the retail
         run: |
           python engine/scripts/stock_parity.py --branding-against-retail \
-            src/invisible_core/branding/official/files \
+            src/invisible_core/branding/official/branding.zip \
             "${{ steps.seal.outputs.version }}" ${{ steps.seal.outputs.platforms }}
 
   gate:

@@ -23,7 +23,7 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
-from ._fpforge.profile import branding_dir, voices_for
+from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
 from ._webgl_personas import persona_for, render_noise_seed
 from ._proxy import configure_proxy
@@ -1519,13 +1519,14 @@ def _apply_branding(prefs: Dict[str, Any], profile: Profile) -> None:
     resource://usercontext-content/branding/ resolve
     (netwerk/protocol/res/StealthBranding.h), and required by its declaration
     gate: with the engine on and this missing, the browser refuses to launch
-    rather than serve the build's own brand. The value is the directory the files
-    are in, wherever this package is installed: the engine grants its content
-    processes read access to exactly that directory, so every way of launching -
-    the three clients and a caller writing these prefs itself - declares the same
-    thing and gets the same branding.
+    rather than serve the build's own brand. The value is the zip archive the
+    files are in, wherever this package is installed: the engine serves it as
+    jar:, the channel class the retail serves its branding with, and grants its
+    content processes read access to exactly that file, so every way of
+    launching - the three clients and a caller writing these prefs itself -
+    declares the same thing and gets the same branding.
     """
-    prefs["zoom.stealth.branding.dir"] = branding_dir(profile.branding).as_uri() + "/"
+    prefs["zoom.stealth.branding.archive"] = branding_archive(profile.branding).as_uri()
 
 
 def _apply_voices(prefs: Dict[str, Any], profile: Profile,
