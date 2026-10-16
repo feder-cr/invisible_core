@@ -23,7 +23,7 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
-from ._fpforge.profile import branding_dir
+from ._fpforge.profile import branding_dir, voices_for
 from ._locale import SessionLocale
 from ._webgl_personas import persona_for, render_noise_seed
 from ._proxy import configure_proxy
@@ -1299,7 +1299,6 @@ def _apply_hardware(prefs: Dict[str, Any], profile: Profile) -> None:
     #: `pointer` / `any-pointer` pair exists to express.
     prefs["zoom.stealth.pointer.primary"]     = 2 | 4
     prefs["zoom.stealth.pointer.all"]         = (2 | 4 | 1) if touch else (2 | 4)
-    prefs["zoom.stealth.voices.list"]         = profile.hardware.voices
     prefs["media.navigator.streams.fake"]     = bool(profile.hardware.fake_media_devices)
     #: [B300] With the fake devices the enumeration is declared: the engine
     #: takes this long on the first one and does not ask the host's audio
@@ -1527,6 +1526,20 @@ def _apply_branding(prefs: Dict[str, Any], profile: Profile) -> None:
     thing and gets the same branding.
     """
     prefs["zoom.stealth.branding.dir"] = branding_dir(profile.branding).as_uri() + "/"
+
+
+def _apply_voices(prefs: Dict[str, Any], profile: Profile,
+                  session_locale: SessionLocale) -> None:
+    """The speechSynthesis voices, for the session's language (B315).
+
+    A machine that browses in a language has that language's voices: an it-IT
+    session declaring only American ones contradicts itself in one
+    `speechSynthesis.getVoices()`. The table is `_fpforge.profile.VOICES_BY_LANGUAGE`;
+    an explicit `hardware.voices` pin wins over it. Never empty: the engine's
+    declaration gate refuses an empty list rather than ask the OS registry.
+    """
+    prefs["zoom.stealth.voices.list"] = (
+        profile.hardware.voices or voices_for(session_locale.languages[0]))
 
 
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -1762,7 +1775,9 @@ def translate_profile_to_prefs(
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
     _apply_branding(prefs, profile)
-    _apply_locale(prefs, SessionLocale.of(locale))
+    session_locale = SessionLocale.of(locale)
+    _apply_locale(prefs, session_locale)
+    _apply_voices(prefs, profile, session_locale)
     _apply_timezone(prefs, timezone)
     _apply_render_seed(prefs, profile)
     _apply_webrtc_host_ip(prefs, profile)
