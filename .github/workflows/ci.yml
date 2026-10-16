@@ -173,8 +173,63 @@ jobs:
   # `if: always()` because without it a failed `needs` SKIPS this job instead of
   # failing it - and a skipped context is not a red context, it is a context
   # that never arrives. That would be the same hole, one floor up.
+  # THE BRANDING A PAGE READS IS THIS PACKAGE'S, so it is judged here. The
+  # engine serves branding/<set>/branding.zip, the archive the profile declares
+  # (zoom.stealth.branding.archive), and the official set must read, to a page, as
+  # the retail Firefox the seal claims: before this job the only comparison ran
+  # in the engine's release, so a release of this package that changed a file of
+  # the set was judged by nobody. The judge is the engine's own code, not a copy:
+  # scripts/stock_parity.py of the source commit the seal pins, with its
+  # observable(), against Mozilla's complete MAR of the sealed upstream version
+  # for every platform the seal ships.
+  branding-is-retail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: what the seal pins
+        id: seal
+        run: |
+          python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json
+          seal = json.load(open("src/invisible_core/seal.json", encoding="utf-8"))
+          # The seal's (platform, arch) of each asset, in the names of
+          # archive.mozilla.org; an unknown pair is refused, never skipped.
+          mar = {("win32", "x86_64"): "win64", ("linux", "x86_64"): "linux-x86_64",
+                 ("linux", "arm64"): "linux-aarch64"}
+          pairs = sorted({(a["platform"], a["arch"]) for a in seal["assets"].values()})
+          unknown = [p for p in pairs if p not in mar]
+          if unknown:
+              raise SystemExit(f"the seal ships {unknown}, which have no retail MAR name here")
+          print(f"source={seal['source_commit']}")
+          print(f"version={seal['upstream_version']}")
+          print("platforms=" + " ".join(mar[p] for p in pairs))
+          EOF
+      - name: the engine's page-surface gate, at the sealed commit
+        run: |
+          git init -q engine
+          cd engine
+          git remote add origin https://github.com/feder-cr/firefox_antidetect_patch
+          git sparse-checkout set --no-cone /scripts/ /python/mozbuild/
+          git fetch -q --depth 1 --filter=blob:none origin "${{ steps.seal.outputs.source }}"
+          git checkout -q FETCH_HEAD
+          grep -qs "^def judge_branding" scripts/stock_parity.py || {
+            echo "the engine the seal pins (${{ steps.seal.outputs.source }}) predates the declared branding (P60): its gate cannot judge this set"
+            exit 1; }
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/stealth-retail
+          key: retail-mar-${{ steps.seal.outputs.version }}
+      - name: the official set reads as the retail
+        run: |
+          python engine/scripts/stock_parity.py --branding-against-retail \
+            src/invisible_core/branding/official/branding.zip \
+            "${{ steps.seal.outputs.version }}" ${{ steps.seal.outputs.platforms }}
+
   gate:
-    needs: [tests, msix-host, arm64-host]
+    needs: [tests, msix-host, arm64-host, branding-is-retail]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -183,6 +238,8 @@ jobs:
           echo "tests: ${{ needs.tests.result }}"
           echo "msix-host: ${{ needs.msix-host.result }}"
           echo "arm64-host: ${{ needs.arm64-host.result }}"
+          echo "branding-is-retail: ${{ needs.branding-is-retail.result }}"
           test "${{ needs.tests.result }}" = "success"
           test "${{ needs.msix-host.result }}" = "success"
           test "${{ needs.arm64-host.result }}" = "success"
+          test "${{ needs.branding-is-retail.result }}" = "success"

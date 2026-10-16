@@ -34,10 +34,10 @@ without the lifecycle ownership.
 """
 from __future__ import annotations
 
-import secrets
 from typing import Any, Dict, List, Optional, Union
 
 from ._fpforge import generate_profile
+from .session_seed import resolve_session_seed
 from .prefs import compose_session_prefs
 
 
@@ -131,7 +131,7 @@ def get_default_stealth_prefs(
         Dict ready to pass as ``firefox_user_prefs=`` to
         ``playwright.firefox.launch()`` or ``launch_persistent_context()``.
     """
-    resolved_seed = int(seed) if seed is not None else secrets.randbits(31)
+    resolved_seed = resolve_session_seed(seed)
     # No `fixed_gpu_class=`: it used to be passed here as
     # `forced_gpu_class(resolved_seed)`, which restated what `generate_profile`
     # already derives from the persona it chooses. Passing it made this a second
