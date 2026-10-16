@@ -106,3 +106,14 @@ def test_a_falsy_object_is_released_in_the_world_it_lives_in():
     assert got is None
     released = [p for m, p in engine.sent if m == "Runtime.disposeObject"]
     assert released == [{"executionContextId": "main-1", "objectId": "all-1"}]
+
+def test_the_whole_remote_object_comes_back_from_the_main_world():
+    """What a client needs to tell a node from any other object ([B324])."""
+    remote = {"objectId": "node-9", "type": "object", "subtype": "node"}
+    engine = _Engine(remote)
+    inj = InjectedScript(engine, S)
+    engine.main_world("main-1")
+    assert inj.evaluate_in_main_remote(F, "document.body", timeout=2) == remote
+    runs = [p for m, p in engine.sent if m == "Runtime.evaluate"]
+    assert len(runs) == 1 and runs[0]["returnByValue"] is False
+    assert runs[0]["executionContextId"] == "main-1"

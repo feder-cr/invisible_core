@@ -539,6 +539,21 @@ class InjectedScript:
             return self.in_current_world(attempt, timeout=timeout)
         return attempt(Deadline(timeout))
 
+    def evaluate_in_main_remote(self, frame_id: str, expression: str, *,
+                                timeout: Optional[float] = 30.0) -> dict:
+        """The caller's expression in the main world, answered as the engine's
+        WHOLE RemoteObject (`objectId`, `type`, `subtype`, or a value).
+
+        What a client needs to turn the result into a handle of the right kind
+        [B324]: a node (`subtype` 'node') is adopted into the utility world,
+        where every element read and action of this package runs, and any other
+        object stays in the main world, where its own reads have to run. An
+        objectId alone, which `evaluate_in_main(by_value=False)` returns, cannot
+        tell the two apart. Sent once, as `evaluate_in_main` ([B285])."""
+        deadline = Deadline(timeout)
+        return self._remote_in(self.main_context(frame_id, timeout=deadline.left()),
+                               expression, by_value=False, timeout=deadline.left())
+
     def poll_in_main(self, frame_id: str, expression: str, *,
                      timeout: Optional[float] = 30.0) -> Optional[dict]:
         """One turn of a wait on the caller's predicate in the main world: the
