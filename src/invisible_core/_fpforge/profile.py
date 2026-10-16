@@ -511,6 +511,39 @@ VOICES = ",".join([
     "Microsoft Zira Desktop - English (United States)|en-US|0|1",
 ])
 
+#: The voices of an English (United States) Windows with the Italian language
+#: added, in the order retail Firefox 151 lists them - measured 2026-10-15 on
+#: such a machine (UI en-US, speech tokens for en-US and it-IT in
+#: HKLM/SOFTWARE/Microsoft/Speech and Speech_OneCore): the five en-US voices and
+#: Cosimo, Elsa and Elsa Desktop, interleaved as SAPI enumerates them, none the
+#: default. A REAL configuration and nothing more: an Italian-UI Windows has not
+#: been measured and may list different voices (70-known-bugs.md [B315]).
+VOICES_IT = ",".join([
+    "Microsoft David - English (United States)|en-US|0|1",
+    "Microsoft Mark - English (United States)|en-US|0|1",
+    "Microsoft Zira - English (United States)|en-US|0|1",
+    "Microsoft Cosimo - Italian (Italy)|it-IT|0|1",
+    "Microsoft Elsa - Italian (Italy)|it-IT|0|1",
+    "Microsoft David Desktop - English (United States)|en-US|0|1",
+    "Microsoft Zira Desktop - English (United States)|en-US|0|1",
+    "Microsoft Elsa Desktop - Italian (Italy)|it-IT|0|1",
+])
+
+#: The voices a session declares, by the primary language of its first
+#: language tag. Only what has been measured on a real Windows is here; a
+#: language with no row gets VOICES, the en-US set every session declared until
+#: 2026-10-16, because inventing another language's voice names is the guess
+#: this table exists to avoid. Each new row is a measurement, never a guess.
+VOICES_BY_LANGUAGE = {
+    "en": VOICES,
+    "it": VOICES_IT,
+}
+
+
+def voices_for(language_tag: str) -> str:
+    """The declared voices for a session whose first language is `language_tag`."""
+    return VOICES_BY_LANGUAGE.get(language_tag.split("-")[0].lower(), VOICES)
+
 #: One fake audio input and one fake video input, on every host.
 FAKE_MEDIA_DEVICES = True
 
@@ -700,7 +733,9 @@ def generate_profile(
     raw.setdefault("taskbar_px", TASKBAR_PX)
     # No setdefault for max_touch_points: the forge samples it, and a floor
     # here would be a second source of truth that agrees until it does not.
-    raw.setdefault("voices", VOICES)
+    # Empty = "the voices of the session's language" (voices_for), which only
+    # the prefs composition knows; a pin names an explicit list instead.
+    raw.setdefault("voices", "")
     raw.setdefault("fake_media_devices", FAKE_MEDIA_DEVICES)
     raw.setdefault("storage_enabled", STORAGE_ENABLED)
     raw.setdefault("generics", GENERICS)
