@@ -20,7 +20,8 @@ binary fails all attempts. The webrtc e2e fake a TCP-only SOCKS locally (no
 proxy/secrets), so the whole suite is offline.
 
 The run opens FOUR browsers at once by default. `--dist loadfile` is not
-negotiable and the reason is on the line that sets it.
+negotiable and the reason is on the line that sets it. The tests marked
+`wall_clock` then run ALONE, one browser, after the others: see `passes`.
 
 Usage, through a client's entry:
     python scripts/run_e2e.py <firefox-binary>
@@ -35,7 +36,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-__all__ = ["DEADLINE_S", "command", "main"]
+__all__ = ["DEADLINE_S", "WALL_CLOCK", "command", "main", "passes", "verdict"]
+
+#: The marker of a test whose VERDICT reads a wall-clock duration: an upper
+#: bound on how long something took, or a ratio of two durations.
+#:
+#: ⛔ NO MARGIN HOLDS ON A MACHINE THAT RUNS FOUR BROWSERS, and widening one is
+#: hiding the test rather than fixing it. Measured 2026-10-16 on the wrapper's
+#: device-enumeration test: its first call waits a delay the engine dispatches
+#: on the PARENT process's main thread, and under four browsers that thread is
+#: late by a share of the load nobody can subtract; 807 ms against a bound of
+#: 686, green again on a rerun of the same SHA. The bound was right and the
+#: machine was busy. A test that measures time gets the machine to itself, which
+#: is the one condition its bound was written for.
+WALL_CLOCK = "wall_clock"
+
+#: pytest's "no tests were collected". One pass of a run that selected nothing
+#: is not a failure: a client with no `wall_clock` test has an empty second pass.
+_NOTHING_COLLECTED = 5
 
 _RERUN_SIGNATURES = "Timeout|context was destroyed|was detached|not visible|because of a navigation|TargetClosed"
 
@@ -87,9 +105,39 @@ def _take_procs(argv: list[str]) -> tuple[str, list[str]]:
     return procs, rest
 
 
+def passes(procs: str) -> list[tuple[str, str]]:
+    """(procs, marker expression) of each pytest invocation, in the order run.
+
+    Asked for one browser at a time, the run is ONE pass, exactly the serial
+    path it always had: the wall-clock tests are already alone. Asked for
+    several, everything else runs first at that width, and then the
+    `wall_clock` tests on the serial path, after the last parallel test has
+    ended - not beside it, which is the condition they cannot survive.
+    """
+    if procs in ("0", "1"):
+        return [(procs, "e2e")]
+    return [(procs, "e2e and not %s" % WALL_CLOCK),
+            ("0", "e2e and %s" % WALL_CLOCK)]
+
+
+def verdict(codes: list[int]) -> int:
+    """One exit code for the passes that ran, in order.
+
+    A pass that collected nothing does not count, and a run where NO pass
+    collected anything answers "nothing collected", not green: a run that ran
+    nothing has not passed. Otherwise the first non-zero code wins, so the
+    reason the run is red is the first one that happened.
+    """
+    ran = [c for c in codes if c != _NOTHING_COLLECTED]
+    if not ran:
+        return _NOTHING_COLLECTED
+    return next((c for c in ran if c != 0), 0)
+
+
 def command(procs: str, extra: list[str], *,
+            selection: str = "e2e",
             deadline_s: int = DEADLINE_S) -> list[str]:
-    """The pytest command line of the run."""
+    """The pytest command line of one pass of the run."""
     # ⛔ `--dist loadfile` IS NOT A TUNING CHOICE, IT IS A CORRECTNESS ONE, and
     # xdist's default (`--dist load`, which hands out one test at a time) breaks
     # the wrapper's suite in two measured ways.
@@ -128,7 +176,7 @@ def command(procs: str, extra: list[str], *,
                 ["-n", procs, "--dist", "loadfile", "--max-worker-restart", "0"])
     return [
         sys.executable, "-m", "pytest",
-        "-m", "e2e",
+        "-m", selection,
         "-o", "addopts=",            # override the default 'not e2e' deselection
         "--reruns", "2", "--reruns-delay", "1",
         "--only-rerun", _RERUN_SIGNATURES,
@@ -185,7 +233,9 @@ def main(argv: list[str], repo: Path, *,
     """Run the e2e suite of the client checked out at ``repo``.
 
     ``argv`` is the entry's own arguments: the binary (or none, for
-    $INVPW_BINARY_PATH), `-n`, and anything else, which goes to pytest.
+    $INVPW_BINARY_PATH), `-n`, and anything else, which goes to pytest - to
+    EVERY pass, so a `-k` narrows both; an output file named there would be
+    written by each pass in turn.
     ``deadline_s`` is for this module's own tests, which cannot wait 420 s for
     a test to die.
     """
@@ -230,9 +280,18 @@ def main(argv: list[str], repo: Path, *,
     env["INVPW_BINARY_PATH"] = binary
     env["STEALTHFOX_E2E_BINARY"] = binary
 
-    cmd = command(procs, extra, deadline_s=deadline_s)
     print(f"[run_e2e] binary={binary}")
-    print(f"[run_e2e] browsers at once: "
-          f"{'1 (serial)' if procs in ('0', '1') else procs}")
-    print(f"[run_e2e] {' '.join(cmd)}", flush=True)
-    return subprocess.run(cmd, cwd=repo, env=env).returncode
+    codes = []
+    for width, selection in passes(procs):
+        cmd = command(width, extra, selection=selection, deadline_s=deadline_s)
+        print(f"[run_e2e] -m '{selection}', browsers at once: "
+              f"{'1 (serial)' if width in ('0', '1') else width}")
+        print(f"[run_e2e] {' '.join(cmd)}", flush=True)
+        codes.append(subprocess.run(cmd, cwd=repo, env=env).returncode)
+        # 0, 1 and 5 are a pass that ran to its end: the next one still runs,
+        # so a red run names every red test and not only the first pass's.
+        # Anything else - interrupted, an internal error, a usage error - is a
+        # run that did not happen, and the same arguments would repeat it.
+        if codes[-1] not in (0, 1, _NOTHING_COLLECTED):
+            break
+    return verdict(codes)

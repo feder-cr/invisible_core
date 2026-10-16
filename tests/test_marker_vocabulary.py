@@ -2,8 +2,8 @@
 
 It was THREE repositories until 2026-08-18, when `invisible_firefox` was
 deleted. The history below is left as it happened - the incident is what bought
-this file - but the list it runs over is now `invisible_core` and
-`invisible_playwright`. See `_REPOS`.
+this file - but the list it runs over is now `invisible_core` and its three
+clients. See `_REPOS`.
 
 WHAT WENT WRONG. `integration` meant "several modules together, no browser" in
 `invisible_core` and `invisible_playwright`, and "launches the real patched
@@ -53,7 +53,16 @@ pytestmark = pytest.mark.unit
 #: workbench, and the marker/addopts/strict-markers comparison between the two
 #: SURVIVING repos had stopped running entirely. A green suite that compares
 #: nothing is the exact failure this file was written to end.
-_REPOS = ["invisible_core", "invisible_playwright"]
+#:
+#: ⛔ AND FOUR SINCE 2026-10-16, because the list had stayed at two while the
+#: core gained two more clients. `invisible_selenium` and `invisible_puppeteer`
+#: run their e2e through this core's `testing.e2e`, which selects by these
+#: markers, and neither was compared: their blocks matched by luck, and the day
+#: `wall_clock` was added nothing would have said that a client which forgot it
+#: runs its timed tests beside four browsers, or refuses `@pytest.mark.wall_clock`
+#: under `--strict-markers`.
+_REPOS = ["invisible_core", "invisible_playwright", "invisible_selenium",
+          "invisible_puppeteer"]
 
 
 def _release_dir() -> Path:
@@ -280,7 +289,8 @@ def test_every_excluded_marker_is_actually_declared():
         cfg = _pytest_config(repo)
         declared = {m.split(":")[0].strip() for m in cfg["markers"]}
         excluded = {w for w in cfg["addopts"].replace("'", " ").split()
-                    if w in ("slow", "e2e", "integration", "unit", "linux_only")}
+                    if w in ("slow", "e2e", "integration", "unit", "linux_only",
+                             "wall_clock")}
         missing = excluded - declared
         assert not missing, (
             f"{repo} excludes {sorted(missing)} by default without declaring "
