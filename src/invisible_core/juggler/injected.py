@@ -5,24 +5,39 @@ selector engines and actionability work on the DOM, and Python is not in
 the page. JavaScript stays JavaScript; this file only handles loading it
 into the right world and calling it.
 
-THE TWO WORLDS, which are the reason for this entire file. Firefox gives
-automation a separate context that sees the same DOM **through an Xray**:
-inside it `addEventListener`, `textContent` and `querySelector` are the
-NATIVE ones, not the ones the site may have replaced. In the MAIN world
-everything belongs to the site, and every read is accountable to whoever
-wrapped the accessor. On 2026-08-27 two spots that used the wrong world
-produced 13 listeners plus one `textContent` read for every
-`bounding_box()`: see `31-client-fork.md` §3.9 and §3.10.
+THE THREE WORLDS, which are the reason for this entire file.
 
-**Rule: this file ALWAYS works in the utility world.**
+- The UTILITY world sees the DOM **through an Xray**: inside it
+  `addEventListener`, `textContent` and `querySelector` are the NATIVE ones,
+  not the ones the site may have replaced, and nothing the site added exists.
+  Everything this package does on its own account runs there: selectors,
+  actionability, reads. On 2026-08-27 two spots that used the wrong world
+  produced 13 listeners plus one `textContent` read for every
+  `bounding_box()`: see `31-client-fork.md` §3.9 and §3.10.
+- The CALLER's world is where the caller's own code runs (`page.evaluate`,
+  `execute_script`, `waitForFunction`, `set_content`) [B322]. It has the
+  page's principal and sees the page through HYBRID Xrays: a name the
+  standard defines is the native one, every other name is the page's. So
+  `window.__NEXT_DATA__`, `el.__vue__` and the page's functions answer as
+  the page defined them, while `document.querySelector` is the native method
+  even when the page wrapped it to count who calls it. Until firefox-49 this
+  code ran in the page's own realm, and a Cloudflare challenge that wraps
+  `querySelector` refused the clearance of a session whose evaluate had
+  looked up its token field, 11 pairs out of 11.
+- The MAIN world is the page's own realm. Nothing of this package runs there:
+  only what the page must see, the callers' init scripts and bindings.
 
-HOW IT IS CREATED. There is no "create a world" command: you send
+**Rule: this file works in the utility world, and in the caller's world only
+for the caller's code.**
+
+HOW THEY ARE CREATED. There is no "create a world" command: you send
 `Page.setInitScripts` with an **empty** script and a `worldName`, and
 Juggler announces the context with `Runtime.executionContextCreated`,
-whose `auxData.name` carries that name. ⛔ The name is `__ctx_aux__` and
-**is not the upstream one**: our fork renamed it because it used to
-travel on the page's window (`31-client-fork.md` §3.5). Changing it here
-without changing it there breaks the hookup silently.
+whose `auxData.name` carries that name; `worldKind` says what kind of world
+the name is ('caller' for the caller's, the utility one by default).
+⛔ The names are not the upstream ones: our fork renamed the utility world's
+because it used to travel on the page's window (`31-client-fork.md` §3.5).
+Changing one here without changing it there breaks the hookup silently.
 """
 from __future__ import annotations
 
@@ -39,6 +54,10 @@ from .deadline import Deadline
 #: it is the key that identifies the right context in
 #: `executionContextCreated`.
 UTILITY_WORLD = "__ctx_aux__"
+
+#: The caller's world [B322], declared with `worldKind: 'caller'` (Juggler's
+#: `content/FrameTree.js`, `_createGlobal`). Needs firefox-49.
+CALLER_WORLD = "__ctx_caller__"
 
 _SOURCE = pathlib.Path(__file__).with_name("injected.js")
 
@@ -116,7 +135,7 @@ def js_truthy(remote: dict) -> bool:
 #: run the same text, so the two cannot drift.
 #:
 #: ⛔ Every read goes through the UTILITY world, hence through the Xray. The
-#: same lines run in the MAIN world would be accountable to a site that
+#: same lines run in the page's own world would be accountable to a site that
 #: wrapped the accessor, the defect measured in §3.9 and §3.10 of
 #: `31-client-fork.md`.
 _READS = {
@@ -227,7 +246,9 @@ class InjectedScript:
         this package runs in. The failure would not look like a lost init
         script: it would look like the browser having no DOM.
         """
-        scripts = [{"script": "", "worldName": UTILITY_WORLD}]
+        scripts = [{"script": "", "worldName": UTILITY_WORLD},
+                   {"script": "", "worldName": CALLER_WORLD,
+                    "worldKind": "caller"}]
         scripts += [{"script": s} for s in self._init_scripts]
         self.c.send("Page.setInitScripts", {"scripts": scripts},
                     session=self.session)
@@ -297,7 +318,7 @@ class InjectedScript:
         ⛔ THE ONE COPY OF THIS RULE. Until 41.37.0 each client carried its own
         loop (`_bridge.across_navigation` in invisible_selenium and in
         invisible_puppeteer, the same twenty lines); a client's `attempt`
-        reads the world itself (`main_context`, `context_id`), so a turn after
+        reads the world itself (`caller_context`, `context_id`), so a turn after
         a refusal waits for the frame's next world, and decides what is final
         by raising anything but `ContextDestroyed`.
 
@@ -498,28 +519,21 @@ class InjectedScript:
             "injected.parseSelector(sel), document).length",
             selector)
 
-    def evaluate_in_main(self, frame_id: str, expression: str, *,
-                         by_value: bool = True, timeout: Optional[float] = 30.0,
-                         repeatable: bool = False):
-        """Evaluate in the PAGE's own world, deliberately and rarely.
+    def evaluate_in_caller(self, frame_id: str, expression: str, *,
+                           by_value: bool = True, timeout: Optional[float] = 30.0,
+                           repeatable: bool = False):
+        """Evaluate the CALLER's code, in the caller's world [B322].
 
-        ⛔ THIS IS THE ONE PLACE THAT LEAVES THE XRAY, AND IT NEEDS A REASON
-        EVERY TIME. Everything else in this module runs in the utility world
-        precisely so a site cannot count our reads. Running here is visible to
-        anything that has wrapped an accessor.
-
-        The reason it exists at all is `set_content`, and it is not a
-        preference: the utility world has an EXTENDED principal (a sandbox over
-        the window, deliberately, so closed shadow roots are reachable), and
+        ⛔ THE CALLER'S CODE NEVER RUNS IN THE UTILITY WORLD. Two reasons. The
+        caller expects the page's own additions (`window.__APP_STATE__`, a
+        node's expandos, the page's functions), which the utility world's Xray
+        hides. And `set_content` needs it: the utility world has an EXTENDED
+        principal (deliberately, so closed shadow roots are reachable), and
         Gecko requires `document.open()` to run under a principal EQUAL to the
-        document's. From the utility world it answers `The operation is
-        insecure` EVERY time - measured here on 2026-08-27, and the same defect
-        was already fixed once inside the driver, where it shipped a broken
-        `set_content` to users.
-
-        ⛔ AND THE MAIN WORLD IS THE ONE WITH THE EMPTY NAME. `auxData.name` is
-        absent for the page's own context, which is why the key is `""` and not
-        a missing lookup.
+        document's; from the utility world it answers `The operation is
+        insecure` every time (measured on 2026-08-27). The caller's world has
+        the page's principal, so both hold, and its hybrid Xrays keep the
+        page's replacements of standard APIs out of the caller's way.
 
         ⛔ SENT ONCE BY DEFAULT. What runs here is the caller's code
         (`page.evaluate`, `evaluate_handle`, `set_content`, a script tag): a
@@ -533,30 +547,30 @@ class InjectedScript:
         """
         def attempt(deadline):
             return self._evaluate_in(
-                self.main_context(frame_id, timeout=deadline.left()),
+                self.caller_context(frame_id, timeout=deadline.left()),
                 expression, by_value=by_value, timeout=deadline.left())
         if repeatable:
             return self.in_current_world(attempt, timeout=timeout)
         return attempt(Deadline(timeout))
 
-    def evaluate_in_main_remote(self, frame_id: str, expression: str, *,
-                                timeout: Optional[float] = 30.0) -> dict:
-        """The caller's expression in the main world, answered as the engine's
-        WHOLE RemoteObject (`objectId`, `type`, `subtype`, or a value).
+    def evaluate_in_caller_remote(self, frame_id: str, expression: str, *,
+                                  timeout: Optional[float] = 30.0) -> dict:
+        """The caller's expression in the caller's world, answered as the
+        engine's WHOLE RemoteObject (`objectId`, `type`, `subtype`, or a value).
 
         What a client needs to turn the result into a handle of the right kind
         [B324]: a node (`subtype` 'node') is adopted into the utility world,
         where every element read and action of this package runs, and any other
-        object stays in the main world, where its own reads have to run. An
-        objectId alone, which `evaluate_in_main(by_value=False)` returns, cannot
-        tell the two apart. Sent once, as `evaluate_in_main` ([B285])."""
+        object stays in the caller's world, where its own reads have to run. An
+        objectId alone, which `evaluate_in_caller(by_value=False)` returns,
+        cannot tell the two apart. Sent once, as `evaluate_in_caller` ([B285])."""
         deadline = Deadline(timeout)
-        return self._remote_in(self.main_context(frame_id, timeout=deadline.left()),
+        return self._remote_in(self.caller_context(frame_id, timeout=deadline.left()),
                                expression, by_value=False, timeout=deadline.left())
 
-    def poll_in_main(self, frame_id: str, expression: str, *,
-                     timeout: Optional[float] = 30.0) -> Optional[dict]:
-        """One turn of a wait on the caller's predicate in the main world: the
+    def poll_in_caller(self, frame_id: str, expression: str, *,
+                       timeout: Optional[float] = 30.0) -> Optional[dict]:
+        """One turn of a wait on the caller's predicate in its world: the
         engine's RemoteObject when the value is truthy as JavaScript judges it
         (`js_truthy`), None when it is not: a turn of `wait_for_function`.
         pyppeteer's `waitForFunction` sends a function with its arguments
@@ -567,10 +581,10 @@ class InjectedScript:
         is already the handle the wait returns and nothing runs it a second
         time to get one. A falsy OBJECT (only `document.all` is) is released
         here, in the context it lives in, so a turn leaves nothing behind.
-        Sent once, as `evaluate_in_main`: a world that went under it is
+        Sent once, as `evaluate_in_caller`: a world that went under it is
         `ContextDestroyed` ([B285])."""
         deadline = Deadline(timeout)
-        context = self.main_context(frame_id, timeout=deadline.left())
+        context = self.caller_context(frame_id, timeout=deadline.left())
         remote = self._remote_in(context, expression, by_value=False,
                                  timeout=deadline.left())
         if js_truthy(remote):
@@ -892,12 +906,11 @@ class InjectedScript:
         """The value of an objectId, asked in the world it belongs to.
 
         ⛔ An objectId is resolved inside the context it is given, so a handle
-        born in the page's own world cannot be read from the utility one. This
-        is the only reader that takes the world as an argument, because
-        `waitForFunction` is the only place that hands back a main-world
-        handle.
+        born in the caller's world cannot be read from the utility one. This
+        is the only reader that takes the world as an argument: 'caller' for a
+        value the caller's code produced, anything else for the utility world.
         """
-        key = (frame_id, "" if world == "main" else UTILITY_WORLD)
+        key = (frame_id, CALLER_WORLD if world == "caller" else UTILITY_WORLD)
         context = self.contexts.get(key)
         if context is None:
             return None
@@ -950,33 +963,34 @@ class InjectedScript:
         except Exception:
             pass
 
-    # ── the page's own world, for Selenium's execute_script ─────────────────
+    # ── the caller's world, for execute_script and the like ─────────────────
     #
-    # ⛔ Every method below is a crossing into the MAIN world, which is exactly
-    # what the rest of this module avoids. They exist because `execute_script`
-    # is the caller asking to run code AS THE PAGE, the same reason
-    # `evaluate_in_main` exists. What they take care of is that nothing ELSE
-    # runs there: the arguments go in as protocol values and adopted nodes,
-    # and the result is read back from the privileged side with
+    # ⛔ Every method below serves the CALLER's code (Selenium's
+    # `execute_script`, Puppeteer's `evaluate`), the reason
+    # `evaluate_in_caller` exists. What they take care of is that nothing
+    # ELSE runs there: the arguments go in as protocol values and adopted
+    # nodes, and the result is read back from the privileged side with
     # `Runtime.getObjectProperties`, which walks the object through the
     # Debugger and never calls a getter the page defined. (They lived only in
     # invisible_selenium's and invisible_puppeteer's copies until this module
     # moved into the core.)
 
-    def main_context(self, frame_id: str, *, timeout: Optional[float] = 30.0) -> str:
-        """The id of the page's own execution context for a frame.
+    def caller_context(self, frame_id: str, *, timeout: Optional[float] = 30.0) -> str:
+        """The id of the caller's world for a frame [B322].
 
-        ⛔ THE MAIN WORLD IS THE ONE WITH THE EMPTY NAME: `auxData.name` is
-        absent for the page's own context, which is why the key is `""`.
+        ⛔ IT EXISTS ONLY BECAUSE `install()` DECLARED IT. Until firefox-49 the
+        caller's code ran in the page's own context, the one with the empty
+        name; nothing here asks for that one any more.
         """
         deadline = Deadline(timeout)
-        key = (frame_id, "")
+        key = (frame_id, CALLER_WORLD)
         while key not in self.contexts:
             if deadline.passed():
                 raise TimeoutError(
-                    "the main world never appeared for frame %s. Worlds seen: "
-                    "%s" % (frame_id, sorted(n for f, n in self.contexts
-                                             if f == frame_id)))
+                    "the caller's world never appeared for frame %s - did "
+                    "you call install()? Worlds seen: %s"
+                    % (frame_id, sorted(n for f, n in self.contexts
+                                        if f == frame_id)))
             time.sleep(0.01)
         return self.contexts[key]
 
@@ -1032,12 +1046,12 @@ class InjectedScript:
             timeout=None))
         return r.get("value")
 
-    def node_to_main(self, frame_id: str, element: str) -> Optional[str]:
-        """Carry a node from the utility world into the page's own world."""
+    def node_to_caller(self, frame_id: str, element: str) -> Optional[str]:
+        """Carry a node from the utility world into the caller's world."""
         answer = self._send_in(
             "Page.adoptNode",
             {"frameId": frame_id,
-             "executionContextId": self.main_context(frame_id),
+             "executionContextId": self.caller_context(frame_id),
              "objectId": element},
             timeout=None) or {}
         return ((answer.get("remoteObject") or {}).get("objectId")) or None

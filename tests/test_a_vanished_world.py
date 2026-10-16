@@ -31,7 +31,7 @@ from invisible_core.juggler import PageActs
 from invisible_core.juggler.actions import Actions
 from invisible_core.juggler.connection import EventListeners, ProtocolError
 from invisible_core.juggler.injected import (
-    UTILITY_WORLD, ContextDestroyed, InjectedScript)
+    CALLER_WORLD, UTILITY_WORLD, ContextDestroyed, InjectedScript)
 
 pytestmark = pytest.mark.unit
 
@@ -196,28 +196,28 @@ def test_a_call_interrupted_while_it_waited_is_typed_and_its_world_forgotten():
     assert (F, UTILITY_WORLD) not in inj.contexts
 
 
-def test_the_callers_code_in_the_page_world_is_sent_once():
-    """`evaluate_in_main` runs `page.evaluate`: refused, it is not made again in
-    the new world, which would run a script that may have run already."""
+def test_the_callers_code_in_its_world_is_sent_once():
+    """`evaluate_in_caller` runs `page.evaluate`: refused, it is not made again
+    in the new world, which would run a script that may have run already."""
     engine, inj = _injected()
-    engine.world("m1", name="")
+    engine.world("m1", name=CALLER_WORLD)
     engine.dead.add("m1")
-    engine.on_refusal = lambda: engine.world("m2", name="")
+    engine.on_refusal = lambda: engine.world("m2", name=CALLER_WORLD)
     with pytest.raises(ContextDestroyed):
-        inj.evaluate_in_main(F, "localStorage.runs = 1", timeout=5)
+        inj.evaluate_in_caller(F, "localStorage.runs = 1", timeout=5)
     assert [c for m, c in engine.sent if m == "Runtime.evaluate"] == ["m1"]
 
 
-def test_a_read_in_the_page_world_declared_repeatable_is_made_in_the_new_world():
-    """The MCP's snapshot is a fixed read without effects, run in the page's
+def test_a_read_in_the_callers_world_declared_repeatable_is_made_in_the_new_world():
+    """The MCP's snapshot is a fixed read without effects, run in the caller's
     world; its caller declares it, and the page moving on under it is answered
     by the new document."""
     engine, inj = _injected()
-    engine.world("m1", name="")
+    engine.world("m1", name=CALLER_WORLD)
     engine.dead.add("m1")
-    engine.on_refusal = lambda: engine.world("m2", name="")
-    assert inj.evaluate_in_main(F, "document.title", repeatable=True,
-                                timeout=5) == "ran in m2"
+    engine.on_refusal = lambda: engine.world("m2", name=CALLER_WORLD)
+    assert inj.evaluate_in_caller(F, "document.title", repeatable=True,
+                                  timeout=5) == "ran in m2"
     assert [c for m, c in engine.sent if m == "Runtime.evaluate"] == ["m1", "m2"]
 
 
