@@ -23,6 +23,7 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
+from ._fpforge.profile import branding_dir
 from ._locale import SessionLocale
 from ._webgl_personas import persona_for, render_noise_seed
 from ._proxy import configure_proxy
@@ -1512,6 +1513,22 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
 # StealthGenericWindowsFont).
 
 
+def _apply_branding(prefs: Dict[str, Any], profile: Profile) -> None:
+    """The branding a page reads (Profile.branding): where its files are.
+
+    Read by the engine where chrome://branding/content/ and
+    resource://usercontext-content/branding/ resolve
+    (netwerk/protocol/res/StealthBranding.h), and required by its declaration
+    gate: with the engine on and this missing, the browser refuses to launch
+    rather than serve the build's own brand. The value is the directory the files
+    are in, wherever this package is installed: the engine grants its content
+    processes read access to exactly that directory, so every way of launching -
+    the three clients and a caller writing these prefs itself - declares the same
+    thing and gets the same branding.
+    """
+    prefs["zoom.stealth.branding.dir"] = branding_dir(profile.branding).as_uri() + "/"
+
+
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     """Dark mode, plus the Windows colours palette when the theme is light."""
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
@@ -1744,6 +1761,7 @@ def translate_profile_to_prefs(
     _apply_rasterisation(prefs, profile)
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
+    _apply_branding(prefs, profile)
     _apply_locale(prefs, SessionLocale.of(locale))
     _apply_timezone(prefs, timezone)
     _apply_render_seed(prefs, profile)

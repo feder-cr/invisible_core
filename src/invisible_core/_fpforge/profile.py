@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as _dc_replace
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ._sampler import sample as _sample_raw
@@ -347,7 +348,7 @@ _PIN_GROUPS = {
              "cleartype_pixel_structure", "cleartype_rendering_mode",
              "freetype_gamma", "freetype_contrast"},
 }
-_PIN_TOP = {"dark_theme"}
+_PIN_TOP = {"dark_theme", "branding"}
 
 
 def _validate_pin_key(key: str) -> None:
@@ -387,6 +388,9 @@ class Profile:
     webgl: WebGLProfile
     font: FontProfile
     dark_theme: bool
+    # The branding a page reads: one of BRANDING_SETS, or the absolute path
+    # of a directory holding exactly BRANDING_FILES.
+    branding: str
     # Bayesian browsing-history: list of {name, category, cookie_profile}
     # dicts sampled from data/browsing_pool.json with per-class CPT. Used
     # by _recaptcha_seed.py to build a coherent cookie pre-seed when the
@@ -448,6 +452,7 @@ _PIN_TO_RAW = {
     "hardware.generics": "generics",
     "hardware.accessibility_overrides": "accessibility_overrides",
     "dark_theme": "dark_theme",
+    "branding": "branding",
 }
 
 #: The rasterisation parameters a Windows machine reports, and the FreeType
@@ -521,6 +526,30 @@ STORAGE_ENABLED = True
 #: An ordinary desktop with no accessibility overrides turned on.
 ACCESSIBILITY_OVERRIDES = False
 
+#: The files a page can ask the branding for, under chrome://branding/content/
+#: and resource://usercontext-content/branding/ - every name the branding
+#: package of Firefox 151 answers. A page reads them (the about dialog's
+#: stylesheet rules, the wordmarks' boxes, the images' sizes) and they tell a
+#: build from the retail one, so by engine rule 7 they live here and nowhere
+#: else: the engine keeps no stealth copy and serves the declared directory
+#: (`zoom.stealth.branding.dir`, netwerk/protocol/res/StealthBranding.h).
+BRANDING_FILES = (
+    "about.png", "about-logo.png", "about-logo.svg", "about-logo@2x.png",
+    "about-wordmark.svg", "about-logo-private.png", "about-logo-private@2x.png",
+    "document.ico", "document_pdf.svg", "firefox-wordmark.svg",
+    "icon16.png", "icon32.png", "icon48.png", "icon64.png", "icon128.png",
+    "aboutDialog.css",
+)
+
+#: The sets this package ships, in invisible_core/branding/<set>/files/:
+#: "official" is the retail brand byte for byte, "unofficial" the one an
+#: unbranded build ships. Each set's licence sits beside `files/`, not in it,
+#: because whatever is in `files/` a page can load.
+BRANDING_SETS = ("official", "unofficial")
+
+#: The retail brand, which is what a page expects of a Firefox.
+BRANDING = "official"
+
 #: The generic-family table a Windows Firefox resolves to. Moved out of C++ on
 #: 2026-08-09; the engine keeps the same rows compiled in as the floor for a
 #: browser launched without this package.
@@ -567,6 +596,52 @@ FONT_MONOSPACE_SIZE = 13     # Firefox ships 13 on Windows, 12 in its Unix block
 FONT_ALPHA_LADDER = (
     0, 18, 35, 53, 70, 87, 104, 121, 138, 153, 169, 185, 200, 215, 230, 243, 255,
 )
+
+
+def branding_dir(branding: str) -> Path:
+    """The directory holding the files of a declared branding."""
+    if branding in BRANDING_SETS:
+        return Path(__file__).resolve().parent.parent / "branding" / branding / "files"
+    return Path(branding)
+
+
+def check_branding_dir(directory: Path) -> None:
+    """Refuse a branding directory that is not exactly BRANDING_FILES.
+
+    A missing file is a load a page sees fail where the retail answers; an extra
+    one is a file a page can load where the retail has none. Either is a
+    difference from the browser the session claims to be, so neither is
+    accepted.
+    """
+    if not directory.is_dir():
+        raise ValueError(f"branding directory {str(directory)!r} does not exist")
+    present = {p.name for p in directory.iterdir()}
+    not_files = sorted(n for n in present if not (directory / n).is_file())
+    missing = sorted(set(BRANDING_FILES) - present)
+    extra = sorted(present - set(BRANDING_FILES))
+    if not_files or missing or extra:
+        raise ValueError(
+            f"branding directory {str(directory)!r} must hold exactly the "
+            f"{len(BRANDING_FILES)} branding files: missing {missing}, extra "
+            f"{extra}, not regular files {not_files}")
+
+
+def _branding(value: Any) -> str:
+    """The declared branding, refused at birth if it does not describe one.
+
+    The engine would refuse too, but only once a page asked for the branding,
+    as a failed load; here it is the caller who passed the value that hears
+    about it, at the moment it is passed.
+    """
+    if isinstance(value, str) and value in BRANDING_SETS:
+        return value
+    if not isinstance(value, (str, Path)) or not Path(value).is_absolute():
+        raise ValueError(
+            f"branding {value!r} is neither a set this package ships "
+            f"({list(BRANDING_SETS)}) nor the absolute path of a directory")
+    directory = Path(value).resolve()
+    check_branding_dir(directory)
+    return str(directory)
 
 
 def _apply_pins_to_raw(raw: Dict[str, Any], pin: Dict[str, Any]) -> Dict[str, Any]:
@@ -705,6 +780,7 @@ def generate_profile(
     raw.setdefault("storage_enabled", STORAGE_ENABLED)
     raw.setdefault("generics", GENERICS)
     raw.setdefault("accessibility_overrides", ACCESSIBILITY_OVERRIDES)
+    raw.setdefault("branding", BRANDING)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
         # The sampler derives screen_avail_h from the DEFAULT taskbar, and the
@@ -783,6 +859,7 @@ def generate_profile(
             freetype_contrast=int(raw["font_freetype_contrast"]),
         ),
         dark_theme=bool(raw["dark_theme"]),
+        branding=_branding(raw["branding"]),
         browsing_history=list(raw.get("browsing_history") or []),
         _raw=raw,
     )

@@ -13,3 +13,10 @@
 # Linux one. The gate folds CRLF vs LF deliberately, but there is no reason to
 # make it do that work.
 PUBLISHED.json text eol=lf
+
+# The branding files a page reads (invisible_core/branding/) are served to it as
+# they are on disk, and the retail set must stay identical to the retail browser
+# BYTE FOR BYTE. An autocrlf checkout would rewrite the stylesheet and the SVGs
+# with CRLF on Windows, so a development install would serve different bytes
+# from the wheel. No conversion, ever: they are data, not text to edit.
+src/invisible_core/branding/** -text
