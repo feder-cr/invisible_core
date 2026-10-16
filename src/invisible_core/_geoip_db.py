@@ -110,23 +110,74 @@ def _download_geoip_tag(tag: str, *, attempts: int) -> Path:
     worth asking again about depends on something only the caller knows - is
     there a cached mmdb to fall back on - and a default would let the next
     caller skip that question without noticing they had been asked it.
+
+    ⛔ A TAG DIRECTORY APPEARS COMPLETE OR NOT AT ALL [B320]. This extracted
+    straight into it, so while one process was still writing the mmdb another
+    saw the file exist, opened half of it and failed with "Is this a valid
+    MaxMind DB file?" - every test of a four-worker e2e that resolved a
+    timezone on a cold cache, 66 of them on the wrapper's main on 2026-10-16,
+    a race latent since the first release. Now the archive is extracted
+    beside the tag directories, outside the glob `_cached_geoip_mmdb` reads
+    and the directories `_prune_old_geoip_tags` removes, the database is
+    opened with the real reader, and only then is the directory renamed into
+    place in one step. A process that loses the rename uses the winner's.
     """
     dst_dir = _geoip_root() / tag
-    target = dst_dir / GEOIP_MMDB_NAME
-    if not target.exists():
-        url = GEOIP_RELEASE_URL_TEMPLATE.format(tag=tag, asset=GEOIP_ASSET)
-        dst_dir.mkdir(parents=True, exist_ok=True)
+    found = _mmdb_in(dst_dir)
+    if found is not None:
+        return found
+    url = GEOIP_RELEASE_URL_TEMPLATE.format(tag=tag, asset=GEOIP_ASSET)
+    root = _geoip_root()
+    root.mkdir(parents=True, exist_ok=True)
+    # Beside the tag directories, on the same filesystem so the rename is
+    # atomic, and outside `root` so nothing that lists the tags can see it.
+    staging = Path(tempfile.mkdtemp(prefix=f".geoip-{tag}-", dir=root.parent))
+    try:
         with tempfile.TemporaryDirectory() as td:
             archive = Path(td) / GEOIP_ASSET
             _download_file(url, archive, attempts=attempts)
-            _extract(archive, dst_dir)
-    if target.exists():
+            _extract(archive, staging)
+        mmdb = _mmdb_in(staging)
+        if mmdb is None:
+            raise RuntimeError(f"geoip mmdb not found after extraction of {url}")
+        _check_readable(mmdb)
+        if dst_dir.exists() and _mmdb_in(dst_dir) is None:
+            # A directory with no database left by the code before this one.
+            shutil.rmtree(dst_dir, ignore_errors=True)
+        try:
+            os.replace(staging, dst_dir)
+        except OSError:
+            if _mmdb_in(dst_dir) is None:
+                raise
+            # Another process landed the same tag first; its copy is complete.
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    found = _mmdb_in(dst_dir)
+    if found is None:
+        raise RuntimeError(f"geoip mmdb not found in {dst_dir} after it was put in place")
+    return found
+
+
+def _mmdb_in(directory: Path) -> Path | None:
+    """The mmdb of a tag directory: GEOIP_MMDB_NAME, or the first *.mmdb when
+    the archive names it otherwise."""
+    target = directory / GEOIP_MMDB_NAME
+    if target.is_file():
         return target
-    # asset name inside the zip may differ from GEOIP_MMDB_NAME
-    found = sorted(dst_dir.glob("*.mmdb"))
-    if found:
-        return found[0]
-    raise RuntimeError(f"geoip mmdb not found after extraction in {dst_dir}")
+    found = sorted(directory.glob("*.mmdb")) if directory.is_dir() else []
+    return found[0] if found else None
+
+
+def _check_readable(mmdb: Path) -> None:
+    """Refuse a database the reader cannot open, before anyone else can see it.
+    A truncated download is otherwise found by the first session that resolves
+    a timezone, as an error that names the cache and not the download."""
+    import maxminddb
+    try:
+        with maxminddb.open_database(str(mmdb), mode=maxminddb.MODE_MMAP):
+            pass
+    except (OSError, ValueError, getattr(maxminddb, "InvalidDatabaseError", ValueError)) as exc:
+        raise RuntimeError(f"the downloaded geoip database {mmdb.name} cannot be read: {exc}") from exc
 
 
 def _prune_old_geoip_tags(keep: str) -> None:
