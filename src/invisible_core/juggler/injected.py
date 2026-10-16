@@ -86,6 +86,31 @@ class ContextDestroyed(RuntimeError):
 _CONTEXT_GONE = ("Failed to find execution context with id",
                  "Execution context was destroyed!")
 
+def js_truthy(remote: dict) -> bool:
+    """JavaScript's ToBoolean of a value the engine returned BY REFERENCE.
+
+    A poll asks whether the caller's predicate is truthy, and the answer has to
+    be the page's: `wait_for_function(() => document.querySelector('#x'))`
+    ends when the element exists. Judged on the value serialized to Python it
+    never ended, because a node does not serialize to anything truthy ([B323]),
+    and NaN came back as a float Python calls true. The engine's RemoteObject
+    (`juggler/content/Runtime.js` `_createRemoteObject`) is a finite shape:
+
+      - an object or a symbol carries `objectId`, and every object is truthy
+        except `document.all`, whose `typeof` (the `type` field) is
+        'undefined';
+      - NaN, -0, Infinity and -Infinity travel as `unserializableValue`, and
+        only the two infinities are truthy;
+      - everything else is `value` (absent for undefined), where booleans,
+        finite numbers and strings are truthy exactly as in Python.
+    """
+    if "objectId" in remote:
+        return remote.get("type") != "undefined"
+    if "unserializableValue" in remote:
+        return remote["unserializableValue"] in ("Infinity", "-Infinity")
+    return bool(remote.get("value"))
+
+
 #: The element reads, each a function of `(injected, el, ...args)`, in ONE
 #: table: a read on a handle (`read`) and a read on a selector (`read_match`)
 #: run the same text, so the two cannot drift.
@@ -347,12 +372,17 @@ class InjectedScript:
 
     def _evaluate_in(self, context: str, expression: str, *, by_value: bool,
                      timeout: Optional[float]) -> Any:
-        r = self._result(self._send_in(
+        r = self._remote_in(context, expression, by_value=by_value, timeout=timeout)
+        return r.get("value") if by_value else r.get("objectId")
+
+    def _remote_in(self, context: str, expression: str, *, by_value: bool,
+                   timeout: Optional[float]) -> dict:
+        """The engine's whole RemoteObject for `expression` in `context`."""
+        return self._result(self._send_in(
             "Runtime.evaluate",
             {"executionContextId": context,
              "expression": expression, "returnByValue": by_value},
             timeout=timeout))
-        return r.get("value") if by_value else r.get("objectId")
 
     def call(self, frame_id: str, declaration: str, *arguments,
              by_value: bool = True, timeout: Optional[float] = 30.0,
@@ -508,6 +538,31 @@ class InjectedScript:
         if repeatable:
             return self.in_current_world(attempt, timeout=timeout)
         return attempt(Deadline(timeout))
+
+    def poll_in_main(self, frame_id: str, expression: str, *,
+                     timeout: Optional[float] = 30.0) -> Optional[dict]:
+        """One turn of a wait on the caller's predicate in the main world: the
+        engine's RemoteObject when the value is truthy as JavaScript judges it
+        (`js_truthy`), None when it is not: a turn of `wait_for_function`.
+        pyppeteer's `waitForFunction` sends a function with its arguments
+        through its own call, and judges what comes back with the same
+        `js_truthy`, so the two waits cannot disagree on what truthy is.
+
+        The caller's code runs once per turn, by reference, so a truthy value
+        is already the handle the wait returns and nothing runs it a second
+        time to get one. A falsy OBJECT (only `document.all` is) is released
+        here, in the context it lives in, so a turn leaves nothing behind.
+        Sent once, as `evaluate_in_main`: a world that went under it is
+        `ContextDestroyed` ([B285])."""
+        deadline = Deadline(timeout)
+        context = self.main_context(frame_id, timeout=deadline.left())
+        remote = self._remote_in(context, expression, by_value=False,
+                                 timeout=deadline.left())
+        if js_truthy(remote):
+            return remote
+        if "objectId" in remote:
+            self.release(context, remote["objectId"])
+        return None
 
     def query_selector_all(self, frame_id: str, selector: str) -> list:
         """Every match, as a list of objectIds the caller must dispose.
