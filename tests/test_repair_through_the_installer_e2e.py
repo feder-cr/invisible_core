@@ -13,7 +13,12 @@ WHAT THIS PROVES, in both directions, with real installers and the real index:
   * a venv uv built, with no pip in it (asserted: that is what made the old
     repair fail, so a bench without it would prove nothing), is repaired by
     `uv pip install --python <it> --force-reinstall`, found on PATH;
-  * a venv pip built is still repaired by its own `-m pip`, as it always was.
+  * a venv pip built is still repaired by its own `-m pip`, as it always was,
+    both with the pip the venv is seeded with and with pip 23.2.1: on Windows
+    that version refused the old `--force-reinstall` with WinError 5 over a
+    psutil the process had loaded (23.3.2 and later do not), so it is the one
+    that makes this half fail if the repair goes back to reinstalling the
+    dependencies. On a runner's current pip that mistake would pass.
 
 The core under test is THIS checkout, built into a wheel and installed into
 each venv. The consumer is a one-module stub, installed by the same tool with
@@ -151,10 +156,13 @@ def test_a_venv_uv_built_is_repaired_through_uv(tmp_path, wheels):
     assert "-m pip install" not in r.stderr, r.stderr
 
 
-def test_a_venv_pip_built_is_still_repaired_through_pip(tmp_path, wheels):
+@pytest.mark.parametrize("pip", ["seeded", "23.2.1"])
+def test_a_venv_pip_built_is_still_repaired_through_pip(tmp_path, wheels, pip):
     venv = tmp_path / "pip-venv"
     _run([sys.executable, "-m", "venv", venv], timeout=300)
     py = _python(venv)
+    if pip != "seeded":
+        _run([py, "-m", "pip", "install", "--quiet", f"pip=={pip}"], timeout=300)
     _run([py, "-m", "pip", "install", "--quiet", wheels["core"]])
     _run([py, "-m", "pip", "install", "--quiet", "--no-deps", wheels["stub"]])
 

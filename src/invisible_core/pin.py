@@ -654,13 +654,16 @@ def repair_command(want: str, recorded: Optional[str]) -> list:
     It replaces the CORE and nothing else. The repair used to run
     `--force-reinstall`, which reinstalls every dependency too, and the repair
     runs inside a process that has already imported the core and so psutil.
-    Measured 2026-10-17 on Windows, pip 23.2.1, in a venv whose core had been
-    imported: `--force-reinstall` exited 1 on
+    Measured 2026-10-17 on Windows, in a venv whose core had been imported:
+    with pip 23.2.1 (what a venv of Python 3.12.0 is seeded with)
+    `--force-reinstall` exited 1 on
     `[WinError 5] Access is denied: ...\\~sutil\\_psutil_windows.pyd` (a loaded
-    extension cannot be deleted) and rolled back; a plain install of the pinned
-    version and `--force-reinstall --no-deps` both succeeded, and uv succeeded
-    with all three. So the automatic repair has never worked for a Windows
-    environment pip built.
+    extension cannot be deleted) and rolled back, while a plain install of the
+    pinned version and `--force-reinstall --no-deps` both succeeded. Bisected the
+    same day: pip 23.3.2, 24.0, 24.2, 24.3.1, 25.0.1, 25.1.1, 25.2 and 26.2.1 all
+    survive the force-reinstall, and uv survives all three forms. So the repair
+    failed only where the venv's pip is that old, which is a venv nobody
+    upgraded; replacing the core alone works with every version tried.
 
     A plain install is enough whenever the record names another version: the
     installer replaces the core and touches a dependency only if the pinned core

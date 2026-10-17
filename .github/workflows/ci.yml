@@ -137,10 +137,10 @@ jobs:
 
   # THE PIN REPAIR, THROUGH THE INSTALLER THAT BUILT THE ENVIRONMENT. It runs
   # from the first line of every client's `__init__`, and until 49.45.0 it had
-  # never worked in either of the two environments users have: a venv uv made
-  # has no pip, so `python -m pip` died on `No module named pip` (the README's
-  # way in is uv), and on Windows a venv pip made refused `--force-reinstall`
-  # with WinError 5 over a psutil the process had loaded. Measured 2026-10-17;
+  # never worked in a venv uv made: it has no pip, so `python -m pip` died on
+  # `No module named pip` (the README's way in is uv). And on Windows a venv
+  # whose pip is 23.2.1 refused `--force-reinstall` with WinError 5 over a
+  # psutil the process had loaded (23.3.2 and later do not). Measured 2026-10-17;
   # `tests/test_repair_through_the_installer_e2e.py` builds both venvs with this
   # checkout's wheel, puts the pin one release off, and asserts the import
   # repairs itself. uv comes from its own installer, the way the README's
@@ -187,10 +187,11 @@ jobs:
           text = pathlib.Path("repair-report.txt").read_text(encoding="utf-8", errors="ignore")
           m = re.search(r"(\d+) passed", text)
           passed = int(m.group(1)) if m else 0
-          if passed < 2:
-              print(f"only {passed} of the 2 directions ran", file=sys.stderr)
+          if passed < 3:
+              print(f"only {passed} of the 3 cases ran (uv, the seeded pip, "
+                    f"pip 23.2.1)", file=sys.stderr)
               sys.exit(1)
-          print(f"{passed} directions ran")
+          print(f"{passed} cases ran")
           PY
 
   # THE ARM64 WINDOWS HOST RUNS THE x86_64 ENGINE, AND THIS IS WHERE THAT IS
