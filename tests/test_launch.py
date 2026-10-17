@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+
+import pytest
+
 from invisible_core.launch import write_user_js, build_launch_env, build_launch_plan
 
 
@@ -131,6 +134,31 @@ def test_build_launch_env_applies_the_surface_env_over_a_cleared_slot():
                                display_env={"INVPW_DESKTOP": "invpw_fresh"})
     assert windows["INVPW_DESKTOP"] == "invpw_fresh"
     assert "INVPW_DESKTOP" not in build_launch_env({}, base_env={"INVPW_DESKTOP": "x"})
+
+
+@pytest.mark.parametrize("display_env", [
+    None,                                    # a headed session: no surface at all
+    {"DISPLAY": ":123", "WAYLAND_DISPLAY": None},   # a hidden one, on Xvfb
+])
+def test_every_linux_session_declares_the_x11_backend(monkeypatch, display_env):
+    """A9 of 28-valori-dell-host.md. Until 49.46.0 only the Xvfb's
+    ``launch_env()`` carried these two, so a HEADED session inherited the
+    host's backend: on a Wayland desktop it ran on Wayland. The known-bad
+    input is the host's own choice in ``base_env``, which must not survive."""
+    import invisible_core.launch as L
+    monkeypatch.setattr(L.sys, "platform", "linux")
+    base = {"PATH": "/usr/bin", "GDK_BACKEND": "wayland", "MOZ_ENABLE_WAYLAND": "1",
+            "WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"}
+    env = build_launch_env({}, base_env=base, display_env=display_env)
+    assert env["GDK_BACKEND"] == "x11"
+    assert env["MOZ_ENABLE_WAYLAND"] == "0"
+
+
+def test_a_windows_session_carries_no_linux_backend(monkeypatch):
+    import invisible_core.launch as L
+    monkeypatch.setattr(L.sys, "platform", "win32")
+    env = build_launch_env({}, base_env={"PATH": "C:/Windows"})
+    assert "GDK_BACKEND" not in env and "MOZ_ENABLE_WAYLAND" not in env
 
 
 def test_build_launch_env_no_proxy_no_webrtc_no_tz():

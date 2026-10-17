@@ -33,6 +33,7 @@ pytestmark = pytest.mark.unit
 
 
 def _prefs(seed: int = 42, **kw):
+    kw.setdefault("timezone", "America/New_York")
     return translate_profile_to_prefs(generate_profile(seed), **kw)
 
 
@@ -419,7 +420,7 @@ def test_the_font_surface_is_pinnable_like_every_other_group():
     from invisible_core._fpforge import generate_profile
     profile = generate_profile(42, pin={"font.ui_family": "Tahoma",
                                         "font.monospace_size": 11})
-    prefs = translate_profile_to_prefs(profile)
+    prefs = translate_profile_to_prefs(profile, timezone="America/New_York")
     assert prefs["ui.font.menu"] == "Tahoma"
     assert prefs["font.size.monospace.ar"] == 11
 
@@ -493,7 +494,7 @@ def test_screen_colour_depth_is_declared_not_read_from_the_host():
     from invisible_core.prefs import translate_profile_to_prefs
 
     profile = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(profile)
+    prefs = translate_profile_to_prefs(profile, timezone="America/New_York")
 
     key = "zoom.stealth.screen.color_depth"
     assert key in prefs, (
@@ -504,7 +505,7 @@ def test_screen_colour_depth_is_declared_not_read_from_the_host():
     # Known-bad input: a depth no mainstream Windows desktop reports. It has to
     # survive the translation, otherwise the field is decorative.
     odd = replace_screen_depth(profile, 30)
-    assert translate_profile_to_prefs(odd)[key] == 30, (
+    assert translate_profile_to_prefs(odd, timezone="America/New_York")[key] == 30, (
         "a declared depth did not reach the pref, so the field is not wired"
     )
 
@@ -591,7 +592,7 @@ def test_the_cleartype_rendering_mode_stays_DEFAULT():
     """
     modes = set()
     for seed in (0xB005, 0xC0FFEE, 42, 970411, 1, 0xFFFF):
-        prefs = translate_profile_to_prefs(generate_profile(seed))
+        prefs = translate_profile_to_prefs(generate_profile(seed), timezone="America/New_York")
         assert MODE_PREF in prefs, (
             "the ClearType rendering mode is no longer emitted. Without it "
             "DirectWrite reads the MACHINE's settings, which is exactly the "
@@ -620,7 +621,7 @@ def test_the_coverage_ladder_is_still_declared_and_has_its_endpoints():
     edges.
     """
     for seed in (0xB005, 0xC0FFEE, 42):
-        prefs = translate_profile_to_prefs(generate_profile(seed))
+        prefs = translate_profile_to_prefs(generate_profile(seed), timezone="America/New_York")
         ladder = prefs.get("zoom.stealth.text.coverage_ladder")
         assert ladder, (
             "the coverage ladder is no longer declared. On Linux FreeType "

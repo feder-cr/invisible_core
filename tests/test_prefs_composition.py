@@ -136,7 +136,7 @@ def test_the_public_api_declares_the_leak_prefs_and_NO_endpoint(tmp_path):
     What the composer still owes a proxied session is the part that was never
     routing: the channels a proxy cannot cover.
     """
-    prefs = get_default_stealth_prefs(SEED, proxy=PROXY)
+    prefs = get_default_stealth_prefs(SEED, proxy=PROXY, timezone="America/New_York", locale="en-US")
     endpoint = {"network.proxy.type", "network.proxy.socks",
                 "network.proxy.socks_port", "network.proxy.socks_username",
                 "network.proxy.socks_password", "network.proxy.http",
@@ -157,7 +157,7 @@ def test_no_proxy_still_means_no_endpoint_prefs():
     fingerprint and are set whether or not a proxy is in play. Written the broad
     way first, and those two are why it went red.
     """
-    prefs = get_default_stealth_prefs(SEED)
+    prefs = get_default_stealth_prefs(SEED, timezone="America/New_York", locale="en-US")
     endpoint = {"network.proxy.type", "network.proxy.socks",
                 "network.proxy.socks_port", "network.proxy.socks_username",
                 "network.proxy.socks_password", "network.proxy.http",
@@ -184,7 +184,7 @@ def test_extra_prefs_beat_the_crash_prefs_and_humanize_beats_extra_prefs():
     composed = compose_session_prefs(
         _profile(),
         extra_prefs={crash_key: "mine", "stealthfox.humanize": "mine"},
-        survive_hard_kill=True, humanize=True,
+        survive_hard_kill=True, humanize=True, timezone="America/New_York",
     ).prefs
     assert composed[crash_key] == "mine", (
         "the crash layer overwrote an explicit override")
@@ -199,8 +199,8 @@ def test_humanize_none_is_not_humanize_false():
     """None leaves the prefs unwritten, False writes the pref off. The direct
     launch path has always left them alone, and the binary has its own default:
     never writing a pref is not the same as writing it false."""
-    off = compose_session_prefs(_profile(), humanize=False).prefs
-    untouched = compose_session_prefs(_profile(), humanize=None).prefs
+    off = compose_session_prefs(_profile(), humanize=False, timezone="America/New_York").prefs
+    untouched = compose_session_prefs(_profile(), humanize=None, timezone="America/New_York").prefs
     assert off["stealthfox.humanize"] is False
     assert "stealthfox.humanize" not in untouched
 
@@ -219,7 +219,7 @@ def test_the_hard_kill_prefs_can_be_overridden_by_the_caller():
     """setdefault, not assignment: a caller pinning either pref means to."""
     composed = compose_session_prefs(
         _profile(), survive_hard_kill=True,
-        extra_prefs={"toolkit.startup.max_resumed_crashes": 3},
+        extra_prefs={"toolkit.startup.max_resumed_crashes": 3}, timezone="America/New_York",
     ).prefs
     assert composed["toolkit.startup.max_resumed_crashes"] == 3
 
@@ -242,7 +242,7 @@ def test_the_visible_cursor_is_declared_by_every_core_path_and_defaults_on():
         "the shipped default moved; that is a decision, so move this "
         "assertion deliberately rather than to make a suite green")
 
-    silent = compose_session_prefs(_profile()).prefs
+    silent = compose_session_prefs(_profile(), timezone="America/New_York").prefs
     assert silent["stealthfox.showcursor"] is DEFAULT_SHOW_CURSOR
 
     off = get_default_stealth_prefs(SEED, locale=LOCALE, timezone=TZ,
@@ -257,7 +257,7 @@ def test_the_visible_cursor_is_declared_by_every_core_path_and_defaults_on():
 
     # And the two core paths agree on the VALUE, not only on the key - which is
     # what `test_the_two_core_paths_compose_the_same_prefs` above compares.
-    composed = compose_session_prefs(_profile(), show_cursor=True).prefs
+    composed = compose_session_prefs(_profile(), show_cursor=True, timezone="America/New_York").prefs
     assert composed["stealthfox.showcursor"] is True
 
 
@@ -270,6 +270,6 @@ def test_the_visible_cursor_is_independent_of_humanize():
     derivation would quietly forbid it.
     """
     both = compose_session_prefs(_profile(), humanize=False,
-                                 show_cursor=True).prefs
+                                 show_cursor=True, timezone="America/New_York").prefs
     assert both["stealthfox.humanize"] is False
     assert both["stealthfox.showcursor"] is True

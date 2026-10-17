@@ -17,6 +17,7 @@ import pytest
 
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import (
+    _WIN_DARK_COLORS,
     _WIN_LIGHT_COLORS,
     translate_profile_to_prefs,
 )
@@ -30,7 +31,7 @@ def test_translate_includes_gpu_renderer_windows(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     from invisible_core._webgl_personas import select_persona
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     persona = select_persona(42)
     assert prefs["zoom.stealth.webgl.renderer"] == persona["renderer"]
     assert prefs["zoom.stealth.webgl.renderer"].endswith(", D3D11)")
@@ -41,7 +42,7 @@ def test_translate_includes_gpu_renderer_windows(monkeypatch):
 @pytest.mark.unit
 def test_translate_includes_screen():
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs["zoom.stealth.screen.width"] == p.screen.css_width
     assert prefs["zoom.stealth.screen.height"] == p.screen.css_height
 
@@ -63,7 +64,7 @@ def test_the_screen_a_page_reads_is_the_panel_divided_by_the_scale(panel, dpr, c
 
     p = generate_profile(seed=7, pin={"screen.width": panel[0], "screen.height": panel[1],
                                       "screen.dpr": dpr})
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert (prefs["zoom.stealth.screen.width"], prefs["zoom.stealth.screen.height"]) == css
     geometry = context_geometry(p)
     assert geometry["screen"] == {"width": css[0], "height": css[1]}
@@ -91,7 +92,7 @@ def test_the_window_frame_is_declared_in_device_pixels_per_scale(dpr, frame, vie
 
     p = generate_profile(seed=7, pin={"screen.width": 2048, "screen.height": 1280,
                                       "screen.dpr": dpr})
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert (prefs["zoom.stealth.screen.frame_border"],
             prefs["zoom.stealth.screen.maximized_ui"],
             prefs["zoom.stealth.screen.popup_ui"],
@@ -109,7 +110,7 @@ def test_a_scale_with_no_measured_frame_is_refused():
     frame interpolated for 1.75 would be one no Windows machine draws."""
     p = generate_profile(seed=7, pin={"screen.dpr": 1.75})
     with pytest.raises(ValueError, match="no measured window frame"):
-        translate_profile_to_prefs(p)
+        translate_profile_to_prefs(p, timezone="America/New_York")
 
 
 @pytest.mark.unit
@@ -122,22 +123,22 @@ def test_the_old_window_pins_are_gone(key):
 
 @pytest.mark.unit
 def test_translate_is_deterministic_per_seed():
-    a = translate_profile_to_prefs(generate_profile(seed=42))
-    b = translate_profile_to_prefs(generate_profile(seed=42))
+    a = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
+    b = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
     assert a == b
 
 
 @pytest.mark.unit
 def test_translate_varies_across_seeds():
-    a = translate_profile_to_prefs(generate_profile(seed=1))
-    b = translate_profile_to_prefs(generate_profile(seed=2))
+    a = translate_profile_to_prefs(generate_profile(seed=1), timezone="America/New_York")
+    b = translate_profile_to_prefs(generate_profile(seed=2), timezone="America/New_York")
     assert a != b
 
 
 @pytest.mark.unit
 def test_translate_has_stealth_baseline_constants():
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs.get("privacy.resistFingerprinting") is False
     assert "media.peerconnection.enabled" in prefs
 
@@ -153,7 +154,7 @@ def test_the_accept_language_header_has_no_second_copy_here():
     zoom.stealth.http.accept_language back in the prefs, a hand-built copy of
     the header that once went out with q=0.5 on every request."""
     prefs = translate_profile_to_prefs(generate_profile(seed=7),
-                                       locale="it-IT")
+                                       locale="it-IT", timezone="America/New_York")
     assert "zoom.stealth.http.accept_language" not in prefs
     assert prefs["intl.accept_languages"] == "it-IT, it, en-US, en"
 
@@ -168,7 +169,7 @@ def test_gpu_renderer_persona_on_windows(monkeypatch):
     # PG2: Windows exposes a validated persona renderer (well-formed ANGLE bucket, NOT empty/native).
     monkeypatch.setattr(sys, "platform", "win32")
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     r = prefs["zoom.stealth.webgl.renderer"]
     assert r and r.startswith("ANGLE (") and r.rstrip().endswith(", D3D11)")
     assert prefs["zoom.stealth.webgl.vendor"].startswith("Google Inc. (")
@@ -182,7 +183,7 @@ def test_msaa_is_4_and_not_pinnable(monkeypatch):
     Both builds emit 4 now, and the key is no longer offered as a pin. The
     cross-platform assertion lives in tests/test_pin_surface.py."""
     monkeypatch.setattr(sys, "platform", "win32")
-    prefs = translate_profile_to_prefs(generate_profile(seed=42))
+    prefs = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
     assert prefs["webgl.msaa-samples"] == 4
     assert prefs["webgl.msaa-force"] is True
     with pytest.raises(ValueError):
@@ -211,7 +212,7 @@ def test_canvas_noise_mask_windows_uses_intel_path(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     nvidia = _persona_named("NVIDIA")
     p = generate_profile(seed=42, pin={"gpu.renderer": nvidia["renderer"]})
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
 
 
@@ -228,7 +229,7 @@ def test_webgl_extensions_persona_on_windows(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     from invisible_core._webgl_personas import select_persona
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     persona = select_persona(42)
     assert prefs["zoom.stealth.webgl.extensions"] == persona["prefs"]["zoom.stealth.webgl.extensions"]
     assert prefs["zoom.stealth.webgl2.extensions"] == persona["prefs"]["zoom.stealth.webgl2.extensions"]
@@ -251,12 +252,18 @@ def test_timezone_set_uses_juggler_pref():
 
 
 @pytest.mark.unit
-def test_timezone_empty_omits_the_key():
-    # TZ2
+@pytest.mark.parametrize("missing", [None, "", "  ", "auto", "AUTO"])
+def test_a_missing_timezone_is_refused_not_left_to_the_host(missing):
+    """TZ2. Until 49.46.0 this test was `test_timezone_empty_omits_the_key`:
+    an empty zone wrote no key, and the engine answered `Intl` and `Date` from
+    the host's operating system. The requirement changed on 2026-10-17 by the
+    owner's decision (28-valori-dell-host.md A16): the zone comes from the
+    exit, never from the machine, so the composition refuses to go on without
+    one - and "auto" is a request to resolve, which only prepare_session_geo
+    can do, not a zone."""
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, timezone="")
-    assert "juggler.timezone.override" not in prefs
-    assert "zoom.stealth.timezone" not in prefs
+    with pytest.raises(ValueError, match="timezone is missing"):
+        translate_profile_to_prefs(p, timezone=missing)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -268,7 +275,7 @@ def test_timezone_empty_omits_the_key():
 def test_extra_prefs_adds_custom_key():
     # EP1
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, extra_prefs={"custom.pref": 42})
+    prefs = translate_profile_to_prefs(p, extra_prefs={"custom.pref": 42}, timezone="America/New_York")
     assert prefs["custom.pref"] == 42
 
 
@@ -277,7 +284,7 @@ def test_extra_prefs_none_value_deletes_key():
     # EP2
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(
-        p, extra_prefs={"privacy.resistFingerprinting": None}
+        p, extra_prefs={"privacy.resistFingerprinting": None}, timezone="America/New_York"
     )
     assert "privacy.resistFingerprinting" not in prefs
 
@@ -286,7 +293,7 @@ def test_extra_prefs_none_value_deletes_key():
 def test_extra_prefs_overrides_existing_key():
     # EP3 - override a real baseline key (hw_seed is the live cross-process seed)
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, extra_prefs={"zoom.stealth.fpp.hw_seed": 999})
+    prefs = translate_profile_to_prefs(p, extra_prefs={"zoom.stealth.fpp.hw_seed": 999}, timezone="America/New_York")
     assert prefs["zoom.stealth.fpp.hw_seed"] == 999
 
 
@@ -294,8 +301,8 @@ def test_extra_prefs_overrides_existing_key():
 def test_extra_prefs_none_is_no_op():
     # EP4
     p = generate_profile(seed=42)
-    base = translate_profile_to_prefs(p)
-    with_none = translate_profile_to_prefs(p, extra_prefs=None)
+    base = translate_profile_to_prefs(p, timezone="America/New_York")
+    with_none = translate_profile_to_prefs(p, extra_prefs=None, timezone="America/New_York")
     assert base == with_none
 
 
@@ -303,8 +310,8 @@ def test_extra_prefs_none_is_no_op():
 def test_extra_prefs_empty_dict_is_no_op():
     # EP5
     p = generate_profile(seed=42)
-    base = translate_profile_to_prefs(p)
-    with_empty = translate_profile_to_prefs(p, extra_prefs={})
+    base = translate_profile_to_prefs(p, timezone="America/New_York")
+    with_empty = translate_profile_to_prefs(p, extra_prefs={}, timezone="America/New_York")
     assert base == with_empty
 
 
@@ -314,25 +321,35 @@ def test_extra_prefs_empty_dict_is_no_op():
 
 
 @pytest.mark.unit
-def test_system_colors_present_when_light_theme():
-    # SC1
-    p = generate_profile(seed=42, pin={"dark_theme": False})
-    prefs = translate_profile_to_prefs(p)
-    assert prefs["ui.systemUsesDarkTheme"] == 0
-    # Spot-check a few keys from the Win10 light palette.
-    for key in _WIN_LIGHT_COLORS:
-        assert key in prefs
-        assert prefs[key] == _WIN_LIGHT_COLORS[key]
+@pytest.mark.parametrize("dark", [False, True])
+def test_the_palette_of_both_schemes_is_declared_for_every_persona(dark):
+    """SC1 and SC2, one test since 49.46.0.
+
+    Until then a light persona got the light palette and a DARK persona got
+    none (SC2 asserted its absence), so its colours were the host's on both
+    schemes, and nobody had the `.dark` names at all. The requirement changed
+    with the retail measurement of 2026-10-17 (28-valori-dell-host.md A4): a
+    page asks for a scheme per element, retail answers from the scheme asked
+    for and not from the OS theme, so both tables go to every persona and
+    only `ui.systemUsesDarkTheme` follows the persona."""
+    p = generate_profile(seed=42, pin={"dark_theme": dark})
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
+    assert prefs["ui.systemUsesDarkTheme"] == int(dark)
+    for table in (_WIN_LIGHT_COLORS, _WIN_DARK_COLORS):
+        for key, value in table.items():
+            assert prefs.get(key) == value, key
 
 
 @pytest.mark.unit
-def test_system_colors_absent_when_dark_theme():
-    # SC2
-    p = generate_profile(seed=42, pin={"dark_theme": True})
-    prefs = translate_profile_to_prefs(p)
-    assert prefs["ui.systemUsesDarkTheme"] == 1
-    for key in _WIN_LIGHT_COLORS:
-        assert key not in prefs
+def test_every_dark_name_overrides_a_light_one():
+    """The engine reads `ui.<name>.dark` and falls back to `ui.<name>`
+    (GetColorFromPref), so a `.dark` entry whose plain name is not in the light
+    table would be a dark value with no light one beside it, the shape of a
+    typo in the name - the underscore spellings of menuhover and oddtreerow
+    are where one already happened."""
+    for key in _WIN_DARK_COLORS:
+        assert key.endswith(".dark"), key
+        assert key[:-len(".dark")] in _WIN_LIGHT_COLORS, key
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -344,7 +361,7 @@ def test_system_colors_absent_when_dark_theme():
 def test_locale_en_us_accept_languages():
     # LC1
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, locale="en-US")
+    prefs = translate_profile_to_prefs(p, locale="en-US", timezone="America/New_York")
     assert prefs["intl.accept_languages"] == "en-US, en"
 
 
@@ -359,9 +376,8 @@ def test_locale_underscore_form_normalized():
     the requested tag; for en-AU it is not, which test_session_locale.py pins.
     """
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, locale="de_DE")
+    prefs = translate_profile_to_prefs(p, locale="de_DE", timezone="America/New_York")
     assert prefs["intl.accept_languages"] == "de-DE, de, en-US, en"
-    assert prefs["general.useragent.locale"] == "de-DE"
     assert prefs["intl.locale.requested"] == "de-DE"
 
 
@@ -369,7 +385,7 @@ def test_locale_underscore_form_normalized():
 def test_locale_empty_falls_back_to_en_us():
     # LC3
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, locale="")
+    prefs = translate_profile_to_prefs(p, locale="", timezone="America/New_York")
     assert prefs["intl.accept_languages"] == "en-US, en"
 
 
@@ -383,9 +399,8 @@ def test_xvfb_workarounds_absent_on_windows(monkeypatch):
     # XW2
     monkeypatch.setattr(sys, "platform", "win32")
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert "gfx.webrender.all" not in prefs
-    assert "gfx.webrender.force-disabled" not in prefs
     assert "webgl.force-enabled" not in prefs
 
 
@@ -399,7 +414,7 @@ def test_virtual_display_workaround_applied_on_windows(monkeypatch):
     # VD1
     monkeypatch.setattr(sys, "platform", "win32")
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, virtual_display=True)
+    prefs = translate_profile_to_prefs(p, virtual_display=True, timezone="America/New_York")
     assert prefs["security.sandbox.gpu.level"] == 0
 
 
@@ -408,7 +423,7 @@ def test_virtual_display_workaround_absent_when_disabled(monkeypatch):
     # VD2
     monkeypatch.setattr(sys, "platform", "win32")
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, virtual_display=False)
+    prefs = translate_profile_to_prefs(p, virtual_display=False, timezone="America/New_York")
     assert "security.sandbox.gpu.level" not in prefs
 
 
@@ -421,7 +436,7 @@ def test_virtual_display_workaround_absent_when_disabled(monkeypatch):
 def test_lan_ip_matches_192_168_pattern():
     # LI1
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     ip = prefs["zoom.stealth.webrtc.host_ip"]
     m = re.match(r"^192\.168\.(\d+)\.(\d+)$", ip)
     assert m, f"unexpected LAN IP format: {ip!r}"
@@ -433,8 +448,8 @@ def test_lan_ip_matches_192_168_pattern():
 @pytest.mark.unit
 def test_lan_ip_deterministic_per_seed():
     # LI2
-    a = translate_profile_to_prefs(generate_profile(seed=42))["zoom.stealth.webrtc.host_ip"]
-    b = translate_profile_to_prefs(generate_profile(seed=42))["zoom.stealth.webrtc.host_ip"]
+    a = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")["zoom.stealth.webrtc.host_ip"]
+    b = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")["zoom.stealth.webrtc.host_ip"]
     assert a == b
 
 
@@ -442,7 +457,7 @@ def test_lan_ip_deterministic_per_seed():
 def test_lan_ip_seed_zero_has_no_zero_octets():
     # LI3: code adds +1 so neither dynamic octet should ever be 0.
     p = generate_profile(seed=0)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     ip = prefs["zoom.stealth.webrtc.host_ip"]
     octets = ip.split(".")
     assert octets[0] == "192"
@@ -467,7 +482,7 @@ def test_gpu_renderer_set_from_profile_on_linux(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     from invisible_core._webgl_personas import select_persona
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     persona = select_persona(42)
     assert prefs["zoom.stealth.webgl.renderer"] == persona["renderer"]
     assert prefs["zoom.stealth.webgl.renderer"].endswith(", D3D11)")
@@ -487,7 +502,7 @@ def test_msaa_on_linux_is_what_windows_emits(monkeypatch):
     which derives the expectation instead of hard-coding a count that can no
     longer occur."""
     monkeypatch.setattr(sys, "platform", "linux")
-    prefs = translate_profile_to_prefs(generate_profile(seed=42))
+    prefs = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
     assert prefs["webgl.msaa-samples"] == 4
     assert prefs["webgl.msaa-force"] is True
 
@@ -501,7 +516,7 @@ def test_canvas_noise_mask_intel_on_linux(monkeypatch):
     intel = _persona_named("Intel")
     p = generate_profile(seed=42, pin={"gpu.renderer": intel["renderer"],
                                        "gpu.vendor": intel["vendor"]})
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
 
 
@@ -515,7 +530,7 @@ def test_canvas_noise_mask_nvidia_on_linux(monkeypatch):
     nvidia = _persona_named("NVIDIA")
     p = generate_profile(seed=42, pin={"gpu.renderer": nvidia["renderer"],
                                        "gpu.vendor": nvidia["vendor"]})
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
 
 
@@ -526,7 +541,7 @@ def test_webgl_extensions_preserved_on_linux(monkeypatch):
     # instead of native Mesa's set.
     monkeypatch.setattr(sys, "platform", "linux")
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs["zoom.stealth.webgl.extensions"]
     assert prefs["zoom.stealth.webgl2.extensions"]
     # Spot-check a canonical Windows ANGLE extension is in the list.
@@ -541,10 +556,12 @@ def test_xvfb_workarounds_applied_on_linux(monkeypatch):
     # still override them via ``extra_prefs``.
     monkeypatch.setattr(sys, "platform", "linux")
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs["gfx.webrender.all"] is False
-    assert prefs["gfx.webrender.force-disabled"] is True
     assert prefs["webgl.force-enabled"] is True
+    # `gfx.webrender.force-disabled` is gone since 49.46.0: no file of the
+    # engine reads it ([B171], tests/test_pref_types.py).
+    assert "gfx.webrender.force-disabled" not in prefs
 
 
 @pytest.mark.unit
@@ -555,7 +572,7 @@ def test_xvfb_workarounds_caller_can_override(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(
-        p, extra_prefs={"webgl.force-enabled": False}
+        p, extra_prefs={"webgl.force-enabled": False}, timezone="America/New_York"
     )
     assert prefs["webgl.force-enabled"] is False
 
@@ -567,7 +584,7 @@ def test_virtual_display_no_op_on_linux(monkeypatch):
     # not pick up ``security.sandbox.gpu.level``.
     monkeypatch.setattr(sys, "platform", "linux")
     p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, virtual_display=True)
+    prefs = translate_profile_to_prefs(p, virtual_display=True, timezone="America/New_York")
     assert "security.sandbox.gpu.level" not in prefs
 
 
@@ -596,7 +613,7 @@ def test_the_apis_a_real_firefox_has_are_not_switched_off():
     what keeps someone from switching them off again for the network reason
     that is still written next to them.
     """
-    prefs = translate_profile_to_prefs(generate_profile(42))
+    prefs = translate_profile_to_prefs(generate_profile(42), timezone="America/New_York")
     assert prefs["geo.enabled"] is True
     assert prefs["dom.push.enabled"] is True
     # ⛔ And `dom.push.connection.enabled` is NOT declared at all any more.
@@ -637,7 +654,7 @@ def test_the_three_touch_surfaces_come_from_one_declaration():
     The bits are PointerCapabilities from ServoTypes.h: Coarse 1, Fine 2,
     Hover 4.
     """
-    desktop = translate_profile_to_prefs(generate_profile(42))
+    desktop = translate_profile_to_prefs(generate_profile(42), timezone="America/New_York")
     assert desktop["zoom.stealth.max_touch_points"] == 0
     # NEVER 2 - at 2 the engine calls PlatformSupportsTouch() and answers with
     # whatever machine it is running on.
@@ -648,7 +665,7 @@ def test_the_three_touch_surfaces_come_from_one_declaration():
     # And pinning the count alone has to move all three, or they are not one
     # declaration - they are three that happen to agree today.
     laptop = translate_profile_to_prefs(
-        generate_profile(42, pin={"hardware.max_touch_points": 10}))
+        generate_profile(42, pin={"hardware.max_touch_points": 10}), timezone="America/New_York")
     assert laptop["zoom.stealth.max_touch_points"] == 10
     assert laptop["dom.w3c_touch_events.enabled"] == 1
     # The primary pointer of a touch laptop is still the mouse; only the union
@@ -672,7 +689,7 @@ def test_a_touch_persona_ships_from_the_data_file_with_no_pin(monkeypatch):
 
     monkeypatch.setattr(_sampler, "_CPT_TOUCH",
                         {k: [{"value": 10, "prob": 1.0}] for k in _sampler._CPT_TOUCH})
-    p = translate_profile_to_prefs(generate_profile(42))
+    p = translate_profile_to_prefs(generate_profile(42), timezone="America/New_York")
     assert p["zoom.stealth.max_touch_points"] == 10
     assert p["dom.w3c_touch_events.enabled"] == 1
     assert p["zoom.stealth.pointer.primary"] == 6
@@ -724,7 +741,7 @@ def test_the_storage_quota_is_a_value_firefox_can_actually_report():
     # And the sampled path on top, because a correct table reached through a
     # broken translation is still the wrong number on the wire.
     for seed in (1, 42, 1234, 99999):
-        prefs = translate_profile_to_prefs(generate_profile(seed))
+        prefs = translate_profile_to_prefs(generate_profile(seed), timezone="America/New_York")
         mb = prefs["zoom.stealth.storage.quota_mb"]
         assert mb == 10240, seed
         assert mb * 1024 * 1024 == 10737418240, seed
@@ -732,7 +749,7 @@ def test_the_storage_quota_is_a_value_firefox_can_actually_report():
     # Still a field and still pinnable: on a genuinely small disk the real rule
     # is disk/10, and that persona has to remain expressible.
     pinned = translate_profile_to_prefs(
-        generate_profile(42, pin={"hardware.storage_quota_mb": 6553}))
+        generate_profile(42, pin={"hardware.storage_quota_mb": 6553}), timezone="America/New_York")
     assert pinned["zoom.stealth.storage.quota_mb"] == 6553
 
 
@@ -760,7 +777,7 @@ def test_no_pref_is_emitted_as_a_python_float():
     job object had each been excluded by measurement.
     """
     for seed in (0, 42, 999):
-        prefs = translate_profile_to_prefs(generate_profile(seed))
+        prefs = translate_profile_to_prefs(generate_profile(seed), timezone="America/New_York")
         floats = {k: v for k, v in prefs.items() if isinstance(v, float)}
         assert floats == {}, (
             "these prefs are emitted as Python floats, and Gecko has no float "

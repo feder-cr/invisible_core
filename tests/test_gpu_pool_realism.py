@@ -114,7 +114,7 @@ def test_no_seed_in_a_wide_sweep_draws_a_software_renderer():
     """
     drawn = {}
     for seed in range(_SWEEP):
-        renderer = get_default_stealth_prefs(seed=seed).get(
+        renderer = get_default_stealth_prefs(seed=seed, timezone="America/New_York", locale="en-US").get(
             "zoom.stealth.webgl.renderer", "")
         if _SOFTWARE.search(renderer):
             drawn[seed] = renderer
@@ -128,7 +128,7 @@ def test_the_seeds_that_appear_in_documentation_are_clean(seed):
     """42 is the one in the quickstart, and 42 was one of the 21. A pool
     constraint that only holds on average is no use to the reader who copies the
     example - they get the one draw everyone else can reproduce."""
-    prefs = get_default_stealth_prefs(seed=seed)
+    prefs = get_default_stealth_prefs(seed=seed, timezone="America/New_York", locale="en-US")
     renderer = prefs.get("zoom.stealth.webgl.renderer", "")
     assert renderer, f"seed {seed} produced no renderer at all"
     assert not _SOFTWARE.search(renderer), (
@@ -148,7 +148,7 @@ def test_every_seed_written_into_the_packages_own_source_is_clean():
     assert seeds, "no example seed found in the package source - has the pattern changed?"
     bad = {}
     for seed in sorted(seeds):
-        renderer = get_default_stealth_prefs(seed=seed).get(
+        renderer = get_default_stealth_prefs(seed=seed, timezone="America/New_York", locale="en-US").get(
             "zoom.stealth.webgl.renderer", "")
         if _SOFTWARE.search(renderer):
             bad[seed] = renderer

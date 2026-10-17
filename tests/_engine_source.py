@@ -1,9 +1,9 @@
 """The Firefox source the PINNED engine was built from, read at its commit.
 
-Three tests compare this package against the engine's source: the prefs the
-core emits against the names the engine reads, the font manifest against the
-file the build bundles, and the juggler provenance contract against the
-release producer. They used to read a WORKING TREE (`STEALTH_FIREFOX_SRC`,
+Four tests compare this package against the engine's source: the prefs the
+core emits against the names the engine reads, and against the TYPE it reads
+them with (`test_pref_types.py`), the font manifest against the file the build
+bundles, and the juggler provenance contract against the release producer. They used to read a WORKING TREE (`STEALTH_FIREFOX_SRC`,
 default `C:/ff/source`), which answers "what is checked out there right now" -
 and on the workbench that tree is shared with other sessions and sat at a commit
 from before firefox-38. On 2026-10-09 the core's pre-push hook refused the
@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 DEFAULT_REPO = "C:/ff/source"
 
@@ -96,3 +96,25 @@ class EngineSource:
             else:
                 self._grep[key] = out.stdout.decode("utf-8", errors="replace")
         return self._grep[key]
+
+    def lines_with(self, literals: Sequence[str],
+                   globs: Sequence[str]) -> Optional[List[Tuple[str, str]]]:
+        """Every line at the commit holding any of `literals` (fixed strings,
+        one search for all of them), as (path, line), or None when git failed -
+        the same three outcomes as `grep`, which drops the path this one
+        keeps. Fixed strings and not an alternation: a regex of a few dozen
+        branches over the whole tree took minutes where this takes seconds."""
+        args = ["grep", "-IF"]
+        for lit in literals:
+            args += ["-e", lit]
+        out = self._git(*args, self.commit, "--", *globs)
+        if out is None or out.returncode not in (0, 1):
+            return None
+        prefix = self.commit + ":"
+        found = []
+        for line in out.stdout.decode("utf-8", errors="replace").splitlines():
+            if line.startswith(prefix):
+                line = line[len(prefix):]
+            path, _, text = line.partition(":")
+            found.append((path, text))
+        return found

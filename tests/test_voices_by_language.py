@@ -42,7 +42,7 @@ def test_the_italian_set_is_the_measured_one_in_its_order():
     ("de-DE", VOICES), ("fr-FR", VOICES),
 ])
 def test_a_session_declares_the_voices_of_its_language(locale, expected):
-    prefs = translate_profile_to_prefs(generate_profile(seed=42), locale=locale)
+    prefs = translate_profile_to_prefs(generate_profile(seed=42), locale=locale, timezone="America/New_York")
     assert prefs[PREF] == expected
     assert voices_for(locale) == expected
 
@@ -50,11 +50,11 @@ def test_a_session_declares_the_voices_of_its_language(locale, expected):
 def test_an_explicit_pin_wins_over_the_language():
     pinned = "Microsoft Hedda - German (Germany)|de-DE|0|1"
     profile = generate_profile(seed=42, pin={"hardware.voices": pinned})
-    assert translate_profile_to_prefs(profile, locale="it-IT")[PREF] == pinned
+    assert translate_profile_to_prefs(profile, locale="it-IT", timezone="America/New_York")[PREF] == pinned
 
 
 @pytest.mark.parametrize("locale", ["en-US", "it-IT", "ja-JP"])
 def test_the_list_is_never_empty(locale):
     # The engine's declaration gate refuses an empty list rather than read the
     # operating system's voice registry.
-    assert translate_profile_to_prefs(generate_profile(seed=7), locale=locale)[PREF]
+    assert translate_profile_to_prefs(generate_profile(seed=7), locale=locale, timezone="America/New_York")[PREF]

@@ -389,20 +389,19 @@ class _LinuxVirtualDisplay:
         """What the browser's environment must carry to draw on this Xvfb.
 
         ``DISPLAY`` names the display, ``XAUTHORITY`` the file holding the
-        cookie the server asks for, the two GTK/Firefox switches keep the
-        toolkit on X11, and the five Wayland variables are named with ``None``
-        so the launcher REMOVES them: inherited from WSLg or GNOME they make
-        Firefox prefer the compositor over the display we set, and the window
-        leaks onto the real desktop. All of it is this session's, none of it
-        is the process's.
+        cookie the server asks for, and the five Wayland variables are named
+        with ``None`` so the launcher REMOVES them: inherited from WSLg or
+        GNOME they make Firefox prefer the compositor over the display we set,
+        and the window leaks onto the real desktop. All of it is this
+        session's, none of it is the process's. The X11 backend itself is not
+        here: every Linux session declares it, headed too, in
+        ``launch.build_launch_env``.
         """
         if not self._display:
             return {}
         env: dict = {
             "DISPLAY": self._display,
             "XAUTHORITY": self._auth_file,
-            "MOZ_ENABLE_WAYLAND": "0",
-            "GDK_BACKEND": "x11",
         }
         for k in _WAYLAND_LEAK_VARS:
             env[k] = None

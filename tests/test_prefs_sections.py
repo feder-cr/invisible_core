@@ -33,10 +33,10 @@ def profile():
 
 def test_the_caller_overlay_can_override_anything_the_pipeline_set(profile):
     """It runs LAST, and that is the contract the argument is documented with."""
-    plain = P.translate_profile_to_prefs(profile)
+    plain = P.translate_profile_to_prefs(profile, timezone="America/New_York")
     key = "zoom.stealth.hw_concurrency"
     assert key in plain
-    got = P.translate_profile_to_prefs(profile, extra_prefs={key: 999})
+    got = P.translate_profile_to_prefs(profile, extra_prefs={key: 999}, timezone="America/New_York")
     assert got[key] == 999
 
 
@@ -45,7 +45,7 @@ def test_the_caller_overlay_can_delete_a_pref_entirely(profile):
     setting it to "" - for `general.useragent.override` an empty string means a
     literally empty UA."""
     key = "zoom.stealth.hw_concurrency"
-    got = P.translate_profile_to_prefs(profile, extra_prefs={key: None})
+    got = P.translate_profile_to_prefs(profile, extra_prefs={key: None}, timezone="America/New_York")
     assert key not in got
 
 
@@ -110,7 +110,7 @@ def test_the_canvas_noise_mask_is_a_constant_not_a_branch(profile):
     reads as a per-vendor choice and is a constant compared against itself: the
     1/8 branch has never executed. Measured across 300 seeds before the change,
     every profile got 15."""
-    seen = {P.translate_profile_to_prefs(generate_profile(s))
+    seen = {P.translate_profile_to_prefs(generate_profile(s), timezone="America/New_York")
             ["zoom.stealth.canvas.noise_skip_mask"] for s in range(200)}
     assert seen == {P._CANVAS_NOISE_SKIP_MASK} == {15}
 
@@ -142,10 +142,14 @@ def _locale_prefs(tag):
 
 
 def test_the_locale_defaults_to_en_US_and_normalises_underscores():
-    assert _locale_prefs("")["general.useragent.locale"] == "en-US"
+    # `general.useragent.locale` was asserted here beside intl.locale.requested
+    # until 49.46.0, when the pref was found read by nothing in the pinned
+    # engine and removed (tests/test_pref_types.py); the requested locale is
+    # the pref that carries this value.
+    assert _locale_prefs("")["intl.locale.requested"] == "en-US"
+    assert "general.useragent.locale" not in _locale_prefs("it_IT")
 
     prefs = _locale_prefs("it_IT")
-    assert prefs["general.useragent.locale"] == "it-IT"
     assert prefs["intl.locale.requested"] == "it-IT"
 
 
@@ -178,7 +182,6 @@ def test_the_locale_override_carries_the_whole_accept_language_list():
     assert prefs["juggler.locale.override"] == prefs["intl.accept_languages"]
     assert prefs["juggler.locale.override"] == "fr-FR, fr, en-US, en"
     assert prefs["intl.locale.requested"] == "fr-FR"
-    assert prefs["general.useragent.locale"] == "fr-FR"
 
 
 @pytest.mark.unit
@@ -209,17 +212,19 @@ def test_the_primary_tag_of_the_list_is_what_every_tag_shaped_pref_says():
         first = prefs["juggler.locale.override"].split(",")[0].strip()
         assert first == primary, tag
         assert prefs["intl.locale.requested"] == first, tag
-        assert prefs["general.useragent.locale"] == first, tag
 
 
-def test_no_timezone_writes_no_timezone_pref():
-    """An empty timezone must leave the pref ABSENT, not set to "". The C++
-    chain reads this as the sole source of truth, and an empty override is not
-    the same as no override."""
+def test_no_timezone_is_refused_and_never_written_empty():
+    """Until 49.46.0 this was `test_no_timezone_writes_no_timezone_pref`: an
+    empty zone left the pref ABSENT, and an absent override is the host's zone.
+    The owner's rule of 2026-10-17 (28-valori-dell-host.md A16) makes the zone
+    always declared, so an empty one is refused; what still holds from the old
+    test is that "" is never written as a value."""
     prefs = {}
-    P._apply_timezone(prefs, "")
+    with pytest.raises(ValueError):
+        P._apply_timezone(prefs, "")
     assert "juggler.timezone.override" not in prefs
-    P._apply_timezone(prefs, "Europe/Rome")
+    P._apply_timezone(prefs, " Europe/Rome ")
     assert prefs["juggler.timezone.override"] == "Europe/Rome"
 
 
@@ -248,19 +253,24 @@ def test_the_same_seed_gives_the_same_host_ip(profile):
     assert a == b, "the synthetic ICE candidate must be stable per session"
 
 
-def test_a_light_theme_brings_the_windows_colour_palette(profile):
+def test_the_theme_moves_the_os_flag_and_not_the_palette(profile):
+    """Until 49.46.0 this was `test_a_light_theme_brings_the_windows_colour_palette`
+    and asserted that a dark theme brought NO palette - the host's colours on
+    both schemes. Both schemes' tables now go to every persona (A4 of
+    28-valori-dell-host.md); the theme decides only what the OS says it is."""
     dark, light = {}, {}
 
     class _P:
         dark_theme = True
     P._apply_theme(dark, _P())
     assert dark["ui.systemUsesDarkTheme"] == 1
-    assert not (set(dark) & set(P._WIN_LIGHT_COLORS))
 
     _P.dark_theme = False
     P._apply_theme(light, _P())
     assert light["ui.systemUsesDarkTheme"] == 0
-    assert set(P._WIN_LIGHT_COLORS) <= set(light)
+    palette = set(P._WIN_LIGHT_COLORS) | set(P._WIN_DARK_COLORS)
+    assert palette <= set(dark) and palette <= set(light)
+    assert {k: dark[k] for k in palette} == {k: light[k] for k in palette}
 
 
 def test_the_codec_prefs_use_names_the_binary_actually_reads(profile):
@@ -288,7 +298,7 @@ def test_uploading_a_real_file_is_allowed_by_the_parent_process(profile):
     one has no section of its own: it is a launch-wide capability, and the test
     that matters is that every session gets it - not that some helper emits it.
     """
-    prefs = P.translate_profile_to_prefs(profile)
+    prefs = P.translate_profile_to_prefs(profile, timezone="America/New_York")
     assert prefs.get("dom.file.createInChild") is True, (
         "without dom.file.createInChild every file upload fails with an "
         "InvalidStateError that names nothing: see [B178]")

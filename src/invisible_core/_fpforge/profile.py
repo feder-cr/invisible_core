@@ -29,6 +29,17 @@ class ScreenProfile:
     avail_height: int
     dpr: float
     tier: str
+    #: The monitor's refresh rate in Hz, which is the cadence of
+    #: requestAnimationFrame: a page reads it from the gap between two rAF
+    #: timestamps. Emitted as `layout.frame_rate`. At its default of -1 the
+    #: engine follows the HOST's display - DwmGetCompositionTimingInfo on
+    #: Windows, GLX/Xrandr or a software 60 on Linux - so the same persona
+    #: answered 119.9 on this workbench's Windows and 58.4 on its Linux
+    #: (28-valori-dell-host.md A1). NOT sampled: there is no measured
+    #: distribution of Windows refresh rates to draw from, and 60 is what an
+    #: office laptop or monitor runs at. Pinnable, so a 144 Hz gaming persona is
+    #: one pin away.
+    refresh_hz: int
     #: Screen colour depth in bits. NOT sampled: 24 is what every mainstream
     #: Windows desktop reports, and a persona that varied it would be varying a
     #: thing real machines do not vary. It is a FIELD rather than a constant in
@@ -115,6 +126,15 @@ class ScreenProfile:
 class HardwareProfile:
     concurrency: int
     storage_quota_mb: int
+    #: Windows 11's "Automatically hide scroll bars" (Settings, Accessibility,
+    #: Visual effects), on by default: scrollbars draw over the content and a
+    #: scrolling box loses no width to them, so `offsetWidth - clientWidth`
+    #: is 0. Off, they take 17 CSS px. Emitted as `ui.useOverlayScrollbars`,
+    #: which the engine reads before it asks the platform - on Windows the live
+    #: setting (WindowsUIUtils), on Linux GTK's own overlay switch. A field,
+    #: like accessibility_overrides, because it is a setting a real user
+    #: changes, and one a page reads in one line.
+    overlay_scrollbars: bool
     #: navigator.maxTouchPoints. NOT sampled: a desktop Windows machine reports
     #: 0, and the GPU personas we ship are all desktop parts, so varying this
     #: would contradict the rest of the identity.
@@ -249,6 +269,20 @@ class FontProfile:
     """
     ui_family: str
     ui_size: str
+    #: The family of the three form-control fonts, `-moz-button`, `-moz-field`
+    #: and `-moz-list`, which is NOT the shell font: Windows Firefox builds
+    #: them from the message font with the name replaced by "MS Shell Dlg 2"
+    #: (widget/windows/nsLookAndFeel.cpp, GetLookAndFeelFont), a registry alias
+    #: the bundle resolves to Tahoma. A page reads it with one
+    #: `getComputedStyle(input).fontFamily` - retail 151 answers
+    #: `"MS Shell Dlg \32 "` - and in the size of every input, select and
+    #: button. Until 49.46.0 these three said "Segoe UI", copied from an all.js
+    #: comment claiming a real Windows Firefox draws its controls in the shell
+    #: font; measured, it does not (28-valori-dell-host.md A7). Only the
+    #: family comes from here: a page sizes these three 2pt below its default
+    #: proportional font (nsLayoutUtils::ComputeSystemFont), 13.333px at 16px,
+    #: on every platform.
+    dialog_family: str
     monospace_size: int
     #: The grayscale coverage levels a Windows glyph edge produces, ascending,
     #: first 0 and last 255 so a snap never moves a fully transparent or fully
@@ -319,8 +353,10 @@ _PIN_GROUPS = {
     # description of a decision already taken and changed nothing else. The FIELD
     # stays on ScreenProfile, where it is an honest label; what went is the
     # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
-    "screen": {"width", "height", "dpr", "taskbar_px", "color_depth"},
-    "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
+    "screen": {"width", "height", "dpr", "taskbar_px", "color_depth",
+               "refresh_hz"},
+    "hardware": {"concurrency", "storage_quota_mb", "overlay_scrollbars",
+                 "max_touch_points",
                  "voices", "fake_media_devices", "media_enumeration_ms",
                  "storage_enabled", "generics",
                  "accessibility_overrides"},
@@ -343,7 +379,8 @@ _PIN_GROUPS = {
     # overridden is a constant buried in a different file, not a field. They
     # were added to FontProfile on 2026-08-08 and left out of this table, and
     # the test below is what said so.
-    "font": {"ui_family", "ui_size", "monospace_size", "alpha_ladder",
+    "font": {"ui_family", "ui_size", "dialog_family", "monospace_size",
+             "alpha_ladder",
              "manifest",
              "cleartype_gamma", "cleartype_contrast", "cleartype_level",
              "cleartype_pixel_structure", "cleartype_rendering_mode",
@@ -430,6 +467,7 @@ _PIN_TO_RAW = {
     # as any sampled field - one mechanism, not two.
     "font.ui_family": "font_ui_family",
     "font.ui_size": "font_ui_size",
+    "font.dialog_family": "font_dialog_family",
     "font.monospace_size": "font_monospace_size",
     "font.alpha_ladder": "font_alpha_ladder",
     "font.manifest": "font_manifest",
@@ -445,6 +483,7 @@ _PIN_TO_RAW = {
     "font.freetype_contrast": "font_freetype_contrast",
     "screen.color_depth": "screen_color_depth",
     "screen.taskbar_px": "taskbar_px",
+    "screen.refresh_hz": "screen_refresh_hz",
     "hardware.max_touch_points": "max_touch_points",
     "hardware.media_enumeration_ms": "media_enumeration_ms",
     "hardware.voices": "voices",
@@ -452,6 +491,7 @@ _PIN_TO_RAW = {
     "hardware.storage_enabled": "storage_enabled",
     "hardware.generics": "generics",
     "hardware.accessibility_overrides": "accessibility_overrides",
+    "hardware.overlay_scrollbars": "overlay_scrollbars",
     "dark_theme": "dark_theme",
     "branding": "branding",
 }
@@ -492,6 +532,9 @@ FONT_FREETYPE_CONTRAST = 100
 #: from the panel: a wide-gamut monitor answers 30, and a persona claiming an
 #: office laptop with a 30-bit display is a contradiction a page can read.
 SCREEN_COLOR_DEPTH = 24
+
+#: An ordinary office monitor, see ScreenProfile.refresh_hz.
+SCREEN_REFRESH_HZ = 60
 
 #: The Windows taskbar, re-exported so a pin can reach it by the same name
 #: as every other declared constant. The value lives in constants.py, which
@@ -560,6 +603,9 @@ STORAGE_ENABLED = True
 #: An ordinary desktop with no accessibility overrides turned on.
 ACCESSIBILITY_OVERRIDES = False
 
+#: Windows 11's default, see HardwareProfile.overlay_scrollbars.
+OVERLAY_SCROLLBARS = True
+
 #: The files a page can ask the branding for, under chrome://branding/content/
 #: and resource://usercontext-content/branding/ - every name the branding
 #: package of Firefox 151 answers. A page reads them (the about dialog's
@@ -625,6 +671,8 @@ GENERICS = chr(10).join([
 #: The canonical Windows values. Not sampled - see FontProfile for why.
 FONT_UI_FAMILY = "Segoe UI"
 FONT_UI_SIZE = "12"          # string: Preferences::GetFloat parses text
+#: Windows' form-control font name, see FontProfile.dialog_family.
+FONT_DIALOG_FAMILY = "MS Shell Dlg 2"
 FONT_MONOSPACE_SIZE = 13     # Firefox ships 13 on Windows, 12 in its Unix block
 
 #: DirectWrite's grayscale coverage ladder, 17 levels. Lives here rather than in
@@ -805,6 +853,7 @@ def generate_profile(
     # `to_prefs_dict()` reports them alongside everything else.
     raw.setdefault("font_ui_family", FONT_UI_FAMILY)
     raw.setdefault("font_ui_size", FONT_UI_SIZE)
+    raw.setdefault("font_dialog_family", FONT_DIALOG_FAMILY)
     raw.setdefault("font_monospace_size", FONT_MONOSPACE_SIZE)
     raw.setdefault("font_alpha_ladder", FONT_ALPHA_LADDER)
     raw.setdefault("font_manifest", FONT_MANIFEST)
@@ -817,6 +866,7 @@ def generate_profile(
     raw.setdefault("font_freetype_contrast", FONT_FREETYPE_CONTRAST)
     raw.setdefault("screen_color_depth", SCREEN_COLOR_DEPTH)
     raw.setdefault("taskbar_px", TASKBAR_PX)
+    raw.setdefault("screen_refresh_hz", SCREEN_REFRESH_HZ)
     # No setdefault for max_touch_points: the forge samples it, and a floor
     # here would be a second source of truth that agrees until it does not.
     # Empty = "the voices of the session's language" (voices_for), which only
@@ -826,6 +876,7 @@ def generate_profile(
     raw.setdefault("storage_enabled", STORAGE_ENABLED)
     raw.setdefault("generics", GENERICS)
     raw.setdefault("accessibility_overrides", ACCESSIBILITY_OVERRIDES)
+    raw.setdefault("overlay_scrollbars", OVERLAY_SCROLLBARS)
     raw.setdefault("branding", BRANDING)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
@@ -862,12 +913,14 @@ def generate_profile(
             avail_height=int(raw["screen_avail_h"]),
             dpr=float(raw["dpr"]),
             tier=str(raw.get("screen_tier", "")),
+            refresh_hz=int(raw["screen_refresh_hz"]),
             color_depth=int(raw["screen_color_depth"]),
             taskbar_px=int(raw["taskbar_px"]),
         ),
         hardware=HardwareProfile(
             concurrency=int(raw["hw_concurrency"]),
             storage_quota_mb=int(raw["storage_quota_mb"]),
+            overlay_scrollbars=bool(raw["overlay_scrollbars"]),
             max_touch_points=int(raw["max_touch_points"]),
             voices=str(raw["voices"]),
             fake_media_devices=bool(raw["fake_media_devices"]),
@@ -893,6 +946,7 @@ def generate_profile(
             # str(), not int(): the pref is read as text and an int here would
             # travel all the way to a silently-ignored pref.
             ui_size=str(raw["font_ui_size"]),
+            dialog_family=str(raw["font_dialog_family"]),
             monospace_size=int(raw["font_monospace_size"]),
             alpha_ladder=tuple(int(v) for v in raw["font_alpha_ladder"]),
             manifest=str(raw["font_manifest"]),

@@ -249,8 +249,11 @@ def test_the_display_never_touches_the_process_environment(monkeypatch):
     vd.start()
     env = vd.launch_env()
     assert env["DISPLAY"] == ":123"
-    assert env["MOZ_ENABLE_WAYLAND"] == "0"
-    assert env["GDK_BACKEND"] == "x11"
+    # The X11 backend is not the Xvfb's to say since 49.46.0: every Linux
+    # session declares it, headed too, in launch.build_launch_env (A9 of
+    # 28-valori-dell-host.md). Two places saying it is the duplicate that let
+    # the headed session go without.
+    assert "MOZ_ENABLE_WAYLAND" not in env and "GDK_BACKEND" not in env
     for k in headless._WAYLAND_LEAK_VARS:
         assert k in env and env[k] is None, k
     assert dict(os.environ) == before, "start() wrote into the process"
@@ -312,16 +315,16 @@ def test_occlusion_tracking_is_off_for_every_session():
     profile = generate_profile(seed=4242)
     key = "widget.windows.window_occlusion_tracking.enabled"
 
-    plain = compose_session_prefs(profile).prefs
+    plain = compose_session_prefs(profile, timezone="America/New_York").prefs
     assert plain[key] is False, (
         "with no flag the tracker would stay on, and the page would read a "
         "browser in the background")
 
-    hidden = compose_session_prefs(profile, virtual_display=True).prefs
+    hidden = compose_session_prefs(profile, virtual_display=True, timezone="America/New_York").prefs
     assert hidden[key] is False
 
     # And an explicit caller override must still win: it is a setdefault.
-    forced = compose_session_prefs(profile, extra_prefs={key: True}).prefs
+    forced = compose_session_prefs(profile, extra_prefs={key: True}, timezone="America/New_York").prefs
     assert forced[key] is True
 
 
@@ -340,11 +343,11 @@ def test_occlusion_is_one_decision_for_both_engines(monkeypatch):
              "zoom.stealth.widget.occlusion_tracking.enabled")
     profile = generate_profile(seed=4242)
 
-    emitted = P.compose_session_prefs(profile).prefs
+    emitted = P.compose_session_prefs(profile, timezone="America/New_York").prefs
     assert [emitted[n] for n in names] == [False, False]
 
     monkeypatch.setattr(P, "OCCLUSION_TRACKING", True)
-    flipped = P.compose_session_prefs(profile).prefs
+    flipped = P.compose_session_prefs(profile, timezone="America/New_York").prefs
     assert [flipped[n] for n in names] == [True, True], (
         "one of the two names does not follow the declaration")
 
@@ -361,10 +364,10 @@ def test_the_focus_follows_the_session_not_the_desktop(monkeypatch):
 
     key = "zoom.stealth.focus.ignore_os_deactivation"
     profile = generate_profile(seed=4242)
-    assert P.compose_session_prefs(profile).prefs[key] is True
+    assert P.compose_session_prefs(profile, timezone="America/New_York").prefs[key] is True
 
     monkeypatch.setattr(P, "IGNORE_OS_DEACTIVATION", False)
-    assert P.compose_session_prefs(profile).prefs[key] is False
+    assert P.compose_session_prefs(profile, timezone="America/New_York").prefs[key] is False
 
 
 

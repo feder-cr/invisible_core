@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -104,6 +105,17 @@ def tz_env(timezone: str) -> str:
     return _IANA_TO_POSIX_TZ.get(timezone, timezone)
 
 
+#: The display backend of EVERY Linux session, hidden or headed (A9 of
+#: 28-valori-dell-host.md). Until 49.46.0 only the hidden session's Xvfb
+#: carried these two, so a headed session inherited the host's: on a Wayland
+#: desktop (WSLg, GNOME) the browser ran on Wayland, with a window geometry,
+#: a scale and a clipboard of a different backend from the one every other
+#: session declares. One declaration for both modes, here, where the
+#: environment is composed; a headed X11 session draws through the
+#: desktop's XWayland, as `DISPLAY` says.
+_LINUX_DISPLAY_BACKEND = {"MOZ_ENABLE_WAYLAND": "0", "GDK_BACKEND": "x11"}
+
+
 #: The private name kept as an alias, not a second body. It was byte-identical
 #: to `tz_env` above - two definitions of a ten-entry table lookup whose Phoenix
 #: row exists because getting it wrong made an identification service deduce the
@@ -175,6 +187,8 @@ def build_launch_env(
         # without a proxy it is simply what an ordinary browser does. Measured
         # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
         env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] = "1"
+    if sys.platform.startswith("linux"):
+        env.update(_LINUX_DISPLAY_BACKEND)
     env.pop(DESKTOP_ENV, None)
     for k, v in (display_env or {}).items():
         if v is None:

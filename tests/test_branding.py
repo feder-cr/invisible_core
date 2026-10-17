@@ -87,7 +87,7 @@ def test_every_shipped_set_can_be_pinned_and_is_declared_as_its_archive(branding
     _validate_pin_key("branding")
     assert _PIN_TO_RAW["branding"] == "branding"
     profile = generate_profile(seed=42, pin={"branding": branding})
-    uri = translate_profile_to_prefs(profile)[PREF]
+    uri = translate_profile_to_prefs(profile, timezone="America/New_York")[PREF]
     # The form the engine accepts (StealthBrandingIsDeclaredArchive): a file:
     # URI of a file, without a backslash or a '!', which would end the archive
     # part of the jar: URI the engine builds from it.
@@ -99,14 +99,14 @@ def test_every_shipped_set_can_be_pinned_and_is_declared_as_its_archive(branding
 @pytest.mark.unit
 def test_the_directory_pref_is_gone():
     # Renamed before it ever shipped: a directory is the wrong channel class.
-    assert "zoom.stealth.branding.dir" not in translate_profile_to_prefs(generate_profile(seed=42))
+    assert "zoom.stealth.branding.dir" not in translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
 
 
 @pytest.mark.unit
 def test_an_archive_of_ones_own_is_declared(own_branding):
     profile = generate_profile(seed=42, pin={"branding": str(own_branding)})
     assert profile.branding == str(own_branding.resolve())
-    assert _file_of(translate_profile_to_prefs(profile)[PREF]) == own_branding.resolve()
+    assert _file_of(translate_profile_to_prefs(profile, timezone="America/New_York")[PREF]) == own_branding.resolve()
 
 
 @pytest.mark.unit

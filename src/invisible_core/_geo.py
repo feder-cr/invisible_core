@@ -638,10 +638,12 @@ def _egress_country(egress_ip: Optional[str], proxy: Optional[Dict[str, str]],
     try:
         # ⛔ WHAT THE CALLER ALREADY HAS IS REUSED: `prepare_session_geo` has
         # already paid this round trip and now carries the result even without a
-        # proxy. Discovery happens only when there is nothing to reuse - the case
-        # of an explicit timezone, where nobody has asked the network anything
-        # yet - and never a second time after `prepare_session_geo` already
-        # failed to discover (``may_discover=False``).
+        # proxy. Discovery happens only when there is nothing to reuse - the
+        # language decided on its own (`decide_session_locale`), where nobody
+        # has asked the network anything yet - and never a second time after
+        # `prepare_session_geo` already failed to discover
+        # (``may_discover=False``). Until 49.46.0 an explicit timezone was a
+        # second such case: `prepare_session_geo` did not ask without a proxy.
         #
         # And discovery stays FORBIDDEN behind a proxy: if `egress_ip` is missing
         # there, discovery has failed, and falling back to the direct address
@@ -883,15 +885,21 @@ def prepare_session_geo(
     tz = (timezone or "").strip()
     proxy_set = _proxy_is_set(proxy)
 
-    # One discovery, reused below. Behind a proxy we always want the egress IP
-    # (for WebRTC) regardless of the timezone setting.
+    # ⛔ ONE DISCOVERY, WITH A PROXY OR WITHOUT ONE, reused by the zone, the
+    # language and the position. The session's geography is the EXIT's, and
+    # without a proxy the exit is the host's public address, never its
+    # operating system (the owner's decision of 2026-10-17,
+    # 28-valori-dell-host.md A16). Until 49.46.0 this asked only behind a
+    # proxy, so a session without one and with an explicit zone had no exit at
+    # all: no position, and a language only if "auto" went and asked on its
+    # own. A failure is kept, not raised: an explicit zone does not need the
+    # address, and the "auto" branch below raises with it.
     egress_ip: Optional[str] = None
     egress_err: Optional[Exception] = None
-    if proxy_set:
-        try:
-            egress_ip = discover_egress_ip(proxy)
-        except Exception as exc:  # noqa: BLE001
-            egress_err = exc
+    try:
+        egress_ip = discover_egress_ip(proxy if proxy_set else None)
+    except Exception as exc:  # noqa: BLE001
+        egress_err = exc
 
     # Timezone resolution - same precedence as resolve_session_timezone.
     def _coordinate(ip: "Optional[str]") -> "tuple[Optional[float], Optional[float]]":
@@ -912,17 +920,15 @@ def prepare_session_geo(
 
     if tz and tz.lower() != "auto":
         lat, lon = _coordinate(egress_ip)
-        # An explicit zone asked the network nothing without a proxy, so an
-        # "auto" language may still discover here: it is the first ask, not a
-        # repeat. Behind a proxy `_decide` never discovers on its own.
+        # The address was asked once above; the language reuses it and never
+        # asks again, and a failure there is the en-US fallback it announces.
         return SessionGeo(tz, egress_ip, lat, lon,
                           _srflx_suppressed(proxy, egress_ip),  # explicit IANA wins
                           _decide(locale, egress_ip=egress_ip, proxy=proxy,
-                                  may_discover=True, discovery_failure=egress_err))
-    ip: Optional[str] = None
+                                  may_discover=False, discovery_failure=egress_err))
+    ip: Optional[str] = egress_ip
     try:
-        ip = egress_ip if proxy_set else discover_egress_ip(None)
-        if ip is None:  # proxy set but discovery failed above
+        if ip is None:  # the discovery above failed
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
         lat, lon = _coordinate(ip)
         zone = ip_to_timezone(ip, _geoip_database(ip, proxy_set))
@@ -931,10 +937,6 @@ def prepare_session_geo(
     except Exception as exc:  # noqa: BLE001
         raise GeoTimezoneError(f"the egress timezone could not be resolved: {exc}",
                                kind="geoip_unavailable") from exc
-    # ⛔ IT CARRIES `ip`, NOT `egress_ip`. Behind a proxy they are the same
-    # value; without one, `ip` is the fact this round-trip has just paid for
-    # and `egress_ip` is `None`. Carrying the second meant throwing the
-    # discovery away and making the language lookup do it again.
     return SessionGeo(zone, ip, lat, lon, _srflx_suppressed(proxy, ip),
                       _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False))
 

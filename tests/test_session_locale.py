@@ -73,11 +73,15 @@ def _egress_country_is(monkeypatch, country, *, ip="203.0.113.7"):
 # ──────────────────────────────────────────────────────────────────────
 
 def test_every_tag_shaped_pref_agrees_with_the_list_navigator_reports():
-    """Red on 35.32.0: general.useragent.locale was "en-AU", the list en-US."""
-    prefs = translate_profile_to_prefs(generate_profile(seed=7), locale="en-AU")
+    """Red on 35.32.0: general.useragent.locale was "en-AU", the list en-US.
+
+    That pref is gone since 49.46.0 - nothing in the pinned engine reads it
+    (tests/test_pref_types.py) - so the tag-shaped pref left to agree is the
+    requested locale, and the dead one must not come back."""
+    prefs = translate_profile_to_prefs(generate_profile(seed=7), locale="en-AU", timezone="America/New_York")
     first = prefs["intl.accept_languages"].split(",")[0].strip()
     assert first == prefs["juggler.locale.override"].split(",")[0].strip()
-    assert prefs["general.useragent.locale"] == first, prefs["general.useragent.locale"]
+    assert "general.useragent.locale" not in prefs
     assert prefs["intl.locale.requested"] == first, prefs["intl.locale.requested"]
 
 
@@ -93,7 +97,6 @@ def test_an_australian_egress_is_one_language_end_to_end(monkeypatch):
 
     prefs = compose_session_prefs(generate_profile(seed=7), locale=geo.locale,
                                   timezone=geo.timezone).prefs
-    assert prefs["general.useragent.locale"] == "en-US"
     assert prefs["intl.locale.requested"] == "en-US"
     assert prefs["intl.accept_languages"] == "en-US, en"
     assert prefs["juggler.locale.override"] == "en-US, en"
@@ -103,9 +106,9 @@ def test_a_tag_and_its_decision_give_the_same_prefs():
     """One derivation, not two: handing the tag or the decision is the same."""
     profile = generate_profile(seed=11)
     for tag in ("en-AU", "fr-BE", "it-IT", "pt_BR", "ja-JP", "", None):
-        by_tag = translate_profile_to_prefs(profile, locale=tag)
+        by_tag = translate_profile_to_prefs(profile, locale=tag, timezone="America/New_York")
         by_decision = translate_profile_to_prefs(
-            profile, locale=decide_session_locale(tag))
+            profile, locale=decide_session_locale(tag), timezone="America/New_York")
         assert by_tag == by_decision, tag
 
 
@@ -176,7 +179,7 @@ def test_nobody_asking_is_en_US(monkeypatch, asked):
 def test_a_pure_builder_refuses_auto():
     """It used to write the language "auto" into the prefs verbatim."""
     with pytest.raises(ValueError, match="auto"):
-        translate_profile_to_prefs(generate_profile(seed=1), locale="auto")
+        translate_profile_to_prefs(generate_profile(seed=1), locale="auto", timezone="America/New_York")
 
 
 def test_a_context_locale_is_decided_without_the_network(monkeypatch):

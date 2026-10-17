@@ -235,14 +235,14 @@ def test_the_available_screen_rect_matches_what_the_engine_computes():
     # and the number the ENGINE will use comes from the same place
     for seed in (1, 42, 777):
         p = generate_profile(seed=seed)
-        prefs = translate_profile_to_prefs(p)
+        prefs = translate_profile_to_prefs(p, timezone="America/New_York")
         assert prefs["zoom.stealth.screen.taskbar_px"] == TASKBAR_PX
         assert p.screen.height - p.screen.avail_height == TASKBAR_PX
 
     # a pin has to move all three together, or it is not one source
     pinned = generate_profile(seed=42, pin={"screen.taskbar_px": 60})
     assert pinned.screen.taskbar_px == 60
-    assert translate_profile_to_prefs(pinned)["zoom.stealth.screen.taskbar_px"] == 60
+    assert translate_profile_to_prefs(pinned, timezone="America/New_York")["zoom.stealth.screen.taskbar_px"] == 60
 
 
 def test_no_pool_for_any_platform_carries_a_software_renderer():
