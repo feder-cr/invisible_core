@@ -52,7 +52,25 @@ REPO = "invisible_core"
 # `test_the_install_e2e_never_imports_the_package_under_test` keeps it that way.
 # The wrapper's test_release_e2e.py carries the same rule in prose and has since
 # the day it hit the same wall.
+#
+# ⛔ AND NOTHING THAT POINTS AT A CHECKOUT CROSSES INTO THE VENV. conftest.py
+# puts this tree's `src` on PYTHONPATH for every child a test spawns, which is
+# right for every other file and exactly wrong here: the venv's python then
+# imports THIS CHECKOUT, not the copy the index served. Measured 2026-10-17 on
+# the first run of the uv fixture: the installed distribution said 49.44.0
+# (the index) and the module said 49.45.0 (this tree), inside "one" install.
+# From 2026-09-16, when conftest.py started exporting it, to that day, every
+# check here that imports the package read the checkout: the Playwright check
+# read the checkout's imports, and "the packaged seal is in the wheel" found the
+# checkout's seal.json, so a wheel without it would have passed. The wrapper's
+# test_release_e2e.py strips the same variables, for the same measured reason.
+_LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "INVISIBLE_SEAL_FILE")
+
+
 def _run(cmd, *, timeout: int = 600, check: bool = True, env=None, cwd=None):
+    env = dict(os.environ if env is None else env)
+    for k in _LEAKS:
+        env.pop(k, None)
     r = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
                        timeout=timeout, env=env,
                        cwd=str(cwd) if cwd is not None else None)
