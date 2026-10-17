@@ -67,6 +67,18 @@ def test_the_memory_is_bounded_and_keeps_the_newest():
     assert f.see("Network.requestFinished", {"requestId": "F%d" % (_KEPT + 9)})
 
 
+def test_asking_classifies_nothing_and_the_answer_outlives_the_request():
+    """`is_favicon` is the server's question: it never decides on its own, so
+    there is one memory to agree with, and that memory still answers after the
+    request has finished (a page replays the events it held at birth later)."""
+    f = FaviconRequests()
+    assert not f.is_favicon("FAV")
+    f.see(*_sent("FAV", "http://h/favicon.ico"))
+    f.see("Network.requestFinished", {"requestId": "FAV"})
+    assert f.is_favicon("FAV")
+    assert not f.is_favicon(None)
+
+
 def test_an_event_without_a_request_id_is_not_a_favicon():
     assert not FaviconRequests().see("Network.requestWillBeSent",
                                      {"url": "http://h/favicon.ico"})

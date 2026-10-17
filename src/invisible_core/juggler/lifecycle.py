@@ -187,7 +187,9 @@ class Lifecycle:
         self.main_frame: Optional[str] = None
         self.ready = False
         self._inflight = 0
-        self._favicons = FaviconRequests()
+        #: The session's ONE memory of which requests are its favicon: this
+        #: lifecycle feeds it, a page's server asks it (`favicon.py`).
+        self.favicons = FaviconRequests()
         # Where each navigation's document request went: the last URL of its
         # chain, redirects included (`Network.requestWillBeSent` carries the
         # navigationId for a main document and its redirects). `goto` checks
@@ -456,7 +458,7 @@ class Lifecycle:
 
         # The browser's own favicon request is not one of the page's requests
         # in flight (`favicon.py`): networkidle does not wait for it.
-        if method.startswith("Network.") and self._favicons.see(method, p):
+        if method.startswith("Network.") and self.favicons.see(method, p):
             return None
 
         if method == "Network.requestWillBeSent":

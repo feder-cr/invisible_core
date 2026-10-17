@@ -275,6 +275,10 @@ def test_the_favicon_is_not_a_request_in_flight():
            ("Network.requestWillBeSent",
             {"requestId": "R", "url": "http://127.0.0.1/data.json"}))
     assert v.inflight == 1, "the page's own request still counts"
+    # The session's one memory, which a page's server asks: it still knows the
+    # chain after both hops finished.
+    assert v.favicons.is_favicon("FAV") and v.favicons.is_favicon("FAV-redirect1")
+    assert not v.favicons.is_favicon("R")
 
 
 def test_networkidle_wants_SILENCE_not_just_zero():

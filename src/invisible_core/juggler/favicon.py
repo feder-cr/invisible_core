@@ -7,14 +7,17 @@ favicon request redirected to, and then sends none of its `request`,
 requests in flight that `networkidle` waits on, and gives it to no route
 handler. A client written against Playwright expects exactly that.
 
-⛔ ONE RULE, HERE, AND ONE MEMORY PER READER. The rule is read by two layers
-that see the same events at different moments: the lifecycle, which counts
-the requests in flight, and a client's server, which reports them and offers
-them to routes. A page's server replays the events it held at birth after the
-lifecycle has finished with them, so a shared memory would answer the server
-about a request the lifecycle had already forgotten. Each reader keeps its own
-`FaviconRequests` and feeds it the events in its own order; what a favicon IS
-lives only in `is_favicon_url` and `FaviconRequests.see`.
+⛔ ONE RULE AND ONE MEMORY, THE LIFECYCLE'S. Two layers need the answer: the
+`Lifecycle`, which counts the requests in flight, and a client's server, which
+reports them and offers them to routes. The session's `Lifecycle` owns the
+only `FaviconRequests` (`Lifecycle.favicons`): it classifies each request as
+its event arrives, and the server asks it by id and keeps nothing of its own.
+That works because the lifecycle reads every event of its session before a
+page's server does (it subscribes first), and because an id is remembered
+past its request's end, so a page that replays the events it held at birth
+gets the same answer later. Two memories could disagree - a redirect one of
+them missed, a replay, a session that went away under one of them - and one
+cannot.
 
 ⛔ THE REQUEST STILL GOES TO THE NETWORK. Upstream aborts a favicon request
 when a route is on; a real Firefox always asks the site for its favicon, so a
@@ -24,14 +27,16 @@ it is let through.
 from __future__ import annotations
 
 from collections import OrderedDict
+from typing import Optional
 
 __all__ = ["FaviconRequests", "is_favicon_url"]
 
-#: How many favicon request ids a reader remembers. An id has to outlive its
-#: own `requestFinished`: the engine finishes a redirect's hop BEFORE it sends
-#: the next hop, whose only tie to it is `redirectedFrom`. There is one favicon
-#: request per document, so 64 is far more than a chain in flight can need, and
-#: the bound is what keeps a long session from growing it for ever.
+#: How many favicon request ids are remembered. An id has to outlive its own
+#: `requestFinished`: the engine finishes a redirect's hop BEFORE it sends the
+#: next hop, whose only tie to it is `redirectedFrom`, and a page's server can
+#: ask after the lifecycle has seen the whole request. There is one favicon
+#: request per document, so 64 is far more than either can need, and the bound
+#: is what keeps a long session from growing it for ever.
 _KEPT = 64
 
 
@@ -41,16 +46,16 @@ def is_favicon_url(url: str) -> bool:
 
 
 class FaviconRequests:
-    """The favicon requests one reader of a session's events has seen."""
+    """The favicon requests of one session: fed by its lifecycle, asked by anyone."""
 
     def __init__(self) -> None:
         self._ids: "OrderedDict[str, None]" = OrderedDict()
 
     def see(self, method: str, params: dict) -> bool:
-        """Whether this `Network.*` event belongs to a favicon request.
+        """Read one `Network.*` event and say whether it is a favicon's.
 
-        A request is classified once, by its `Network.requestWillBeSent`; its
-        later events are answered by its id.
+        The lifecycle's call, once per event: a request is classified by its
+        `Network.requestWillBeSent`, and its later events are answered by id.
         """
         request_id = params.get("requestId")
         if request_id is None:
@@ -64,3 +69,7 @@ class FaviconRequests:
         while len(self._ids) > _KEPT:
             self._ids.popitem(last=False)
         return True
+
+    def is_favicon(self, request_id: Optional[str]) -> bool:
+        """Whether a request already seen is a favicon's. It classifies nothing."""
+        return request_id is not None and request_id in self._ids
