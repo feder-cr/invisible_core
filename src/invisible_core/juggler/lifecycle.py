@@ -24,7 +24,8 @@ THE WAITS, and which event closes each:
     domcontentloaded   Page.eventFired name=DOMContentLoaded
     load               Page.eventFired name=load
     networkidle        `load`, then zero inflight requests for IDLE_QUIET
-                       seconds (`Lifecycle._settle`, the only place)
+                       seconds (`Lifecycle._settle`, the only place); the
+                       browser's favicon request is not one (`favicon.py`)
     networkidle2       `load`, then at most two inflight requests for
                        IDLE_QUIET seconds: pyppeteer's `networkidle2`, which
                        is Chrome's `networkAlmostIdle` (`_settle` too)
@@ -47,6 +48,7 @@ from typing import NamedTuple, Optional
 
 from .connection import Interrupted, TargetClosedError
 from .deadline import Deadline
+from .favicon import FaviconRequests
 
 #: How much silence the network needs before it counts as "still". It is
 #: Playwright's value: shorter, and a pause between two requests would read
@@ -185,6 +187,7 @@ class Lifecycle:
         self.main_frame: Optional[str] = None
         self.ready = False
         self._inflight = 0
+        self._favicons = FaviconRequests()
         # Where each navigation's document request went: the last URL of its
         # chain, redirects included (`Network.requestWillBeSent` carries the
         # navigationId for a main document and its redirects). `goto` checks
@@ -450,6 +453,11 @@ class Lifecycle:
             elif name == "DOMContentLoaded":
                 f.states.add("domcontentloaded")
             return f
+
+        # The browser's own favicon request is not one of the page's requests
+        # in flight (`favicon.py`): networkidle does not wait for it.
+        if method.startswith("Network.") and self._favicons.see(method, p):
+            return None
 
         if method == "Network.requestWillBeSent":
             nav = p.get("navigationId")
