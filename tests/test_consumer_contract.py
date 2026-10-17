@@ -280,7 +280,15 @@ CONTRACT = {
         "installed_core_version", "normalise_name", "parse_requirement",
         "pin_declaration", "pin_from_requirements", "pin_problem",
         "pin_report", "recorded_core_version", "repair_core",
+        # Since 49.45.0, with `installer.install` below: a client's own remedy
+        # (the wrapper's Playwright range) is spelled by the tool that built the
+        # environment and rendered the way every other remedy is.
+        "format_command",
     },
+    # Since 49.45.0: the install command as the tool that built the environment
+    # spells it. A client's floor cannot use it (it speaks when the core does
+    # not import) and carries its own reading of the same record.
+    "invisible_core.installer": {"install"},
     "invisible_core.process": {
         "JobObjectGuard", "LifetimeGuard", "NullGuard", "SessionToken",
         "TOKEN_VAR", "alive", "find_processes", "guard_for", "psutil",
