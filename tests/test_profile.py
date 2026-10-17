@@ -406,3 +406,26 @@ def test_the_windows_claim_has_exactly_one_source_each():
     assert bundle["platform"] is constants.PLATFORM_OVERRIDE
     assert bundle["oscpu"] is constants.OSCPU_OVERRIDE
     assert bundle["user_agent"] is constants.USER_AGENT
+
+
+def test_only_the_desktop_group_carries_dataclass_defaults():
+    """One copy of every declared value. `generate_profile` seeds the raw dict
+    from the module's constants (or samples) and passes every field to the
+    constructors, so a dataclass default beside it was a second copy nobody
+    read - until 49.46.0 sixteen of them, three already different from what a
+    profile carries: `cleartype_rendering_mode` 5 against 0, `generics` empty
+    against the twenty rows, `media_enumeration_ms` 0 against the sampled
+    time. The desktop group is the one exception, the other way round: its
+    defaults ARE the copy, and its constants are read off the class."""
+    import dataclasses
+
+    from invisible_core._fpforge.profile import DesktopProfile
+
+    p = generate_profile(42)
+    for name in ("gpu", "screen", "hardware", "audio", "codec", "webgl", "font"):
+        group = getattr(p, name)
+        defaulted = [f.name for f in dataclasses.fields(group)
+                     if f.default is not dataclasses.MISSING
+                     or f.default_factory is not dataclasses.MISSING]
+        assert not defaulted, (name, defaulted)
+    assert all(f.default is not dataclasses.MISSING for f in dataclasses.fields(DesktopProfile))

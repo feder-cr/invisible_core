@@ -49,12 +49,12 @@ class ScreenProfile:
     #: and it went unnoticed for as long as it did because both development
     #: machines are 24-bit, so it agreed cross-OS by coincidence. Pinnable and
     #: overridable like every other surface (rule 6, everything at one level).
-    color_depth: int = 24
+    color_depth: int
 
     #: Height of the Windows taskbar, i.e. how much shorter availHeight is
     #: than height. It was the literal 48 in three places - two C++ files and
     #: this generator - kept in step by hand.
-    taskbar_px: int = 48
+    taskbar_px: int
 
     # ⛔ chrome_w, chrome_h, window_x AND window_y ARE GONE (38.x). They said a
     # maximized window sits at (0, 0) with no side border and its content 85 CSS
@@ -137,7 +137,7 @@ class HardwareProfile:
     #: through extra_prefs - the thing rule 6 rejects. A touchscreen persona is
     #: a legitimate future case (a Surface, a 2-in-1), and it must not require
     #: a browser rebuild.
-    max_touch_points: int = 0
+    max_touch_points: int
 
     #: The five speechSynthesis voices the page is handed, as the binary
     #: parses them: "name|lang|default|localService", comma separated.
@@ -154,7 +154,7 @@ class HardwareProfile:
     #: Italian voice names would be exactly the kind of guess this codebase
     #: keeps having to undo. Moving the level is the part that can be done
     #: honestly today; the data is the next step and it needs a machine.
-    voices: str = ""
+    voices: str
 
     #: navigator.mediaDevices.enumerateDevices: one fake audio input and one
     #: fake video input on every host, via media.navigator.streams.fake.
@@ -165,12 +165,12 @@ class HardwareProfile:
     #: fixed pair is the invariant we want; it was a constant in _BASELINE,
     #: which means the device count - a fingerprint surface - was not
     #: pinnable, not inspectable and not overridable.
-    fake_media_devices: bool = True
+    fake_media_devices: bool
 
     #: How long the session's first enumerateDevices() takes, in ms, with the
     #: fake devices ([B300]): the engine answers after it instead of asking
     #: the host's audio stack. See `_sampler.derive_media_enumeration_ms`.
-    media_enumeration_ms: int = 0
+    media_enumeration_ms: int
 
     #: Whether cookies, localStorage, sessionStorage and indexedDB all work.
     #:
@@ -184,7 +184,7 @@ class HardwareProfile:
     #: right - not because anything declared them. An enterprise policy, a
     #: profile carried over, or an upstream default change would have moved a
     #: fingerprint surface with nothing in this package aware of it.
-    storage_enabled: bool = True
+    storage_enabled: bool
 
     #: Whether the machine has accessibility overrides on: reduced motion,
     #: reduced transparency, inverted colours.
@@ -206,7 +206,7 @@ class HardwareProfile:
     #: Costs nothing to close: Firefox already reads ui.prefersReducedMotion and
     #: its siblings BEFORE the native per-platform code (nsXPLookAndFeel), so
     #: this needs no C++ and no rebuild.
-    accessibility_overrides: bool = False
+    accessibility_overrides: bool
 
     #: The CSS generic families, as "generic|lang|family" records separated by
     #: newlines. It was ten rows compiled into gfxPlatformFontList.cpp: a finite,
@@ -215,7 +215,7 @@ class HardwareProfile:
     #: rebuild. The x-math row is load-bearing and easy to lose: without it the
     #: western serif answer wins and every MathML glyph renders in Times New
     #: Roman, on EVERY host, which is why no cross-OS gate could see it.
-    generics: str = ""
+    generics: str
 
 
 @dataclass(frozen=True)
@@ -312,13 +312,13 @@ class FontProfile:
     #: Measured: it moves the canvas text hash on every setting, so the lever
     #: works, but it does NOT close the gap on its own - the residual is the
     #: alpha quantisation, not the curve.
-    cleartype_gamma: int = 2200        # /1000 -> 2.2, DWrite's own default
-    cleartype_contrast: int = 100      # /100  -> 1.0
-    cleartype_level: int = 100         # /100  -> 1.0
-    cleartype_pixel_structure: int = 1  # DWRITE_PIXEL_GEOMETRY_RGB
-    cleartype_rendering_mode: int = 5   # CLEARTYPE_NATURAL_SYMMETRIC
-    freetype_gamma: int = 220          # /100  -> 2.2, matching DWrite
-    freetype_contrast: int = 100       # /100  -> 1.0
+    cleartype_gamma: int  # /1000 -> 2.2, DWrite's own default
+    cleartype_contrast: int  # /100  -> 1.0
+    cleartype_level: int  # /100  -> 1.0
+    cleartype_pixel_structure: int  # DWRITE_PIXEL_GEOMETRY_RGB
+    cleartype_rendering_mode: int  # DWRITE_RENDERING_MODE_*, see FONT_CLEARTYPE_RENDERING_MODE
+    freetype_gamma: int  # /100  -> 2.2, matching DWrite
+    freetype_contrast: int  # /100  -> 1.0
 
 
 @dataclass(frozen=True)
