@@ -47,6 +47,9 @@ class _Engine(EventListeners):
 
     def emit(self, events):
         for method, params in events:
+            if callable(method):        # something the client does in between
+                method()
+                continue
             self.dispatch_event(method, params, S)
 
     def send(self, method, params=None, session=None, timeout=None):
@@ -102,6 +105,22 @@ def test_the_end_of_a_redirect_chain_is_where_the_request_went():
                  _request(OURS, final, "r2", redirected_from="r1"),
                  _started(OURS), _committed(OURS, final), _DCL])
     assert out["url"] == final
+
+
+def test_a_route_that_sent_the_request_elsewhere_is_where_it_went():
+    """B326: a route continued the document request at another URL. The engine
+    redirects it internally and says nothing, so the client tells the lifecycle
+    (`went_to`). Known bad: without it, the navigation that committed where the
+    route sent it was refused as landed elsewhere."""
+    routed = "http://127.0.0.1/global-var.html"
+    engine = _Engine()
+    life = Lifecycle(engine, S)
+    engine.after = [_request(OURS, NEW), (lambda: life.went_to(OURS, routed), None),
+                    _started(OURS), _committed(OURS, routed), _DCL]
+    engine.emit([("Page.frameAttached", {"frameId": F}), _started("nav-6"),
+                 _committed("nav-6", OLD), _DCL])
+    out = life.goto(NEW, frame_id=F, until="domcontentloaded", timeout=5)
+    assert out["landed"] == OURS and out["url"] == routed
 
 
 def test_the_fragment_is_not_sent_and_does_not_count():

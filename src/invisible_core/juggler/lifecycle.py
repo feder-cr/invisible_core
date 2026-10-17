@@ -464,10 +464,7 @@ class Lifecycle:
         if method == "Network.requestWillBeSent":
             nav = p.get("navigationId")
             if nav:
-                self._went.pop(nav, None)
-                self._went[nav] = p.get("url")
-                while len(self._went) > _WENT_KEPT:
-                    del self._went[next(iter(self._went))]
+                self._record_went(nav, p.get("url"))
             self._inflight += 1
             self._last_activity = time.monotonic()
             if self._inflight > 2:
@@ -911,6 +908,27 @@ class Lifecycle:
                 'Navigation to "%s" was reported committed on "%s", which is '
                 'not where it went ("%s"): the page is not the one asked for'
                 % (url, committed, went))
+
+    def went_to(self, navigation_id: str, url: str) -> None:
+        """A route sent this navigation's document request on to `url`.
+
+        The engine applies a route's URL as an INTERNAL redirect and sends no
+        event of it, as upstream's does: the only one who knows is whoever
+        continued the route. Until this, `_went` kept the URL the request was
+        sent with, and `_check_landed` refused the navigation that committed
+        where the route had sent it (B326, Playwright's own
+        `test_should_override_request_url`, 10 runs out of 10).
+        """
+        with self._cv:
+            self._record_went(navigation_id, url)
+
+    def _record_went(self, navigation_id: str, url: Optional[str]) -> None:
+        """Where a navigation's document request went, newest last. Under
+        `_cv`. Re-inserted so a redirect chain does not age at its first hop."""
+        self._went.pop(navigation_id, None)
+        self._went[navigation_id] = url
+        while len(self._went) > _WENT_KEPT:
+            del self._went[next(iter(self._went))]
 
     # ── inspection ──────────────────────────────────────────────────────────
     def frame_tree(self) -> dict:
