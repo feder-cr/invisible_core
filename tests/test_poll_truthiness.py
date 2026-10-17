@@ -5,14 +5,14 @@ firefox-48 although the element existed: the predicate ran by value and Python
 judged the serialized value, and a node serializes to nothing truthy. Found by
 the fourth wave of the workbench's `tests/gates/observable_crossings.py` (96
 turns, none truthy). `js_truthy` judges the engine's RemoteObject instead, and
-`poll_in_main` is the one place that knows what a turn of a wait is.
+`poll_in_caller` is the one place that knows what a turn of a wait is.
 """
 from __future__ import annotations
 
 import pytest
 
 from invisible_core.juggler.connection import EventListeners
-from invisible_core.juggler.injected import InjectedScript, js_truthy
+from invisible_core.juggler.injected import CALLER_WORLD, InjectedScript, js_truthy
 
 pytestmark = pytest.mark.unit
 
@@ -58,10 +58,10 @@ class _Engine(EventListeners):
         self.remote = remote
         self.sent = []
 
-    def main_world(self, context):
+    def caller_world(self, context):
         self.dispatch_event("Runtime.executionContextCreated",
                             {"executionContextId": context,
-                             "auxData": {"frameId": F, "name": ""}}, S)
+                             "auxData": {"frameId": F, "name": CALLER_WORLD}}, S)
 
     def send(self, method, params=None, session=None, timeout=None):
         params = params or {}
@@ -77,8 +77,8 @@ class _Engine(EventListeners):
 def _poll(remote):
     engine = _Engine(remote)
     inj = InjectedScript(engine, S)
-    engine.main_world("main-1")
-    return engine, inj.poll_in_main(F, "() => 1", timeout=2)
+    engine.caller_world("main-1")
+    return engine, inj.poll_in_caller(F, "() => 1", timeout=2)
 
 
 def test_a_node_ends_the_wait_and_is_the_handle():
@@ -86,7 +86,7 @@ def test_a_node_ends_the_wait_and_is_the_handle():
     engine, got = _poll(remote)
     assert got == remote
     runs = [p for m, p in engine.sent if m == "Runtime.evaluate"]
-    # ONE run of the caller's code per turn, by reference, in the main world
+    # ONE run of the caller's code per turn, by reference, in the caller's world
     assert len(runs) == 1
     assert runs[0]["returnByValue"] is False
     assert runs[0]["executionContextId"] == "main-1"
@@ -107,13 +107,13 @@ def test_a_falsy_object_is_released_in_the_world_it_lives_in():
     released = [p for m, p in engine.sent if m == "Runtime.disposeObject"]
     assert released == [{"executionContextId": "main-1", "objectId": "all-1"}]
 
-def test_the_whole_remote_object_comes_back_from_the_main_world():
+def test_the_whole_remote_object_comes_back_from_the_callers_world():
     """What a client needs to tell a node from any other object ([B324])."""
     remote = {"objectId": "node-9", "type": "object", "subtype": "node"}
     engine = _Engine(remote)
     inj = InjectedScript(engine, S)
-    engine.main_world("main-1")
-    assert inj.evaluate_in_main_remote(F, "document.body", timeout=2) == remote
+    engine.caller_world("main-1")
+    assert inj.evaluate_in_caller_remote(F, "document.body", timeout=2) == remote
     runs = [p for m, p in engine.sent if m == "Runtime.evaluate"]
     assert len(runs) == 1 and runs[0]["returnByValue"] is False
     assert runs[0]["executionContextId"] == "main-1"

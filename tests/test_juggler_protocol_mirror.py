@@ -101,6 +101,30 @@ def test_every_protocol_name_this_package_writes_is_declared():
     assert not unknown, "not in the protocol mirror: %r" % unknown
 
 
+def test_the_mirror_check_sees_every_drift_and_no_checkout():
+    """`_gen_protocol --check` is what ties the mirror to the engine, and its
+    selftest is what says the check works: every known-bad mutation of
+    Protocol.js must move the body, and the cases that are not a drift (another
+    source path, a reformat, a comment, the same mirror checked out with CRLF)
+    must not.
+
+    ⛔ The selftest existed and NOTHING RAN IT, which is how a byte comparison
+    that said DRIFT on every Windows checkout of an aligned mirror went unseen
+    (2026-10-17, the firefox-49 candidate). It runs here, on the Protocol.js of
+    the engine the seal pins, read at its commit (`tests/_engine_source.py`).
+    """
+    from _engine_source import EngineSource
+
+    from invisible_core.juggler import _gen_protocol
+
+    source = EngineSource.pinned()
+    if source.unavailable() is not None:
+        pytest.skip(source.unavailable())
+    text = source.show("juggler/protocol/Protocol.js")
+    assert text, "the pinned engine has no juggler/protocol/Protocol.js"
+    assert _gen_protocol._selftest(text) == 0
+
+
 def test_every_type_uses_only_the_eight_known_combinators():
     """A new combinator in Protocol.js must make the generator REJECT,
     not slip through unnoticed.

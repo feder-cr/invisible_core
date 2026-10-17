@@ -44,7 +44,7 @@ class _Lifecycle:
     main_frame = MAIN
 
 
-from invisible_core.juggler.protocol import COMMANDS  # noqa: E402
+from _closed_world import check_command  # noqa: E402
 
 
 class _Connection:
@@ -64,13 +64,9 @@ class _Connection:
 
     def send(self, method, params=None, session=None, timeout=None):
         # ⛔ CLOSED WORLD, like the engine's `checkScheme`: a field the
-        # protocol mirror does not declare is a rejected command, not an
-        # ignored field.
-        declared = set(COMMANDS[method]["params"].get("fields", {}))
-        undeclared = sorted(set(params or {}) - declared)
-        if undeclared:
-            raise AssertionError("%s carries fields the engine does not declare: %s"
-                                 % (method, undeclared))
+        # protocol mirror does not declare, at any depth, is a rejected
+        # command, not an ignored field (tests/_closed_world.py).
+        check_command(method, params)
         self.sent.append((method, params))
         if method == "Page.dispatchMouseEvent" and self.page is not None:
             self.dispatched += 1

@@ -295,6 +295,22 @@ def render(domains: dict, source: str) -> str:
     return body
 
 
+def body(t: str) -> str:
+    """What `--check` compares of a mirror: its BODY, not its header (the
+    source line carries a path that changes from one machine to another),
+    with the line endings of the checkout taken out.
+
+    ⛔ The line endings are the checkout's, not the protocol's: git stores
+    the mirror with LF and a Windows checkout with `core.autocrlf` writes it
+    with CRLF, so a byte comparison said DRIFT on every Windows checkout of
+    an aligned mirror (measured 2026-10-17 on the firefox-49 candidate: the
+    same file ALIGNED before a `git checkout`, DRIFT after it).
+    """
+    t = t.replace("\r\n", "\n")
+    i = t.find("DOMAINS = ")
+    return t[i:] if i >= 0 else t
+
+
 def _selftest(text: str) -> int:
     """Known-bad mutations on Protocol.js, without a browser and without a
     network.
@@ -305,10 +321,6 @@ def _selftest(text: str) -> int:
     not move the body is a hole.
     """
     base = render(parse_type(text), "base")
-
-    def body(t):
-        i = t.find("DOMAINS = ")
-        return t[i:] if i >= 0 else t
 
     MUTATIONS = [
         ("a command REMOVED",
@@ -392,6 +404,13 @@ def _selftest(text: str) -> int:
     else:
         print("  WRONGLY REJECTED  a new comment")
         false_positives += 1
+    # And the mirror as a Windows checkout writes it (CRLF) is the same
+    # mirror: the line endings are the checkout's, not the protocol's.
+    if body(base.replace("\n", "\r\n")) == body(base):
+        print("  PASSES            the same mirror checked out with CRLF")
+    else:
+        print("  WRONGLY REJECTED  the same mirror checked out with CRLF")
+        false_positives += 1
 
     print()
     print("survived: %d of %d, wrongly rejected: %d"
@@ -443,11 +462,6 @@ def main() -> int:
             print("MISSING: %s" % out)
             return 1
         old = out.read_bytes().decode("utf-8")
-        # compares the BODY, not the header: the source line carries a
-        # path that changes from one machine to another.
-        def body(t):
-            i = t.find("DOMAINS = ")
-            return t[i:] if i >= 0 else t
         if body(old) == body(new):
             print("PROTOCOL ALIGNED")
             return 0

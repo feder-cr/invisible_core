@@ -255,6 +255,32 @@ def test_the_inflight_counter_does_not_go_below_zero():
     assert v.inflight == 0
 
 
+def test_the_favicon_is_not_a_request_in_flight():
+    """Playwright leaves the browser's favicon request out of what networkidle
+    waits on (`favicon.py`). Known bad: counted, a favicon still loading kept
+    the page from going idle, and its redirect hop counted twice."""
+    c, v = lifecycle()
+    events(v, ("Page.frameAttached", {"frameId": "F1"}),
+           ("Page.eventFired", {"frameId": "F1", "name": "load"}),
+           ("Network.requestWillBeSent",
+            {"requestId": "FAV", "url": "http://127.0.0.1/favicon.ico"}))
+    assert v.inflight == 0
+    v.wait_for_state("F1", "networkidle", timeout=IDLE_QUIET * 4)
+    # The engine finishes a redirect's hop before it sends the next one.
+    events(v, ("Network.requestFinished", {"requestId": "FAV"}),
+           ("Network.requestWillBeSent",
+            {"requestId": "FAV-redirect1", "url": "http://127.0.0.1/icon.png",
+             "redirectedFrom": "FAV"}),
+           ("Network.requestFinished", {"requestId": "FAV-redirect1"}),
+           ("Network.requestWillBeSent",
+            {"requestId": "R", "url": "http://127.0.0.1/data.json"}))
+    assert v.inflight == 1, "the page's own request still counts"
+    # The session's one memory, which a page's server asks: it still knows the
+    # chain after both hops finished.
+    assert v.favicons.is_favicon("FAV") and v.favicons.is_favicon("FAV-redirect1")
+    assert not v.favicons.is_favicon("R")
+
+
 def test_networkidle_wants_SILENCE_not_just_zero():
     c, v = lifecycle()
     # A loaded document: networkidle implies load (see the class test).
