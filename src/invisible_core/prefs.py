@@ -54,107 +54,9 @@ _NAVIGATOR_OVERRIDES: Dict[str, str] = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────
-#  System colors - FP Pro probes getComputedStyle(div) with CSS system
-#  keywords (ButtonFace, Menu, Highlight, …) and hashes the result into
-#  signal s142. On Linux, Firefox resolves these via GTK theme → GTK
-#  RGB values diverge from Windows Win32 palette → server-side anomaly
-#  even with Windows UA. Pinning the palette to Win10 default closes
-#  the gap (see project_css_system_colors.md memory).
-# ──────────────────────────────────────────────────────────────────────
-
-_WIN_LIGHT_COLORS: Dict[str, str] = {
-    # Measured against stock Firefox 151 on Windows, 2026-08-09, not chosen.
-    # A page resolves every one of these through getComputedStyle, and our Linux
-    # build answered GTK's values for all seven: menuhover was rgb(53,132,228)
-    # against rgba(0,0,0,0.118), oddtreerow was transparent against white,
-    # dialogtext was rgb(46,52,54) against black. Eight colours in one call is a
-    # desktop-environment readout, which is a stronger tell than any single one.
-    #
-    # The names are NOT uniform and that is upstream's doing, not a typo here:
-    # nsXPLookAndFeel.cpp spells cellhighlight with a hyphen and menuhover,
-    # menuhovertext, menubarhovertext and oddtreerow with an UNDERSCORE. Naming
-    # all seven with hyphens left exactly those four unset, and the measurement
-    # said so - Linux went from 8 divergences to 4, and the 4 were the 4.
-    "ui.-moz-cellhighlight":           "#CECECE",
-    # F0F0F0. This one value was declared three times in two days, twice from a
-    # binary that was not the right judge, and the sequence is worth more than
-    # the number.
-    #
-    #   declared      FFFFFF   no measurement behind it
-    #   2026-08-09    F0F0F0   judged by C:/tmp/ff151-win2
-    #   2026-08-09    FFFFFF   judged by C:/tmp/retail151, "the signed retail"
-    #   2026-08-10    F0F0F0   judged by a binary verified to be both
-    #
-    # ff151-win2 reports 151.0 and is not retail: Get-AuthenticodeSignature
-    # says NotSigned, ProductName is "Nightly", IsPrivateBuild is true. Right
-    # version, wrong build. So the second row was rejected - correctly.
-    #
-    # C:/tmp/retail151 was then downloaded and extracted to be the answer to
-    # that, and its application.ini says Version=153.0.3: the extraction had
-    # failed and the directory kept what was already in it. Right provenance,
-    # wrong version, and the name said 151 both times. So the third row was
-    # measured against 153, which genuinely answers white here - the difference
-    # is upstream drift between the two majors, which is exactly the thing
-    # rule 4's same-major clause exists to keep out of our numbers.
-    #
-    # The fourth row is C:/tmp/ffjudge-151.0: application.ini Version=151.0
-    # BuildID=20260516144017, Authenticode Valid, CN=Mozilla Corporation,
-    # ProductName Firefox, IsPrivateBuild false. Both checks, on the same
-    # binary, before it was allowed to decide anything. It answers
-    # rgb(240,240,240), which means the FIRST correction had the right value
-    # from the wrong evidence - and a right answer from a bad judge is still
-    # not knowledge, because the next value it decides will be wrong.
-    #
-    # Measured the same day across all 35 keywords: our Windows build differs
-    # from that judge on this one field and no other, and 6 of the 35 do not
-    # resolve from content at all. That 1-of-35 is why a wrong judge survives
-    # so long - it agrees almost everywhere.
-    "ui.-moz-dialog":                  "#F0F0F0",
-    "ui.-moz-dialogtext":              "#000000",
-    "ui.-moz_menubarhovertext":        "#15141A",
-    "ui.-moz_menuhover":               "#0000001E",
-    "ui.-moz_menuhovertext":           "#15141A",
-    "ui.-moz_oddtreerow":              "#FFFFFF",
-    "ui.activeborder":              "#B4B4B4",
-    "ui.activecaption":             "#99B4D1",
-    "ui.appworkspace":              "#ABABAB",
-    "ui.background":                "#000000",
-    "ui.buttonface":                "#F0F0F0",
-    "ui.buttonhighlight":           "#FFFFFF",
-    "ui.buttonshadow":              "#A0A0A0",
-    "ui.buttontext":                "#000000",
-    "ui.buttonborder":              "#000000",
-    "ui.captiontext":               "#000000",
-    "ui.graytext":                  "#6D6D6D",
-    "ui.highlight":                 "#0078D7",
-    "ui.highlighttext":             "#FFFFFF",
-    "ui.inactiveborder":            "#F4F7FC",
-    "ui.inactivecaption":           "#BFCDDB",
-    "ui.inactivecaptiontext":       "#434E54",
-    "ui.infobackground":            "#FFFFE1",
-    "ui.infotext":                  "#000000",
-    "ui.menu":                      "#F9F9FB",
-    "ui.menutext":                  "#000000",
-    "ui.scrollbar":                 "#C8C8C8",
-    "ui.threeddarkshadow":          "#696969",
-    "ui.threedface":                "#F0F0F0",
-    "ui.threedhighlight":           "#FFFFFF",
-    "ui.threedlightshadow":         "#E3E3E3",
-    "ui.threedshadow":              "#A0A0A0",
-    "ui.window":                    "#FFFFFF",
-    "ui.windowframe":               "#646464",
-    "ui.windowtext":                "#000000",
-    "ui.mark":                      "#FFFF00",
-    "ui.marktext":                  "#000000",
-    "ui.accentcolor":                  "#0060DF",
-    "ui.accentcolortext":           "#FFFFFF",
-    "ui.selecteditem":              "#0078D7",
-    "ui.selecteditemtext":          "#FFFFFF",
-    "ui.-moz-hyperlinktext":        "#0066CC",
-    "ui.-moz-activehyperlinktext":  "#EE0000",
-    "ui.-moz-visitedhyperlinktext": "#551A8B",
-}
+# The system colour palette lives in `_fpforge.palette`, the default of the
+# `desktop.palette` field: a value a pref decides is a field of the Profile,
+# and this module only writes it (`_apply_theme`).
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -333,15 +235,13 @@ _WIN_DECODING_INFO = chr(10).join([
 # ──────────────────────────────────────────────────────────────────────
 #  Windows system-font surface
 #
-#  These 26 also live in the binary's all.js, and the duplication is
-#  deliberate: the binary must stay correct when launched WITHOUT this
-#  package (a manual run, or any other code that launches the binary
-#  directly - invisible_firefox did this before its 2026-08-18 deletion),
-#  because the fallback is not a subtle drift - Gecko's own defaults name "Sans" at
-#  13.3333px on Linux, a family that does not exist on Windows, and that
-#  is what drove FpJS Pro tampering=True on 2026-08-07. all.js is the
-#  compiled floor; this is the source of truth that can move without a
-#  Firefox rebuild.
+#  The 20 `ui.font.*` also live in the binary's all.js. That copy was kept
+#  as a floor for a binary launched WITHOUT this package, because Gecko's own
+#  Linux default names "Sans" at 13.3333px, a family that does not exist on
+#  Windows (FpJS Pro tampering=True on 2026-08-07). It is a second source of
+#  truth all the same, and it was wrong on the three form-control fonts
+#  (see `_apply_fonts`): it goes with the next engine, and this is the one
+#  source (28-valori-dell-host.md A7).
 #
 #  THE SIZES ARE STRINGS ON PURPOSE. nsXPLookAndFeel reads them through
 #  Preferences::GetFloat, which in Gecko parses float prefs from their
@@ -357,6 +257,10 @@ _UI_FONT_ELEMENTS = (
     "caption", "icon", "menu", "message-box", "small-caption", "status-bar",
     "-moz-pull-down-menu", "-moz-button", "-moz-list", "-moz-field",
 )
+
+#: The three Windows builds from the message font renamed "MS Shell Dlg 2"
+#: (nsLookAndFeel::GetLookAndFeelFont); the other seven keep the shell font.
+_DIALOG_FONT_ELEMENTS = ("-moz-button", "-moz-list", "-moz-field")
 
 #: The language groups whose monospace default Firefox sets differently on
 #: Windows (13) and in its Unix block (12). The gap is directly readable: it is
@@ -670,7 +574,8 @@ _BASELINE: Dict[str, Any] = {
     #: because a detector can serve from a host with a revoked certificate and
     #: watch whether we load.
     "services.settings.server":                           "",
-    "browser.search.geoSpecificDefaults":                 False,
+    # `browser.search.geoSpecificDefaults` was here and has no reader in the
+    # pinned engine (tests/test_pref_types.py): it moved nothing.
     "browser.contentblocking.report.lockwise.enabled":    False,
     "browser.contentblocking.report.monitor.enabled":     False,
     "dom.private-attribution.submission.enabled":         False,
@@ -718,7 +623,9 @@ _BASELINE: Dict[str, Any] = {
     # load they produce an early cancellation of the channel
     # (NS_BINDING_FAILED). That is a remedy for an observed failure, not a
     # fingerprint defence - and it has not been re-measured, so it is not touched.
-    "network.predictor.enabled":                          False,
+    # ⛔ `network.predictor.enabled` sat here as the switch for it and has no
+    # reader in the pinned engine (tests/test_pref_types.py): the predictor is
+    # gone from Firefox 151, so the line looked like this remedy and was not.
     "network.dns.disablePrefetch":                        True,
     "network.dns.disablePrefetchFromHTTPS":               True,
 
@@ -980,7 +887,9 @@ _BASELINE: Dict[str, Any] = {
 
 _LINUX_XVFB_WORKAROUNDS: Dict[str, Any] = {
     "gfx.webrender.all":                       False,
-    "gfx.webrender.force-disabled":            True,
+    # `gfx.webrender.force-disabled` was here and no file of the engine reads
+    # it ([B171], tests/test_pref_types.py). What this table still does is
+    # A12 of 28-valori-dell-host.md, for the canvas phase.
     "webgl.force-enabled":                     True,
     # webgl.software-rendering-enabled / webgl.force-layers-readback removed in FF150.
 }
@@ -1449,15 +1358,20 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     disagreement is what drove FpJS Pro to tampering=True on Linux with
     Windows clean, same seed and same IP.
 
-    The 26 prefs also ship compiled into the binary's all.js. The duplication
-    is deliberate: the binary has to stay right when launched WITHOUT this
-    package, and the failure mode is not a subtle drift but a family name no
-    Windows machine has. all.js is the floor; this layer is the source of
-    truth that can move without a Firefox rebuild, and being a layer it can be
-    overridden by `extra_prefs` like every other surface.
+    ⛔ The 20 `ui.font.*` prefs also ship compiled into the binary's all.js,
+    and that copy is a SECOND SOURCE OF TRUTH, which engine rule 7 refuses
+    even as a floor: it went wrong exactly the way rule 7 says it will. Its
+    comment declared the three form-control fonts "Segoe UI" on the belief
+    that a real Windows Firefox draws its controls in the shell font; retail
+    says "MS Shell Dlg 2", and this layer copied the floor instead of
+    measuring. From 49.46.0 the three come from `font.dialog_family`, and a
+    user pref beats an all.js default, so this layer wins on both builds. The
+    all.js block is removed with the next engine (28-valori-dell-host.md A7).
     """
     for element in _UI_FONT_ELEMENTS:
-        prefs[f"ui.font.{element}"] = profile.font.ui_family
+        prefs[f"ui.font.{element}"] = (
+            profile.font.dialog_family if element in _DIALOG_FONT_ELEMENTS
+            else profile.font.ui_family)
         # Kept as the string the profile carries: Preferences::GetFloat reads
         # float prefs from their text form, and an int here is not an error,
         # it is silently ignored in favour of StyleFONT_MEDIUM_PX (16px).
@@ -1544,7 +1458,9 @@ def _apply_voices(prefs: Dict[str, Any], profile: Profile,
 
 
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
-    """Dark mode, plus the Windows colours palette when the theme is light."""
+    """Dark mode, the LookAndFeel values that read the host, and the Windows
+    colour palette for both schemes."""
+    d = profile.desktop
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
     # The same thing said to the other reader. `ui.systemUsesDarkTheme` is read
     # by LookAndFeel; `prefers-color-scheme` is not, because nsPresContext looks
@@ -1576,41 +1492,103 @@ def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     # or one `matchMedia('(resolution: ...)')`.
     #
     # 1.0 is what a machine at the default setting reports, which is what the
-    # personas claim. Both development machines are at the default, so this
-    # agreed cross-OS by coincidence and no comparison could have caught it -
-    # the same shape as the colour depth, which read the real panel for months
-    # while both machines happened to be 24-bit.
+    # personas claim (`desktop.text_scale`, 100). Both development machines
+    # are at the default, so this agreed cross-OS by coincidence and no
+    # comparison could have caught it - the same shape as the colour depth,
+    # which read the real panel for months while both machines happened to be
+    # 24-bit.
     #
-    # A STRING, and the quotes are the whole bug fixed on 2026-08-10. Gecko has
-    # no float pref type: `Preferences::GetFloat` reads a CHAR pref and parses
-    # the text, which is why `layout.css.devPixelsPerPx` five hundred lines up
-    # is `str(...)` and why FONT_UI_SIZE carries the note "string:
-    # Preferences::GetFloat parses text". Written as a Python float it reached
-    # the profile as a number pref, so the name existed with the wrong TYPE and
-    # the read failed - and a failed read here does not fall back quietly.
+    # ⛔ AN INT, PERCENT, AND THE TYPE IS THE WHOLE STORY. This is NOT read by
+    # `Preferences::GetFloat`: nsXPLookAndFeel::GetFloatValue reads every name
+    # of its `sFloatPrefs` table with `Preferences::GetInt` and divides by 100.
+    # Until 49.46.0 it was the STRING "1.0", reasoned from the other float
+    # reader (the one `layout.css.devPixelsPerPx` and FONT_UI_SIZE go
+    # through): GetInt fails on a string pref, the read fell through to
+    # NativeGetFloat, and the host's scale came back. Measured on Linux under
+    # GDK_DPI_SCALE=1.25 with 49.44.0: devicePixelRatio 1.25 and innerWidth
+    # 1549 on a persona declaring 1 and 1920, in both contexts
+    # (28-valori-dell-host.md A17). The type every LookAndFeel pref must have is
+    # now read from the engine's own tables by tests/test_prefs_surface.py,
+    # not remembered.
     #
-    # What it cost, measured: opening a page in a SECOND browser context killed
-    # the browser on Windows. The first context was fine, so nothing in the
-    # normal path showed it; the e2e suite wedged at 83% for twenty-two minutes
+    # The string came from a real bug, fixed on 2026-08-10, and it is worth
+    # keeping why: written as a Python FLOAT the pref carried a type Gecko does
+    # not have, and opening a page in a SECOND browser context killed the
+    # browser on Windows. The first context was fine, so nothing in the normal
+    # path showed it; the e2e suite wedged at 83% for twenty-two minutes
     # instead of failing. Isolated by a binary search over the 230 prefs the
-    # wrapper composes - 14 launches - after the engine, the window cloak, the
-    # context kwargs, the environment, the cursor layer and the process job
-    # object had each been excluded by their own measurement.
-    prefs["ui.textScaleFactor"] = "1.0"
-    #: 0 = let the locale decide, which is what Windows does. On Linux this
-    #: IntID reads GNOME's `org.gnome.desktop.interface clock-format` live and
-    #: OSPreferences_gtk overrides the ICU pattern with it, so a host set to
-    #: 24h changed `Intl.DateTimeFormat().resolvedOptions().hourCycle` and every
-    #: `toLocaleTimeString()`. Windows has no case for this IntID at all, so
-    #: declaring 0 is what makes the two behave the same way.
-    prefs["ui.hourCycle"] = 0
-    #: Windows hardcodes 1 (select the whole field when tabbing into it); GTK
-    #: reads the live `gtk-entry-select-on-focus` setting, which a user can turn
-    #: off. A page reads the difference with `input.selectionStart` after
-    #: focusing a pre-filled field.
-    prefs["ui.selectTextfieldsOnKeyFocus"] = 1
-    if not profile.dark_theme:
-        prefs.update(_WIN_LIGHT_COLORS)
+    # wrapper composes - 14 launches. The quotes cured the crash and turned the
+    # declaration into a read that failed in silence: the type was wrong in a
+    # new way, and nothing looked at the type.
+    prefs["ui.textScaleFactor"] = int(d.text_scale)
+    # The two below and the rest of `profile.desktop` carry their reasons on
+    # the field (DesktopProfile); here they are only written.
+    prefs["ui.hourCycle"] = int(d.hour_cycle)
+    prefs["ui.selectTextfieldsOnKeyFocus"] = int(d.select_on_focus)
+    # The palette, for BOTH colour schemes and for every persona. A page asks
+    # for a scheme per element (`color-scheme: dark`), whatever the persona's
+    # own theme is, and retail answers from the scheme asked for: measured on
+    # retail 151 with the OS in dark, a `light` box gets the light values and
+    # a `dark` box the dark ones. Until 49.46.0 the palette was emitted for
+    # light personas only and never in `.dark`, so a dark persona's colours
+    # were the HOST's on both schemes, and a light persona's dark box answered
+    # light ones (28-valori-dell-host.md A4). The engine tries `ui.<name>.dark`
+    # first in the dark scheme and falls back to `ui.<name>`
+    # (GetColorFromPref), so a record's dark part is only there when it moves.
+    prefs.update(_palette_prefs(d.palette))
+    prefs["widget.non-native-theme.use-theme-accent"] = bool(d.theme_accent)
+
+
+def _palette_prefs(palette: str) -> Dict[str, str]:
+    """`desktop.palette` as prefs: `ui.<name>` from each record's light part,
+    `ui.<name>.dark` from its dark part when there is one. A record of another
+    shape is refused, not skipped: a pinned palette with a typo would
+    otherwise lose that colour to the host in silence."""
+    out: Dict[str, str] = {}
+    for number, line in enumerate(palette.splitlines(), 1):
+        if not line.strip():
+            continue
+        parts = line.split("|")
+        if len(parts) != 3 or not parts[0].startswith("ui.") or not parts[1]:
+            raise ValueError(
+                "desktop.palette line %d is not 'ui.<name>|<light>|<dark or "
+                "nothing>': %r" % (number, line))
+        name, light, dark = parts
+        out[name] = light
+        if dark:
+            out[name + ".dark"] = dark
+    return out
+
+
+def _apply_desktop(prefs: Dict[str, Any], profile: Profile) -> None:
+    """What the persona's Windows desktop decides and a page reads.
+
+    Every pref here had an engine default that either asks the HOST or
+    differs between the Windows and the Linux build, so the same persona
+    answered with the machine it ran on (28-valori-dell-host.md, group A,
+    measured on three arms: retail 151 on Windows 11, our Windows build, our
+    Linux build). Each is a field of the Profile - `screen.refresh_hz` and the
+    `desktop` group, whose docs say what reads it and why the default is
+    retail's - and the same on both builds. None needs the engine: each is
+    read before the platform code.
+    """
+    d = profile.desktop
+    #: requestAnimationFrame's cadence (A1). At -1 the engine follows the
+    #: host's display: 119.9 Hz on this workbench's Windows, 58.4 on its
+    #: Linux. A positive value runs the software vsync at that rate on both
+    #: (gfxPlatform::ForceSoftwareVsync).
+    prefs["layout.frame_rate"] = int(profile.screen.refresh_hz)
+    prefs["ui.useOverlayScrollbars"] = int(d.overlay_scrollbars)            # A2
+    prefs["widget.non-native-theme.scrollbar.style"] = int(d.scrollbar_style)
+    prefs["ui.systemScrollbarSize"] = int(d.scrollbar_size)
+    prefs["ui.dragThresholdX"] = int(d.drag_threshold)                      # A3
+    prefs["ui.dragThresholdY"] = int(d.drag_threshold)
+    prefs["ui.scrollToClick"] = int(d.scroll_to_click)                      # A5
+    prefs["browser.display.document_color_use"] = int(d.document_colors)    # A6
+    prefs["dom.forms.select.customstyling"] = bool(d.select_styling)
+    prefs["layout.word_select.eat_space_to_next_word"] = bool(d.word_select_eats_space)  # A13
+    prefs["gfx.color_management.force_srgb"] = bool(d.srgb_output)          # A8
+    prefs["security.osclientcerts.autoload"] = bool(d.os_client_certs)      # A11
 
 
 def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
@@ -1628,7 +1606,10 @@ def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
     # nsHttpHandler, with the q-values of rust_prepare_accept_languages. Until
     # the firefox-36 engine this file also declared the header by hand in
     # zoom.stealth.http.accept_language, for a Juggler rewrite that is gone.
-    prefs["general.useragent.locale"]  = locale.primary
+    # `general.useragent.locale` was written here too: Firefox has not read
+    # it since the requested locale moved to intl.locale.requested, and the
+    # pinned engine names it only to translate a distribution.ini
+    # (tests/test_pref_types.py).
     prefs["intl.locale.requested"]     = locale.primary
     prefs["privacy.spoof_english"]     = 0
     # juggler.locale.override seeds the BrowsingContext LanguageOverride FIELD in
@@ -1660,13 +1641,32 @@ def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
     prefs["juggler.locale.override"]   = locale.accept_languages
 
 
-def _apply_timezone(prefs: Dict[str, Any], timezone: str) -> None:
-    if timezone:
-        # juggler.timezone.override is the SOLE source of truth read by the C++
-        # timezone chain (BrowsingContext::Attach/DidSet, ContentChild). The old
-        # zoom.stealth.timezone pref was declared in the yaml but read by NO
-        # code - dropped here on 2026-06-10 (see 20-our-patches.md section 8).
-        prefs["juggler.timezone.override"] = timezone
+def _apply_timezone(prefs: Dict[str, Any], timezone: Optional[str]) -> None:
+    """The session's zone, which every session declares.
+
+    ⛔ A MISSING ZONE IS REFUSED, NOT SKIPPED. Until 49.46.0 an empty one wrote
+    nothing, and the engine then answered `Intl` and `Date` from the host's
+    operating system - the default of `get_default_stealth_prefs` and of this
+    function, so a caller who passed nothing got the machine's zone with a
+    persona declaring everything else. The owner's rule of 2026-10-17
+    (28-valori-dell-host.md A16): the zone, the language and the position come
+    from the EXIT, with a proxy or without one, never from the operating
+    system. `prepare_session_geo` is where "auto" becomes a zone; this
+    function only writes one.
+    """
+    zone = (timezone or "").strip()
+    if not zone or zone.lower() == "auto":
+        raise ValueError(
+            "the session's timezone is missing (%r): every session declares "
+            "one, and an undeclared zone is the host's. Pass the zone that "
+            "prepare_session_geo(timezone, proxy, locale).timezone decided "
+            "from the exit, or an IANA name such as America/New_York"
+            % (timezone,))
+    # juggler.timezone.override is the SOLE source of truth read by the C++
+    # timezone chain (BrowsingContext::Attach/DidSet, ContentChild). The old
+    # zoom.stealth.timezone pref was declared in the yaml but read by NO
+    # code - dropped here on 2026-06-10 (see 20-our-patches.md section 8).
+    prefs["juggler.timezone.override"] = zone
 
 
 def _apply_render_seed(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -1738,7 +1738,7 @@ def translate_profile_to_prefs(
     profile: Profile,
     *,
     locale: "SessionLocale | str | None" = "en-US",
-    timezone: str = "",
+    timezone: Optional[str] = None,
     extra_prefs: Optional[Dict[str, Any]] = None,
     virtual_display: bool = False,
 ) -> Dict[str, Any]:
@@ -1753,7 +1753,11 @@ def translate_profile_to_prefs(
                          derivation, so both give identical prefs. None or ""
                          is en-US; "auto" is refused, since resolving it needs
                          the egress.
-        timezone:        IANA timezone name, e.g. ``"America/New_York"``.
+        timezone:        The session's IANA zone, e.g. ``"America/New_York"``:
+                         the one ``prepare_session_geo(...).timezone``
+                         decided from the exit, or one the caller chose.
+                         REQUIRED: a missing zone is refused, never left to
+                         the host (see ``_apply_timezone``).
         extra_prefs:     Optional overlay applied LAST.
         virtual_display: When True on Windows, apply GPU-disabling workarounds
                          to prevent the GPU process from crashing on virtual
@@ -1775,6 +1779,7 @@ def translate_profile_to_prefs(
     _apply_rasterisation(prefs, profile)
     _apply_codecs(prefs, profile)
     _apply_theme(prefs, profile)
+    _apply_desktop(prefs, profile)
     _apply_branding(prefs, profile)
     session_locale = SessionLocale.of(locale)
     _apply_locale(prefs, session_locale)

@@ -146,3 +146,51 @@ def _no_geoip_download(monkeypatch, request):
     sentinella = pathlib.Path(__file__).with_name("_geoip_db_not_downloaded_in_tests.mmdb")
     monkeypatch.setattr(_dl, "ensure_geoip_mmdb", lambda *a, **kw: sentinella,
                         raising=False)
+
+
+class _ExitNotAskedInTests(ConnectionError):
+    """What a hermetic test gets when it asks the network for its exit."""
+
+
+@pytest.fixture(autouse=True)
+def _no_egress_discovery(monkeypatch, request):
+    """The sibling of the fixture above, for the other half of the round trip.
+
+    Since 49.46.0 `prepare_session_geo` asks for the exit address with a proxy
+    or without one (28-valori-dell-host.md A16), and `get_default_stealth_prefs`
+    goes through it by default. A hermetic test that reaches either would make
+    a real request from the machine running the suite, and its answer - the
+    zone and the language of wherever CI happens to run - would decide what the
+    test sees.
+
+    It FAILS the request instead of inventing an address, which is the one
+    difference from the fixture above: a stubbed path there is dropped unread,
+    while an address here would BE the answer, and an answer no test chose is
+    the defect itself. The callers already treat a failed discovery as their
+    real code does: an explicit zone goes on without a position, "auto" raises.
+
+    The refusal sits on `_geo`'s OWN handle to the network, not on
+    `discover_egress_ip`: the tests of discovery itself stub
+    `_geo.requests.get` and must still reach the real function, and every
+    other module's `requests` - the downloads, which `responses` mocks one
+    layer lower - is left alone. A test that wants an exit stubs
+    `_geo.discover_egress_ip` or `_geo.requests.get`, which overrides this;
+    an `e2e` test gets the network.
+    """
+    if request.node.get_closest_marker("e2e"):
+        return
+    from invisible_core import _geo
+
+    class _GeoNetwork:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def get(self, *a, **kw):
+            raise _ExitNotAskedInTests(
+                "a hermetic test asked the network for its exit address; "
+                "monkeypatch invisible_core._geo.discover_egress_ip to give it one")
+
+    monkeypatch.setattr(_geo, "requests", _GeoNetwork(_geo.requests))

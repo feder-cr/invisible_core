@@ -21,7 +21,7 @@ PREF = "zoom.stealth.media.enumeration_ms"
 
 
 def _prefs(seed, **pin):
-    return translate_profile_to_prefs(generate_profile(seed, pin=pin or None))
+    return translate_profile_to_prefs(generate_profile(seed, pin=pin or None), timezone="America/New_York")
 
 
 def test_the_time_is_the_measured_range_and_one_seed_keeps_it():

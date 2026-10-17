@@ -35,7 +35,7 @@ def test_get_default_args_is_empty_list():
 
 def test_get_default_stealth_prefs_random_seed_returns_dict():
     """No seed -> fresh random fingerprint, dict has expected stealth keys."""
-    prefs = get_default_stealth_prefs()
+    prefs = get_default_stealth_prefs(timezone="America/New_York", locale="en-US")
     assert isinstance(prefs, dict)
     assert len(prefs) > 0
     # humanize toggle is always set explicitly
@@ -45,35 +45,35 @@ def test_get_default_stealth_prefs_random_seed_returns_dict():
 
 def test_get_default_stealth_prefs_seed_is_deterministic():
     """Same seed -> byte-identical prefs across calls."""
-    a = get_default_stealth_prefs(seed=42)
-    b = get_default_stealth_prefs(seed=42)
+    a = get_default_stealth_prefs(seed=42, timezone="America/New_York", locale="en-US")
+    b = get_default_stealth_prefs(seed=42, timezone="America/New_York", locale="en-US")
     assert a == b
 
 
 def test_get_default_stealth_prefs_different_seeds_differ():
     """Different seeds -> different prefs."""
-    a = get_default_stealth_prefs(seed=1)
-    b = get_default_stealth_prefs(seed=2)
+    a = get_default_stealth_prefs(seed=1, timezone="America/New_York", locale="en-US")
+    b = get_default_stealth_prefs(seed=2, timezone="America/New_York", locale="en-US")
     assert a != b
 
 
 def test_humanize_false_disables_prefs():
     """humanize=False removes the maxTime knob and flips the toggle to False."""
-    prefs = get_default_stealth_prefs(seed=42, humanize=False)
+    prefs = get_default_stealth_prefs(seed=42, humanize=False, timezone="America/New_York", locale="en-US")
     assert prefs["stealthfox.humanize"] is False
     assert "stealthfox.humanize.maxTime" not in prefs
 
 
 def test_humanize_default_sets_max_time_1_5():
     """humanize=True -> default maxTime is 1.5s, stored as string."""
-    prefs = get_default_stealth_prefs(seed=42, humanize=True)
+    prefs = get_default_stealth_prefs(seed=42, humanize=True, timezone="America/New_York", locale="en-US")
     assert prefs["stealthfox.humanize"] is True
     assert prefs["stealthfox.humanize.maxTime"] == "1.5"
 
 
 def test_humanize_float_overrides_max_time():
     """Float for humanize is the explicit cap in seconds."""
-    prefs = get_default_stealth_prefs(seed=42, humanize=3.0)
+    prefs = get_default_stealth_prefs(seed=42, humanize=3.0, timezone="America/New_York", locale="en-US")
     assert prefs["stealthfox.humanize"] is True
     assert prefs["stealthfox.humanize.maxTime"] == "3.0"
 
@@ -81,40 +81,40 @@ def test_humanize_float_overrides_max_time():
 def test_extra_prefs_overlay_takes_precedence():
     """extra_prefs overlay LAST overrides any baseline value."""
     prefs = get_default_stealth_prefs(
-        seed=42, extra_prefs={"some.custom.pref": 999}
+        seed=42, extra_prefs={"some.custom.pref": 999}, timezone="America/New_York", locale="en-US"
     )
     assert prefs["some.custom.pref"] == 999
 
 
 def test_extra_prefs_can_override_baseline():
     """A key in extra_prefs that also exists in baseline gets overridden."""
-    baseline = get_default_stealth_prefs(seed=42)
+    baseline = get_default_stealth_prefs(seed=42, timezone="America/New_York", locale="en-US")
     a_baseline_key = next(iter(baseline.keys()))
     overridden = get_default_stealth_prefs(
-        seed=42, extra_prefs={a_baseline_key: "OVERRIDDEN_SENTINEL"}
+        seed=42, extra_prefs={a_baseline_key: "OVERRIDDEN_SENTINEL"}, timezone="America/New_York", locale="en-US"
     )
     assert overridden[a_baseline_key] == "OVERRIDDEN_SENTINEL"
 
 
 def test_locale_argument_changes_prefs():
     """Different locales produce different prefs (Accept-Language affected)."""
-    en = get_default_stealth_prefs(seed=42, locale="en-US")
-    it = get_default_stealth_prefs(seed=42, locale="it-IT")
+    en = get_default_stealth_prefs(seed=42, locale="en-US", timezone="America/New_York")
+    it = get_default_stealth_prefs(seed=42, locale="it-IT", timezone="America/New_York")
     assert en != it
 
 
 def test_timezone_argument_changes_prefs():
     """Different timezones produce different prefs."""
-    ny = get_default_stealth_prefs(seed=42, timezone="America/New_York")
-    rome = get_default_stealth_prefs(seed=42, timezone="Europe/Rome")
+    ny = get_default_stealth_prefs(seed=42, timezone="America/New_York", locale="en-US")
+    rome = get_default_stealth_prefs(seed=42, timezone="Europe/Rome", locale="en-US")
     assert ny != rome
 
 
 def test_pin_argument_forces_specific_fields():
     """Pin forces a specific field while the rest stays seed-derived."""
-    plain = get_default_stealth_prefs(seed=42)
+    plain = get_default_stealth_prefs(seed=42, timezone="America/New_York", locale="en-US")
     pinned = get_default_stealth_prefs(
-        seed=42, pin={"hardware.concurrency": 999}
+        seed=42, pin={"hardware.concurrency": 999}, timezone="America/New_York", locale="en-US"
     )
     # something in the dict must differ vs the plain seed=42 build
     assert plain != pinned

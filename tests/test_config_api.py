@@ -35,20 +35,20 @@ def test_the_default_still_enables_the_in_binary_generator():
     A third-party integration upgrading invisible-core must not have its
     pointer behaviour change underneath it without a release note.
     """
-    prefs = config.get_default_stealth_prefs(seed=42)
+    prefs = config.get_default_stealth_prefs(seed=42, timezone="America/New_York", locale="en-US")
     assert prefs["stealthfox.humanize"] is True
     assert prefs["stealthfox.humanize.maxTime"] == "1.5"
 
 
 def test_disabling_it_leaves_no_timing_prefs_behind():
     """False must mean off, not "off but still carrying a duration"."""
-    prefs = config.get_default_stealth_prefs(seed=42, humanize=False)
+    prefs = config.get_default_stealth_prefs(seed=42, humanize=False, timezone="America/New_York", locale="en-US")
     assert prefs["stealthfox.humanize"] is False
     assert "stealthfox.humanize.maxTime" not in prefs
 
 
 def test_a_float_caps_the_motion_rather_than_reading_as_merely_truthy():
-    prefs = config.get_default_stealth_prefs(seed=42, humanize=0.4)
+    prefs = config.get_default_stealth_prefs(seed=42, humanize=0.4, timezone="America/New_York", locale="en-US")
     assert prefs["stealthfox.humanize"] is True
     assert prefs["stealthfox.humanize.maxTime"] == "0.4"
 

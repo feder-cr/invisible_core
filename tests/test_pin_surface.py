@@ -94,11 +94,11 @@ def _current(profile, key):
 
 def _prefs_moved_by(key):
     base_profile = generate_profile(SEED)
-    base = translate_profile_to_prefs(base_profile)
+    base = translate_profile_to_prefs(base_profile, timezone="America/New_York")
     before = _current(base_profile, key)
     after = _perturb(key, before, base_profile)
     assert after != before, "the probe failed to change %s" % key
-    pinned = translate_profile_to_prefs(generate_profile(SEED, pin={key: after}))
+    pinned = translate_profile_to_prefs(generate_profile(SEED, pin={key: after}), timezone="America/New_York")
     return sorted(k for k in set(base) | set(pinned) if base.get(k) != pinned.get(k))
 
 
@@ -139,7 +139,7 @@ def test_msaa_is_the_same_on_both_builds(monkeypatch):
     for platform in ("win32", "linux"):
         monkeypatch.setattr(sys, "platform", platform)
         seen[platform] = [
-            translate_profile_to_prefs(generate_profile(seed))["webgl.msaa-samples"]
+            translate_profile_to_prefs(generate_profile(seed), timezone="America/New_York")["webgl.msaa-samples"]
             for seed in (0, 7, 42, 1000, 1561645783, 555, 99, 12345)
         ]
     assert seen["win32"] == seen["linux"], (
@@ -153,7 +153,7 @@ def test_msaa_force_follows_the_emitted_count(monkeypatch):
     """The force flag is derived from the count, so it cannot contradict it."""
     for platform in ("win32", "linux"):
         monkeypatch.setattr(sys, "platform", platform)
-        prefs = translate_profile_to_prefs(generate_profile(42))
+        prefs = translate_profile_to_prefs(generate_profile(42), timezone="America/New_York")
         assert prefs["webgl.msaa-force"] is (prefs["webgl.msaa-samples"] > 0)
 
 

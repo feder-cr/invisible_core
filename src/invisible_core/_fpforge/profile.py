@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import zipfile
-from dataclasses import dataclass, field, replace as _dc_replace
+from dataclasses import dataclass, field, fields as _dc_fields, replace as _dc_replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +12,7 @@ from ._sampler import sample as _sample_raw
 # module scope, so there is no cycle to work around - verified by importing the
 # package, this module and `_webgl_personas` each first in a fresh interpreter.
 from .._webgl_personas import choose_persona as _choose_persona
+from .palette import PALETTE
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,17 @@ class ScreenProfile:
     avail_height: int
     dpr: float
     tier: str
+    #: The monitor's refresh rate in Hz, which is the cadence of
+    #: requestAnimationFrame: a page reads it from the gap between two rAF
+    #: timestamps. Emitted as `layout.frame_rate`. At its default of -1 the
+    #: engine follows the HOST's display - DwmGetCompositionTimingInfo on
+    #: Windows, GLX/Xrandr or a software 60 on Linux - so the same persona
+    #: answered 119.9 on this workbench's Windows and 58.4 on its Linux
+    #: (28-valori-dell-host.md A1). NOT sampled: there is no measured
+    #: distribution of Windows refresh rates to draw from, and 60 is what an
+    #: office laptop or monitor runs at. Pinnable, so a 144 Hz gaming persona is
+    #: one pin away.
+    refresh_hz: int
     #: Screen colour depth in bits. NOT sampled: 24 is what every mainstream
     #: Windows desktop reports, and a persona that varied it would be varying a
     #: thing real machines do not vary. It is a FIELD rather than a constant in
@@ -37,12 +49,12 @@ class ScreenProfile:
     #: and it went unnoticed for as long as it did because both development
     #: machines are 24-bit, so it agreed cross-OS by coincidence. Pinnable and
     #: overridable like every other surface (rule 6, everything at one level).
-    color_depth: int = 24
+    color_depth: int
 
     #: Height of the Windows taskbar, i.e. how much shorter availHeight is
     #: than height. It was the literal 48 in three places - two C++ files and
     #: this generator - kept in step by hand.
-    taskbar_px: int = 48
+    taskbar_px: int
 
     # ⛔ chrome_w, chrome_h, window_x AND window_y ARE GONE (38.x). They said a
     # maximized window sits at (0, 0) with no side border and its content 85 CSS
@@ -125,7 +137,7 @@ class HardwareProfile:
     #: through extra_prefs - the thing rule 6 rejects. A touchscreen persona is
     #: a legitimate future case (a Surface, a 2-in-1), and it must not require
     #: a browser rebuild.
-    max_touch_points: int = 0
+    max_touch_points: int
 
     #: The five speechSynthesis voices the page is handed, as the binary
     #: parses them: "name|lang|default|localService", comma separated.
@@ -142,7 +154,7 @@ class HardwareProfile:
     #: Italian voice names would be exactly the kind of guess this codebase
     #: keeps having to undo. Moving the level is the part that can be done
     #: honestly today; the data is the next step and it needs a machine.
-    voices: str = ""
+    voices: str
 
     #: navigator.mediaDevices.enumerateDevices: one fake audio input and one
     #: fake video input on every host, via media.navigator.streams.fake.
@@ -153,12 +165,12 @@ class HardwareProfile:
     #: fixed pair is the invariant we want; it was a constant in _BASELINE,
     #: which means the device count - a fingerprint surface - was not
     #: pinnable, not inspectable and not overridable.
-    fake_media_devices: bool = True
+    fake_media_devices: bool
 
     #: How long the session's first enumerateDevices() takes, in ms, with the
     #: fake devices ([B300]): the engine answers after it instead of asking
     #: the host's audio stack. See `_sampler.derive_media_enumeration_ms`.
-    media_enumeration_ms: int = 0
+    media_enumeration_ms: int
 
     #: Whether cookies, localStorage, sessionStorage and indexedDB all work.
     #:
@@ -172,7 +184,7 @@ class HardwareProfile:
     #: right - not because anything declared them. An enterprise policy, a
     #: profile carried over, or an upstream default change would have moved a
     #: fingerprint surface with nothing in this package aware of it.
-    storage_enabled: bool = True
+    storage_enabled: bool
 
     #: Whether the machine has accessibility overrides on: reduced motion,
     #: reduced transparency, inverted colours.
@@ -194,7 +206,7 @@ class HardwareProfile:
     #: Costs nothing to close: Firefox already reads ui.prefersReducedMotion and
     #: its siblings BEFORE the native per-platform code (nsXPLookAndFeel), so
     #: this needs no C++ and no rebuild.
-    accessibility_overrides: bool = False
+    accessibility_overrides: bool
 
     #: The CSS generic families, as "generic|lang|family" records separated by
     #: newlines. It was ten rows compiled into gfxPlatformFontList.cpp: a finite,
@@ -203,7 +215,7 @@ class HardwareProfile:
     #: rebuild. The x-math row is load-bearing and easy to lose: without it the
     #: western serif answer wins and every MathML glyph renders in Times New
     #: Roman, on EVERY host, which is why no cross-OS gate could see it.
-    generics: str = ""
+    generics: str
 
 
 @dataclass(frozen=True)
@@ -249,6 +261,20 @@ class FontProfile:
     """
     ui_family: str
     ui_size: str
+    #: The family of the three form-control fonts, `-moz-button`, `-moz-field`
+    #: and `-moz-list`, which is NOT the shell font: Windows Firefox builds
+    #: them from the message font with the name replaced by "MS Shell Dlg 2"
+    #: (widget/windows/nsLookAndFeel.cpp, GetLookAndFeelFont), a registry alias
+    #: the bundle resolves to Tahoma. A page reads it with one
+    #: `getComputedStyle(input).fontFamily` - retail 151 answers
+    #: `"MS Shell Dlg \32 "` - and in the size of every input, select and
+    #: button. Until 49.46.0 these three said "Segoe UI", copied from an all.js
+    #: comment claiming a real Windows Firefox draws its controls in the shell
+    #: font; measured, it does not (28-valori-dell-host.md A7). Only the
+    #: family comes from here: a page sizes these three 2pt below its default
+    #: proportional font (nsLayoutUtils::ComputeSystemFont), 13.333px at 16px,
+    #: on every platform.
+    dialog_family: str
     monospace_size: int
     #: The grayscale coverage levels a Windows glyph edge produces, ascending,
     #: first 0 and last 255 so a snap never moves a fully transparent or fully
@@ -286,13 +312,90 @@ class FontProfile:
     #: Measured: it moves the canvas text hash on every setting, so the lever
     #: works, but it does NOT close the gap on its own - the residual is the
     #: alpha quantisation, not the curve.
-    cleartype_gamma: int = 2200        # /1000 -> 2.2, DWrite's own default
-    cleartype_contrast: int = 100      # /100  -> 1.0
-    cleartype_level: int = 100         # /100  -> 1.0
-    cleartype_pixel_structure: int = 1  # DWRITE_PIXEL_GEOMETRY_RGB
-    cleartype_rendering_mode: int = 5   # CLEARTYPE_NATURAL_SYMMETRIC
-    freetype_gamma: int = 220          # /100  -> 2.2, matching DWrite
-    freetype_contrast: int = 100       # /100  -> 1.0
+    cleartype_gamma: int  # /1000 -> 2.2, DWrite's own default
+    cleartype_contrast: int  # /100  -> 1.0
+    cleartype_level: int  # /100  -> 1.0
+    cleartype_pixel_structure: int  # DWRITE_PIXEL_GEOMETRY_RGB
+    cleartype_rendering_mode: int  # DWRITE_RENDERING_MODE_*, see FONT_CLEARTYPE_RENDERING_MODE
+    freetype_gamma: int  # /100  -> 2.2, matching DWrite
+    freetype_contrast: int  # /100  -> 1.0
+
+
+@dataclass(frozen=True)
+class DesktopProfile:
+    """The Windows desktop settings a page reads, declared instead of asked.
+
+    Each field is a value a pref decides whose engine default either asks the
+    HOST or differs between our Windows and our Linux build, so the same
+    persona answered with the machine it ran on (28-valori-dell-host.md,
+    group A, measured on three arms on 2026-10-17: retail 151 on Windows 11,
+    our Windows build, our Linux build). The defaults are retail's, and they
+    are the ONLY copy: `generate_profile` seeds the raw dict from them and the
+    pin table is built from these fields, so a field added here is pinnable
+    and emitted without a second list to keep in step. Not sampled: the
+    persona is an ordinary Windows 11 desktop at its defaults, and varying
+    these would invent a diversity nobody has measured.
+    """
+    #: `ui.textScaleFactor`, in percent: Windows' "Text size" slider. It
+    #: MULTIPLIES the devicePixelRatio (SystemZoomSettings), so 100 is the
+    #: only value that leaves `screen.dpr` the one number for the DPR; a pin
+    #: of 125 is a user with bigger text, on top of whatever dpr says.
+    text_scale: int = 100
+    #: Windows 11's "Automatically hide scroll bars", on by default: scrollbars
+    #: draw over the content and a scrolling box loses no width to them,
+    #: `offsetWidth - clientWidth` is 0. Off, they take `scrollbar_size`.
+    overlay_scrollbars: bool = True
+    #: The scrollbar drawing (widget.non-native-theme.scrollbar.style,
+    #: Theme.cpp): 5 Windows 11, 4 Windows 10, 2 GTK, 0 "the platform's",
+    #: which on our Linux build was GTK's fixed 12px. Windows 11 because the
+    #: window frame is retail's on Windows 11 (constants.WINDOW_FRAME_BY_DPR).
+    scrollbar_style: int = 5
+    #: SM_CXVSCROLL at 96 dpi, the width a non-overlay scrollbar takes: a
+    #: registry setting the engine would otherwise read live.
+    scrollbar_size: int = 17
+    #: How far a real pointer moves before `dragstart`, both axes: Windows
+    #: SM_CXDRAG - 1, 3 at the default; GTK's gtk-dnd-drag-threshold, 8.
+    #: Measured with the pointer: retail-like 4px to start, Linux 9 before.
+    drag_threshold: int = 3
+    #: A click in a scrollbar's track jumps there instead of paging. Off on
+    #: Windows; GTK reads the live gtk-primary-button-warps-slider.
+    scroll_to_click: bool = False
+    #: browser.display.document_color_use: 0 on Windows ("only with the OS
+    #: high-contrast theme"), 1 on Linux ("never"); with
+    #: `hardware.accessibility_overrides` on, Windows forces its colours onto
+    #: the page and `forced-colors: active` matches.
+    document_colors: int = 0
+    #: A page may style a <select>'s popup (dom.forms.select.customstyling):
+    #: true on Windows, false on GTK.
+    select_styling: bool = True
+    #: A double click selects the word AND the space after it
+    #: (layout.word_select.eat_space_to_next_word): Windows, not Linux. A page
+    #: reads it with getSelection() after a real double click.
+    word_select_eats_space: bool = True
+    #: Tagged images are converted to sRGB (gfx.color_management.force_srgb)
+    #: instead of the HOST's monitor profile (GetICMProfileW, _ICC_PROFILE),
+    #: which a canvas below the 64x64 substitution floor reads back.
+    srgb_output: bool = True
+    #: The OS client-certificate module (security.osclientcerts.autoload):
+    #: with it the machine's personal certificates answer a server that asks
+    #: for one. Off: the persona has none.
+    os_client_certs: bool = False
+    #: The content-exposed AccentColor follows the theme's accent
+    #: (widget.non-native-theme.use-theme-accent): false on Windows, where it
+    #: is Firefox's blue stand-in; true on Linux, the GTK theme's.
+    theme_accent: bool = False
+    #: ui.hourCycle, 0 = the locale decides, which is what Windows does. On
+    #: Linux this IntID read GNOME's clock-format live, so a host set to 24h
+    #: changed every `toLocaleTimeString()`.
+    hour_cycle: int = 0
+    #: Tabbing into a pre-filled field selects all of it
+    #: (ui.selectTextfieldsOnKeyFocus): hardcoded on Windows, the live
+    #: gtk-entry-select-on-focus on Linux.
+    select_on_focus: bool = True
+    #: The system colours, light and dark, as `ui.<name>|<light>|<dark>`
+    #: records, one per line, the dark part empty where the scheme does not
+    #: move it. See `_fpforge.palette` for how each was measured.
+    palette: str = PALETTE
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -319,7 +422,8 @@ _PIN_GROUPS = {
     # description of a decision already taken and changed nothing else. The FIELD
     # stays on ScreenProfile, where it is an honest label; what went is the
     # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
-    "screen": {"width", "height", "dpr", "taskbar_px", "color_depth"},
+    "screen": {"width", "height", "dpr", "taskbar_px", "color_depth",
+               "refresh_hz"},
     "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
                  "voices", "fake_media_devices", "media_enumeration_ms",
                  "storage_enabled", "generics",
@@ -343,13 +447,21 @@ _PIN_GROUPS = {
     # overridden is a constant buried in a different file, not a field. They
     # were added to FontProfile on 2026-08-08 and left out of this table, and
     # the test below is what said so.
-    "font": {"ui_family", "ui_size", "monospace_size", "alpha_ladder",
+    "font": {"ui_family", "ui_size", "dialog_family", "monospace_size",
+             "alpha_ladder",
              "manifest",
              "cleartype_gamma", "cleartype_contrast", "cleartype_level",
              "cleartype_pixel_structure", "cleartype_rendering_mode",
              "freetype_gamma", "freetype_contrast"},
 }
 _PIN_TOP = {"dark_theme", "branding"}
+
+#: The desktop group, read off its dataclass: every field is pinnable, its
+#: raw key is `desktop_<field>`, and its default is the dataclass's. One list,
+#: the class, instead of three to keep in step.
+_DESKTOP_DEFAULTS = {f.name: f.default for f in _dc_fields(DesktopProfile)}
+_DESKTOP_RAW = {name: "desktop_" + name for name in _DESKTOP_DEFAULTS}
+_PIN_GROUPS["desktop"] = set(_DESKTOP_DEFAULTS)
 
 
 def _validate_pin_key(key: str) -> None:
@@ -388,6 +500,7 @@ class Profile:
     codec: CodecProfile
     webgl: WebGLProfile
     font: FontProfile
+    desktop: DesktopProfile
     dark_theme: bool
     # The branding a page reads: one of BRANDING_SETS, or the absolute path
     # of a zip archive holding exactly BRANDING_FILES at its root.
@@ -430,6 +543,7 @@ _PIN_TO_RAW = {
     # as any sampled field - one mechanism, not two.
     "font.ui_family": "font_ui_family",
     "font.ui_size": "font_ui_size",
+    "font.dialog_family": "font_dialog_family",
     "font.monospace_size": "font_monospace_size",
     "font.alpha_ladder": "font_alpha_ladder",
     "font.manifest": "font_manifest",
@@ -445,6 +559,7 @@ _PIN_TO_RAW = {
     "font.freetype_contrast": "font_freetype_contrast",
     "screen.color_depth": "screen_color_depth",
     "screen.taskbar_px": "taskbar_px",
+    "screen.refresh_hz": "screen_refresh_hz",
     "hardware.max_touch_points": "max_touch_points",
     "hardware.media_enumeration_ms": "media_enumeration_ms",
     "hardware.voices": "voices",
@@ -454,6 +569,7 @@ _PIN_TO_RAW = {
     "hardware.accessibility_overrides": "accessibility_overrides",
     "dark_theme": "dark_theme",
     "branding": "branding",
+    **{"desktop." + name: raw_key for name, raw_key in _DESKTOP_RAW.items()},
 }
 
 #: The rasterisation parameters a Windows machine reports, and the FreeType
@@ -492,6 +608,9 @@ FONT_FREETYPE_CONTRAST = 100
 #: from the panel: a wide-gamut monitor answers 30, and a persona claiming an
 #: office laptop with a 30-bit display is a contradiction a page can read.
 SCREEN_COLOR_DEPTH = 24
+
+#: An ordinary office monitor, see ScreenProfile.refresh_hz.
+SCREEN_REFRESH_HZ = 60
 
 #: The Windows taskbar, re-exported so a pin can reach it by the same name
 #: as every other declared constant. The value lives in constants.py, which
@@ -625,6 +744,8 @@ GENERICS = chr(10).join([
 #: The canonical Windows values. Not sampled - see FontProfile for why.
 FONT_UI_FAMILY = "Segoe UI"
 FONT_UI_SIZE = "12"          # string: Preferences::GetFloat parses text
+#: Windows' form-control font name, see FontProfile.dialog_family.
+FONT_DIALOG_FAMILY = "MS Shell Dlg 2"
 FONT_MONOSPACE_SIZE = 13     # Firefox ships 13 on Windows, 12 in its Unix block
 
 #: DirectWrite's grayscale coverage ladder, 17 levels. Lives here rather than in
@@ -805,6 +926,7 @@ def generate_profile(
     # `to_prefs_dict()` reports them alongside everything else.
     raw.setdefault("font_ui_family", FONT_UI_FAMILY)
     raw.setdefault("font_ui_size", FONT_UI_SIZE)
+    raw.setdefault("font_dialog_family", FONT_DIALOG_FAMILY)
     raw.setdefault("font_monospace_size", FONT_MONOSPACE_SIZE)
     raw.setdefault("font_alpha_ladder", FONT_ALPHA_LADDER)
     raw.setdefault("font_manifest", FONT_MANIFEST)
@@ -817,6 +939,7 @@ def generate_profile(
     raw.setdefault("font_freetype_contrast", FONT_FREETYPE_CONTRAST)
     raw.setdefault("screen_color_depth", SCREEN_COLOR_DEPTH)
     raw.setdefault("taskbar_px", TASKBAR_PX)
+    raw.setdefault("screen_refresh_hz", SCREEN_REFRESH_HZ)
     # No setdefault for max_touch_points: the forge samples it, and a floor
     # here would be a second source of truth that agrees until it does not.
     # Empty = "the voices of the session's language" (voices_for), which only
@@ -826,6 +949,9 @@ def generate_profile(
     raw.setdefault("storage_enabled", STORAGE_ENABLED)
     raw.setdefault("generics", GENERICS)
     raw.setdefault("accessibility_overrides", ACCESSIBILITY_OVERRIDES)
+    # The desktop group is seeded from its dataclass defaults, its only copy.
+    for name, raw_key in _DESKTOP_RAW.items():
+        raw.setdefault(raw_key, _DESKTOP_DEFAULTS[name])
     raw.setdefault("branding", BRANDING)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
@@ -862,6 +988,7 @@ def generate_profile(
             avail_height=int(raw["screen_avail_h"]),
             dpr=float(raw["dpr"]),
             tier=str(raw.get("screen_tier", "")),
+            refresh_hz=int(raw["screen_refresh_hz"]),
             color_depth=int(raw["screen_color_depth"]),
             taskbar_px=int(raw["taskbar_px"]),
         ),
@@ -893,6 +1020,7 @@ def generate_profile(
             # str(), not int(): the pref is read as text and an int here would
             # travel all the way to a silently-ignored pref.
             ui_size=str(raw["font_ui_size"]),
+            dialog_family=str(raw["font_dialog_family"]),
             monospace_size=int(raw["font_monospace_size"]),
             alpha_ladder=tuple(int(v) for v in raw["font_alpha_ladder"]),
             manifest=str(raw["font_manifest"]),
@@ -904,6 +1032,9 @@ def generate_profile(
             freetype_gamma=int(raw["font_freetype_gamma"]),
             freetype_contrast=int(raw["font_freetype_contrast"]),
         ),
+        desktop=DesktopProfile(**{
+            name: type(_DESKTOP_DEFAULTS[name])(raw[raw_key])
+            for name, raw_key in _DESKTOP_RAW.items()}),
         dark_theme=bool(raw["dark_theme"]),
         branding=_branding(raw["branding"]),
         browsing_history=list(raw.get("browsing_history") or []),

@@ -310,7 +310,7 @@ def test_generate_profile_pin_gpu_renderer_propagates():
     p = generate_profile(seed=42, pin={"gpu.renderer": wanted["renderer"]})
     assert p.gpu.renderer == wanted["renderer"]
     assert p.to_prefs_dict()["webgl_renderer"] == wanted["renderer"]
-    assert translate_profile_to_prefs(p)["zoom.stealth.webgl.renderer"] == wanted["renderer"]
+    assert translate_profile_to_prefs(p, timezone="America/New_York")["zoom.stealth.webgl.renderer"] == wanted["renderer"]
 
 
 @pytest.mark.unit
@@ -360,6 +360,8 @@ def test_no_profile_constant_is_shadowed_by_the_sampler_s_locked_dict():
         "font_cleartype_rendering_mode": "FONT_CLEARTYPE_RENDERING_MODE",
         "font_freetype_gamma": "FONT_FREETYPE_GAMMA",
         "font_freetype_contrast": "FONT_FREETYPE_CONTRAST",
+        "font_dialog_family": "FONT_DIALOG_FAMILY",
+        "screen_refresh_hz": "SCREEN_REFRESH_HZ",
     }
     clashing = sorted(k for k in seeded if k in _sampler._LOCKED)
     assert not clashing, (
@@ -395,7 +397,7 @@ def test_the_windows_claim_has_exactly_one_source_each():
     from invisible_core._fpforge.profile import generate_profile
     from invisible_core.prefs import translate_profile_to_prefs
 
-    prefs = translate_profile_to_prefs(generate_profile(seed=42))
+    prefs = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
     assert prefs["general.platform.override"] is constants.PLATFORM_OVERRIDE
     assert prefs["general.oscpu.override"] is constants.OSCPU_OVERRIDE
     assert prefs["general.useragent.override"] is constants.USER_AGENT
@@ -404,3 +406,26 @@ def test_the_windows_claim_has_exactly_one_source_each():
     assert bundle["platform"] is constants.PLATFORM_OVERRIDE
     assert bundle["oscpu"] is constants.OSCPU_OVERRIDE
     assert bundle["user_agent"] is constants.USER_AGENT
+
+
+def test_only_the_desktop_group_carries_dataclass_defaults():
+    """One copy of every declared value. `generate_profile` seeds the raw dict
+    from the module's constants (or samples) and passes every field to the
+    constructors, so a dataclass default beside it was a second copy nobody
+    read - until 49.46.0 sixteen of them, three already different from what a
+    profile carries: `cleartype_rendering_mode` 5 against 0, `generics` empty
+    against the twenty rows, `media_enumeration_ms` 0 against the sampled
+    time. The desktop group is the one exception, the other way round: its
+    defaults ARE the copy, and its constants are read off the class."""
+    import dataclasses
+
+    from invisible_core._fpforge.profile import DesktopProfile
+
+    p = generate_profile(42)
+    for name in ("gpu", "screen", "hardware", "audio", "codec", "webgl", "font"):
+        group = getattr(p, name)
+        defaulted = [f.name for f in dataclasses.fields(group)
+                     if f.default is not dataclasses.MISSING
+                     or f.default_factory is not dataclasses.MISSING]
+        assert not defaulted, (name, defaulted)
+    assert all(f.default is not dataclasses.MISSING for f in dataclasses.fields(DesktopProfile))

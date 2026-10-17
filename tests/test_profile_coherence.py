@@ -62,7 +62,7 @@ def test_every_seed_gets_a_bundle_matching_the_persona_it_will_expose():
     bad = []
     for seed in range(_SWEEP):
         profile = generate_profile(seed=seed)
-        prefs = translate_profile_to_prefs(profile)
+        prefs = translate_profile_to_prefs(profile, timezone="America/New_York")
         exposed = by_name.get((prefs["zoom.stealth.webgl.renderer"],
                                prefs["zoom.stealth.webgl.vendor"]))
         if exposed is not None and exposed != profile.gpu.class_tier:
@@ -95,7 +95,7 @@ def test_the_exposed_renderer_is_the_personas_on_the_bare_call_too():
     """Ties the two halves together: the prefs carry the persona's renderer, and
     the test above says the bundle matches that persona's class."""
     for seed in (0, 1, 7, 42, 123, 1234):
-        prefs = translate_profile_to_prefs(generate_profile(seed=seed))
+        prefs = translate_profile_to_prefs(generate_profile(seed=seed), timezone="America/New_York")
         assert prefs["zoom.stealth.webgl.renderer"] == select_persona(seed)["renderer"]
 
 
@@ -134,7 +134,7 @@ def test_the_profile_is_still_a_pure_function_of_the_seed():
     the property every other guarantee in this package rests on."""
     for seed in (0, 42, 999):
         a, b = generate_profile(seed=seed), generate_profile(seed=seed)
-        assert translate_profile_to_prefs(a) == translate_profile_to_prefs(b)
+        assert translate_profile_to_prefs(a, timezone="America/New_York") == translate_profile_to_prefs(b, timezone="America/New_York")
 
 
 def test_a_pinned_taskbar_moves_availheight():
@@ -193,7 +193,7 @@ def test_the_reported_gpu_name_is_the_one_the_page_receives():
     disagreements = []
     for seed in range(200):
         p = generate_profile(seed)
-        expected = translate_profile_to_prefs(p).get("zoom.stealth.webgl.renderer")
+        expected = translate_profile_to_prefs(p, timezone="America/New_York").get("zoom.stealth.webgl.renderer")
         if expected and p.gpu.renderer != expected:
             disagreements.append((seed, p.gpu.renderer, expected))
     assert not disagreements, (
@@ -226,8 +226,8 @@ def test_an_explicit_pin_still_outranks_the_persona():
     wanted = next(p for p in _gpu_pool() if p["renderer"] != select_persona(42)["renderer"])
     p = generate_profile(42, pin={"gpu.renderer": wanted["renderer"]})
     assert p.gpu.renderer == wanted["renderer"]
-    assert translate_profile_to_prefs(p)["zoom.stealth.webgl.renderer"] == wanted["renderer"]
-    assert translate_profile_to_prefs(p)["zoom.stealth.webgl.vendor"] == wanted["vendor"]
+    assert translate_profile_to_prefs(p, timezone="America/New_York")["zoom.stealth.webgl.renderer"] == wanted["renderer"]
+    assert translate_profile_to_prefs(p, timezone="America/New_York")["zoom.stealth.webgl.vendor"] == wanted["vendor"]
 
 
 def test_a_renderer_the_pool_cannot_present_is_refused_not_relabelled():
@@ -263,7 +263,7 @@ def test_the_label_and_the_page_agree_for_every_seed_pinned_or_not():
     for seed in range(60):
         for pin in pins:
             p = generate_profile(seed, pin=pin)
-            prefs = translate_profile_to_prefs(p)
+            prefs = translate_profile_to_prefs(p, timezone="America/New_York")
             if (p.gpu.renderer != prefs["zoom.stealth.webgl.renderer"]
                     or p.gpu.vendor != prefs["zoom.stealth.webgl.vendor"]):
                 disagreements.append((seed, pin, p.gpu.renderer,

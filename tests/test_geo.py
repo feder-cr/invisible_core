@@ -817,3 +817,65 @@ def test_behind_a_proxy_a_failed_discovery_does_NOT_fall_to_the_direct_address(m
     assert count["n"] == 0, (
         "it went out on the DIRECT network to derive the language while a proxy "
         "was configured: that address is the one at home")
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  A16 - the exit decides, with a proxy or without one (2026-10-17)
+# ──────────────────────────────────────────────────────────────────────
+@pytest.mark.unit
+def test_without_a_proxy_an_explicit_zone_still_gets_the_exits_position_and_language(monkeypatch):
+    """The owner's rule of 2026-10-17 (28-valori-dell-host.md A16): the zone,
+    the language and the position come from the EXIT, and without a proxy the
+    exit is the host's public address. Until 49.46.0 an explicit zone without
+    a proxy asked nothing, so the session had no position at all - the
+    known-bad this test would have caught is that `latitude` stayed None and
+    the count stayed 0."""
+    count = _count_probes(monkeypatch)
+    geo = _geo.prepare_session_geo("Asia/Tokyo", None, "auto")
+
+    assert geo.timezone == "Asia/Tokyo", "an explicit zone still wins"
+    assert (geo.latitude, geo.longitude) == (1.0, 2.0), "the position is the exit's"
+    assert geo.locale.region == "GB", "the language is the exit's"
+    assert count["n"] == 1, "one round trip for the three, not %d" % count["n"]
+    assert geo.srflx_to_declare() is None, (
+        "with no proxy nothing is declared: the real srflx is already the truth")
+
+
+@pytest.mark.unit
+def test_without_a_proxy_a_failed_discovery_does_not_fail_an_explicit_zone(monkeypatch):
+    """An explicit zone does not need the address, so a dead network leaves
+    the session without a position rather than without a launch - the same
+    tolerance it always had behind a proxy - and "auto" still raises."""
+    count = {"n": 0}
+
+    def boom(proxy=None, **kw):
+        count["n"] += 1
+        raise GeoTimezoneError("offline")
+
+    monkeypatch.setattr(_geo, "discover_egress_ip", boom)
+    geo = _geo.prepare_session_geo("Asia/Tokyo", None, "en-US")
+    assert geo.timezone == "Asia/Tokyo" and geo.egress_ip is None
+    assert (geo.latitude, geo.longitude) == (None, None)
+    assert count["n"] == 1, "a failure is not retried by the language decision"
+    with pytest.raises(GeoTimezoneError):
+        _geo.prepare_session_geo("auto", None, "en-US")
+
+
+@pytest.mark.unit
+def test_the_public_prefs_helper_declares_the_exits_zone_by_default(monkeypatch):
+    """`get_default_stealth_prefs()` with nothing passed used to emit no zone
+    at all, which is the host's: its default was "" and the docstring said
+    "Empty means use the host TZ". It resolves "auto" from the exit now, the
+    way a launch does (A16), and the zone it writes is that one."""
+    from invisible_core.config import get_default_stealth_prefs
+
+    count = _count_probes(monkeypatch)
+    decided = _geo.prepare_session_geo("auto", None, "auto")
+    count["n"] = 0
+    prefs = get_default_stealth_prefs(seed=42)
+    assert prefs["juggler.timezone.override"] == decided.timezone == "America/New_York"
+    # The language the exit's decision gives (the country picks the builds,
+    # the address one of them), not a tag this test guesses.
+    assert prefs["intl.locale.requested"] == decided.locale.primary
+    assert prefs["intl.accept_languages"] == decided.locale.accept_languages
+    assert count["n"] == 1

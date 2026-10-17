@@ -37,14 +37,17 @@ uv add invisible-core
 ```
 
 ```python
-from invisible_core import generate_profile, translate_profile_to_prefs, ensure_binary
+from invisible_core import (ensure_binary, generate_profile, prepare_session_geo,
+                            translate_profile_to_prefs)
 
-profile = generate_profile(seed=42)          # deterministic Bayesian fingerprint
-prefs   = translate_profile_to_prefs(profile)  # dict of Firefox user prefs
-binary  = ensure_binary()                     # path to the patched Firefox binary
+profile = generate_profile(seed=42)        # deterministic Bayesian fingerprint
+geo     = prepare_session_geo("auto", None)  # zone and language of the exit (here, this machine's public IP)
+prefs   = translate_profile_to_prefs(profile, locale=geo.locale, timezone=geo.timezone)
+binary  = ensure_binary()                   # path to the patched Firefox binary
 ```
 
-Same seed → same fingerprint, every time.
+Same seed → same fingerprint, every time. The timezone is required: a session
+without one would run on the host's own zone.
 
 ## What the fields actually mean
 

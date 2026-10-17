@@ -37,6 +37,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Union
 
 from ._fpforge import generate_profile
+from ._geo import prepare_session_geo
 from .session_seed import resolve_session_seed
 from .prefs import compose_session_prefs
 
@@ -45,8 +46,8 @@ def get_default_stealth_prefs(
     seed: Optional[int] = None,
     *,
     pin: Optional[Dict[str, Any]] = None,
-    locale: Any = "en-US",
-    timezone: str = "",
+    locale: Any = "auto",
+    timezone: str = "auto",
     extra_prefs: Optional[Dict[str, Any]] = None,
     humanize: Union[bool, float] = True,
     virtual_display: bool = False,
@@ -65,16 +66,24 @@ def get_default_stealth_prefs(
             random int31 (matches ``InvisiblePlaywright`` default).
         pin: Optional dict forcing specific fingerprint fields while the
             rest stays seed-derived. See ``docs/pinning.md``.
-        locale: BCP-47 tag (e.g. ``"en-US"``) or a ``SessionLocale``. Drives
-            ``Accept-Language`` and ``navigator.language``, through the same
-            decision a launch makes (``decide_session_locale``). Like the
-            timezone, ``"auto"`` is not resolved here: pass
-            ``prepare_session_geo(timezone, proxy, "auto").locale``.
-        timezone: IANA timezone (e.g. ``"America/New_York"``). Empty means
-            use the host TZ. This pure pref builder does NOT resolve
-            ``"auto"`` (that needs the proxy + a network lookup at launch
-            time) - pass a concrete zone here, or use ``InvisiblePlaywright``
-            / ``resolve_session_timezone(timezone, proxy)`` for ``"auto"``.
+        locale: ``"auto"`` (the default), a BCP-47 tag (e.g. ``"en-US"``)
+            or a ``SessionLocale``. Drives ``Accept-Language`` and
+            ``navigator.language``. ``"auto"`` is the language of the exit's
+            country, decided the way a launch decides it.
+        timezone: ``"auto"`` (the default) or an IANA zone (e.g.
+            ``"America/New_York"``). ``"auto"`` is the zone of the exit: the
+            ``proxy`` below when one is given, the host's public address
+            otherwise, and it raises when that cannot be resolved.
+
+            ⛔ THE DEFAULTS ASK THE NETWORK, ONCE, and that is the point.
+            Until 49.46.0 they were ``"en-US"`` and ``""``, and the empty zone
+            left the browser on the host operating system's: a caller who
+            passed nothing got the machine's zone beside a persona that
+            declares everything else. The language, the zone and the position
+            now come from the exit, with a proxy or without one, as they do
+            for a launch (``prepare_session_geo``, the owner's rule of
+            2026-10-17). Passing both explicitly asks the network for the
+            exit's position only.
         extra_prefs: Optional dict overlaid LAST onto the generated prefs.
         humanize: When True (default), every mouse move is expanded into
             a Bezier trajectory BY THE PATCHED BINARY. A float caps the
@@ -138,6 +147,9 @@ def get_default_stealth_prefs(
     # place that had to be kept in step with the persona choice, and call sites
     # that forgot it produced a different profile for the same seed.
     profile = generate_profile(resolved_seed, pin=pin)
+    # The same decision a launch makes, from the same exit: one call for the
+    # zone, the language and the address, so the three cannot disagree.
+    geo = prepare_session_geo(timezone, proxy, locale)
     # One composition for all three entry points (prefs.py). Two things this
     # function did NOT do before 2026-08-01 and now does, both by taking the
     # shared layers rather than rebuilding them:
@@ -149,8 +161,8 @@ def get_default_stealth_prefs(
     #     wrote maxTime = "-1.0" for humanize=-1.
     return compose_session_prefs(
         profile,
-        locale=locale,
-        timezone=timezone,
+        locale=geo.locale,
+        timezone=geo.timezone,
         extra_prefs=extra_prefs,
         virtual_display=virtual_display,
         proxy=proxy,
