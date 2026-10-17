@@ -82,7 +82,7 @@ def _release_dir() -> Path:
     even from a worktree, so its grandparent is `release/`.
 
     This repo's OWN tests still come from `__file__`, never from here - see
-    `_test_trees()`. Resolving the siblings must not quietly swap the tree under
+    `_citation_files()`. Resolving the siblings must not quietly swap the tree under
     test for the shared checkout, which sits on whatever commit somebody else left
     it on: that is the wrong-judge failure this project keeps paying for, and it
     would be worse than skipping, because it would be green about the wrong tree.
@@ -110,122 +110,33 @@ _RELEASE = _release_dir()
 #: not `_RELEASE / "invisible_core"`. Everything that judges THIS tree uses it.
 _SELF = Path(__file__).resolve().parents[1]
 
-#: What a test name looks like, declared ONCE and read by the four scans below.
-#:
-#: ⛔ IT USED TO BE `test_[a-z0-9_]+`, WRITTEN OUT FOUR TIMES, AND THAT MADE THE
-#: TWO DOC GATES BLIND TO 5% OF THE SUITE. This project screams in test names on
-#: purpose - `test_..._REFUSES_...`, `test_GLI_STATI_...` - and a capital letter
-#: took the name out of the gate's sight on BOTH sides at once: a doc could cite
-#: it and no tree could be searched for it.
-#:
-#: Measured 2026-09-15 across the four suites: 168 of 3693 names carry a capital.
-#: The three citations that surfaced the moment the class was widened -
-#: `test_a_core_version_that_is_not_XYZ_is_refused`,
-#: `test_il_percorso_che_delega_NON_cambia_comportamento`,
-#: `test_GLI_STATI_DI_UNA_NAVIGAZIONE_NON_VALGONO_PER_UN_ALTRA` - exist in no
-#: tree at all, so the docs had been sending readers to an empty grep for as
-#: long as the names carried a capital.
-#:
-#: And the narrow class did worse than skip: against `def test_A_b`, `[a-z0-9_]+`
-#: matches the PREFIX `test_` and records that fragment as a defined name, so
-#: the `defined` set was polluted rather than merely short.
-_TEST_NAME = r"test_[A-Za-z0-9_]+"
+def _citations():
+    """The workbench's `scripts/check_test_citations.py`: the ONE definition of
+    the two doc gates below.
 
-
-def _test_trees():
-    """Every tree on this machine that DEFINES a test the docs may cite.
-
-    ⛔ THIS WAS WRITTEN THREE TIMES, AND THE THREE COPIES HAD DRIFTED APART. The
-    two doc gates below both answer "does this cited name exist", and they were
-    reading different worlds: one derived the sibling repos and added the Firefox
-    source's `scripts/`, the other still carried a hand-written pair of repo
-    names. So the same citation could be a phantom for one gate and fine for the
-    other, and only the stricter of the two could ever say so.
-
-    That hand-written list is the one whose staleness is already recorded a few
-    lines down - it did not know AIHawk existed and reported 9 true citations as
-    phantoms. Deriving it once is what stops the fourth repo from repeating it.
-
-    Returns (trees, source_present). The caller decides what a missing Firefox
-    source means for IT: the phantom gate has to skip, because a name it cannot
-    resolve would be reported as missing, while a gate asking "is the file named
-    nearby" is simply quieter without it.
+    ⛔ THESE GATES USED TO CARRY THEIR OWN COPY, and it ran too late. They lived
+    only here, so they judged the workbench docs only when this suite ran, after
+    the docs had landed: on the night of 2026-10-16/17 the same citation without
+    its file got through three times and each time made every push of this repo
+    red. The check is about the workbench's docs and reads the tests of every
+    repo, and the workbench is the one place that knows them all, so it lives
+    there and its pre-commit runs it before a doc lands. These tests call it.
     """
-    # ⛔ THIS CHECKOUT FIRST, and the shared one for this repo is skipped. Running
-    # from a worktree, `_RELEASE / "invisible_core"` is somebody else's tree on
-    # somebody else's commit; reading it would make these gates green about code
-    # that is not the code under test.
-    trees = [_SELF / "tests"]
-    trees += [d / "tests" for d in sorted(_RELEASE.iterdir())
-              if (d / "tests").is_dir() and d.name != _SELF.name]
-    # The workbench itself: its suite, and its `scripts/`, which holds tests
-    # beside the scripts they cover (`scripts/test_sync_core_pin.py`).
-    trees.append(_RELEASE.parent / "tests")
-    trees.append(_RELEASE.parent / "scripts")
-    sorgente = [p for p in _FIREFOX_SOURCE_CANDIDATES if (p / "scripts").is_dir()]
-    if sorgente:
-        trees.append(sorgente[0] / "scripts")
-    return [t for t in trees if t.is_dir()], bool(sorgente)
+    path = _RELEASE.parent / "scripts" / "check_test_citations.py"
+    if not path.is_file():
+        pytest.skip("not the workbench - its citation check is not here")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("check_test_citations", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
-def _test_files():
-    """(file name, text) of every test file a doc may cite, and source_present.
-
-    ⛔ THE WORKING COPIES ARE NOT ENOUGH, AND THE SHARED ONES ARE BEHIND BY
-    DESIGN. The sibling checkouts under `release/` are shared between sessions
-    and no session may move them (CLAUDE.md, rule 17), so they sit on whatever
-    commit they last landed on. Measured 2026-10-06: seven tests the docs cite
-    existed on the wrapper's `main` and not in its shared checkout, and the
-    phantom gate called all seven missing. The only offered way out was to drop
-    the backticks, which by this gate's own convention declares a name
-    HISTORICAL: a true citation rewritten as a false one to quiet the gate.
-
-    So each sibling repo is read twice: its working copy (what is on this
-    machine, possibly ahead) and the tree of its `origin/main` (what is
-    published), straight from git objects, without touching the checkout. It is
-    as fresh as the last `git fetch`; a repo with no `origin/main` simply adds
-    nothing.
-    """
-    trees, source_present = _test_trees()
-    files = []
-    for tree in trees:
-        for path in tree.rglob("test_*.py"):
-            files.append((path.name, path.read_text(encoding="utf-8", errors="replace")))
-    for repo in sorted(_RELEASE.iterdir()):
-        if repo.name != _SELF.name and (repo / ".git").exists():
-            files += _test_files_on_origin_main(repo)
-    return files, source_present
-
-
-def _test_files_on_origin_main(repo: Path):
-    """(file name, text) of the test files in the tree of ``repo``'s origin/main."""
-    listed = subprocess.run(
-        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", "origin/main"],
-        capture_output=True, text=True)
-    if listed.returncode != 0:
-        return []
-    paths = [p for p in listed.stdout.splitlines()
-             if p.rsplit("/", 1)[-1].startswith("test_") and p.endswith(".py")]
-    if not paths:
-        return []
-    batch = subprocess.run(
-        ["git", "-C", str(repo), "cat-file", "--batch"],
-        input="".join(f"origin/main:{p}\n" for p in paths).encode("utf-8"),
-        capture_output=True)
-    if batch.returncode != 0:
-        return []
-    out, pos, files = batch.stdout, 0, []
-    for p in paths:
-        end = out.index(b"\n", pos)
-        header = out[pos:end].split()
-        pos = end + 1
-        if len(header) != 3 or header[1] != b"blob":
-            continue                     # "<name> missing": nothing to read
-        size = int(header[2])
-        files.append((p.rsplit("/", 1)[-1],
-                      out[pos:pos + size].decode("utf-8", errors="replace")))
-        pos += size + 1
-    return files
+def _citation_files(mod):
+    """(files, source present), with THIS checkout's tests first and the shared
+    copy of this repo left out: from a worktree, `_RELEASE / "invisible_core"`
+    is somebody else's tree on somebody else's commit."""
+    return mod.test_files(_RELEASE, _RELEASE.parent, first=[_SELF / "tests"], skip={_SELF.name})
 
 
 def _is_vendored(rel: str) -> bool:
@@ -241,16 +152,6 @@ def _is_vendored(rel: str) -> bool:
     """
     parts = rel.replace("\\", "/").split("/")
     return "_pw" in parts or "_driver" in parts
-
-# Where the patched Firefox source lives, per `10-repo-layout.md`. Two entries
-# because the two build trees are SEPARATE clones, Windows and WSL. Only used
-# to resolve test names the workbench docs cite from that repo; a machine that
-# has neither skips those checks rather than reporting a name as missing.
-_FIREFOX_SOURCE_CANDIDATES = (
-    Path("C:/ff/source"),
-    Path.home() / "ff-build" / "firefox-150",
-)
-
 
 def _pytest_config(repo: str) -> dict:
     path = _RELEASE / repo / "pyproject.toml"
@@ -1087,62 +988,25 @@ def test_the_workbench_docs_name_no_test_that_does_not_exist():
 
     Skipped outside the workbench: these docs are not part of any package.
     """
-    import re
-
     workbench = _RELEASE.parent
     docs = workbench / "docs" / "firefox-stealth-architecture"
     if not docs.is_dir():
         pytest.skip("not the workbench - the architecture docs are not here")
-
-    defined = set()
     for repo in _DEFAULT_SUITE_WORKFLOW:
         if not (_RELEASE / repo / "tests").is_dir():
             pytest.skip("not the workbench - the sibling repos are not here")
-    # EVERY sibling repo that has a suite, not a list of two written by hand.
-    #
-    # The list WAS written by hand, and it went stale the moment a third
-    # first-party repo appeared: AIHawk arrived with its own tests, the docs
-    # started citing them by name, and this gate reported those names as
-    # phantoms - 9 of them, permanently, on citations that were all true. That
-    # is the same false positive the `sorgente` block below was added to fix,
-    # so it gets the same answer rather than a third hardcoded entry that would
-    # go stale on the fourth repo. `_DEFAULT_SUITE_WORKFLOW` still decides
-    # whether this is the workbench at all; it no longer decides what is read.
-    # ⛔ THE TREES COME FROM `_test_trees()`, and two of the entries in it are
-    # there because this gate went red on citations that were TRUE. The Firefox
-    # source's `scripts/` was added 2026-08-12 for
-    # `test_manifest_family_set_equals_the_68`; the workbench's own `scripts/`
-    # on 2026-09-15 for `test_a_core_version_that_is_not_XYZ_is_refused`, which
-    # had been invisible only because the name class was narrower than the names.
-    # A gate that is red for a false positive is worse than a stale doc: it
-    # teaches the next reader to ignore it.
-    # ⛔ AND THE FILES COME FROM `_test_files()`, which adds each sibling's
-    # origin/main to its working copy: the shared checkouts are behind by
-    # design, and reading only them called seven true citations phantoms.
-    files, source_present = _test_files()
+    mod = _citations()
+    files, source_present = _citation_files(mod)
     if not source_present:
         pytest.skip("the Firefox source tree is not on this machine, so the "
                     "names the docs cite from it cannot be judged")
-
-    for name, text in files:
-        defined.update(re.findall(r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")", text))
-        defined.add(name[:-3])              # docs cite files by name too
-
-    phantom = {}
-    for doc in sorted(docs.glob("*.md")):
-        cited = set(re.findall(r"`(" + _TEST_NAME + r")`",
-                               doc.read_text(encoding="utf-8")))
-        gone = sorted(cited - defined)
-        if gone:
-            phantom[doc.name] = gone
-
+    phantom = mod.phantoms(docs, files)
     assert not phantom, (
         "these docs name tests that do not exist, which sends the next reader to "
         "a grep that returns nothing:\n  "
         + "\n  ".join(f"{f}: {names}" for f, names in phantom.items())
         + "\nEither the name changed and the doc did not follow, or the coverage "
           "went. If the mention is HISTORICAL, write it without backticks.")
-
 
 def test_every_open_bug_says_how_to_re_check_it():
     """An OPEN heading is a claim about TODAY, and nothing was re-reading it.
@@ -1222,43 +1086,15 @@ def test_a_doc_that_names_a_test_function_names_the_file_holding_it():
     A name that IS a file stem is exempt: it already names the file. A function
     defined in more than one file passes if any of them is named.
     """
-    import re
-
     workbench = _RELEASE.parent
     docs = workbench / "docs" / "firefox-stealth-architecture"
     if not docs.is_dir():
         pytest.skip("not the workbench - the architecture docs are not here")
-
-    # ⛔ THE SAME TREES AS THE PHANTOM GATE, from one helper. This list used to
-    # be the hand-written pair whose staleness is recorded up there, so the two
-    # gates asking the same question read two different worlds.
-    files, _ = _test_files()
-    defined = {}
-    stem = set()
-    for file_name, text in files:
-        stem.add(file_name[:-3])
-        for name in re.findall(r"(?m)^\s*(?:async )?def (" + _TEST_NAME + r")", text):
-            defined.setdefault(name, set()).add(file_name)
-    if not defined:
+    mod = _citations()
+    files, _ = _citation_files(mod)
+    if not files:
         pytest.skip("not the workbench - the sibling repos are not here")
-
-    orphans = {}
-    for doc in sorted(docs.glob("*.md")):
-        lines = doc.read_text(encoding="utf-8").split(chr(10))
-        cuts = [i for i, r in enumerate(lines) if re.match(r"^#{1,6} ", r)]
-        cuts.append(len(lines))
-        for i, line in enumerate(lines):
-            for m in re.finditer(r"`(" + _TEST_NAME + r")`", line):
-                name = m.group(1)
-                if name in stem or name not in defined:
-                    continue     # a file, or non-existent: the other gate says so
-                a = max([t for t in cuts if t <= i], default=0)
-                b = min([t for t in cuts if t > i], default=len(lines))
-                section = chr(10).join(lines[a:b])
-                if not any(f in section for f in defined[name]):
-                    orphans.setdefault(doc.name, []).append(
-                        name + " -> " + "/".join(sorted(defined[name])))
-
+    orphans = mod.orphans(docs, files)
     assert not orphans, (
         "these docs name a test function without naming, anywhere in the same "
         "section, the file that holds it - so the only way to reach it is a "
