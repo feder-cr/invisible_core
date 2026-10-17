@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import pytest
 
+from _closed_world import check_command
+
 from invisible_core.juggler.connection import EventListeners
 from invisible_core.juggler.injected import (
     CALLER_WORLD, UTILITY_WORLD, InjectedScript)
@@ -35,6 +37,8 @@ class _Engine(EventListeners):
                              "auxData": {"frameId": F, "name": name}}, S)
 
     def send(self, method, params=None, session=None, timeout=None):
+        # what the engine would refuse, at every depth of the command
+        check_command(method, params)
         self.sent.append((method, dict(params or {})))
         if method == "Page.setInitScripts":
             return {}
