@@ -116,6 +116,12 @@ CONTRACT = {
         # names it any more (they read `prepare_session_geo(...).locale`).
         # Still exported and tested here; out of the contract only.
         "persona_cookies",
+        # The persistent profile's seed, since 48.41.0 (all three consumers),
+        # and LATE here for the reason `SessionLocale` was: the live check
+        # below skips unless the consumers sit beside THIS checkout, which a
+        # worktree never has, so it went unread until 2026-10-17, when a
+        # worktree of each client happened to sit next to one of the core.
+        "record_session_seed", "resolve_session_seed",
         "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
@@ -314,6 +320,9 @@ CONTRACT = {
         # ContextDestroyed since 41.36.0: a world that went, typed once here
         # instead of matched by its sentence in each client.
         "ContextDestroyed", "EvaluationError", "InjectedScript", "UTILITY_WORLD",
+        # Since 48.42.0, imported by invisible_puppeteer: a predicate's result
+        # judged as JavaScript judges it, once here (late, as above).
+        "js_truthy",
     },
     # Since 41.37.0: the browser module selenium and puppeteer each carried a
     # copy of, here once.
