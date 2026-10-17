@@ -2,13 +2,13 @@
 
 The rule is Playwright's: a URL ending in `/favicon.ico`, or a request a
 favicon request redirected to. These cases pin it, the redirect in the order
-the engine really sends it, and the memory's bound.
+the engine really sends it, and the memory's lifetime.
 """
 from __future__ import annotations
 
 import pytest
 
-from invisible_core.juggler.favicon import FaviconRequests, is_favicon_url, _KEPT
+from invisible_core.juggler.favicon import FaviconRequests, is_favicon_url
 
 pytestmark = pytest.mark.unit
 
@@ -59,12 +59,17 @@ def test_a_page_request_redirected_to_the_favicon_is_a_favicon_from_that_hop():
     assert not f.see("Network.requestFinished", {"requestId": "R"})
 
 
-def test_the_memory_is_bounded_and_keeps_the_newest():
+def test_an_early_favicon_is_still_known_after_many_later_ones():
+    """Known bad: the memory once kept the last 64 ids, and a late question about
+    an early favicon (a page replaying the events it held at birth) answered
+    "not a favicon" once 64 more had come. An id lives as long as its session."""
     f = FaviconRequests()
-    for i in range(_KEPT + 10):
+    f.see(*_sent("F0", "http://h/favicon.ico"))
+    f.see("Network.requestFinished", {"requestId": "F0"})
+    for i in range(1, 1000):
         f.see(*_sent("F%d" % i, "http://h/favicon.ico"))
-    assert not f.see("Network.requestFinished", {"requestId": "F0"})
-    assert f.see("Network.requestFinished", {"requestId": "F%d" % (_KEPT + 9)})
+    assert f.is_favicon("F0")
+    assert f.see("Network.requestFinished", {"requestId": "F0"})
 
 
 def test_asking_classifies_nothing_and_the_answer_outlives_the_request():

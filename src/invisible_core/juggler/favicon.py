@@ -19,6 +19,18 @@ gets the same answer later. Two memories could disagree - a redirect one of
 them missed, a replay, a session that went away under one of them - and one
 cannot.
 
+⛔ AN ID LIVES AS LONG AS ITS SESSION, NOT AS LONG AS A COUNT ALLOWS. Everyone
+who can ask about a request belongs to the session: the lifecycle itself, the
+next hop of a redirect (the engine finishes a hop BEFORE it sends the next one,
+whose only tie to it is `redirectedFrom`), and the page's server replaying the
+events it held at birth, after the lifecycle saw them end. Nothing the engine
+sends says "nobody will ask about this one again" except the end of the
+session, so that is where the memory ends: it is the lifecycle's, and goes with
+it. Until 2026-10-17 it kept the last 64 ids, a number picked by hand, and a
+session with more favicons than that answered "not a favicon" to a late
+question about an early one: B321 again, by a side door. It grows by one short
+id per favicon request, about one per top-level document.
+
 ⛔ THE REQUEST STILL GOES TO THE NETWORK. Upstream aborts a favicon request
 when a route is on; a real Firefox always asks the site for its favicon, so a
 site would see one less request than from any Firefox. Hidden from the client,
@@ -26,19 +38,9 @@ it is let through.
 """
 from __future__ import annotations
 
-from collections import OrderedDict
-from typing import Optional
+from typing import Optional, Set
 
 __all__ = ["FaviconRequests", "is_favicon_url"]
-
-#: How many favicon request ids are remembered. An id has to outlive its own
-#: `requestFinished`: the engine finishes a redirect's hop BEFORE it sends the
-#: next hop, whose only tie to it is `redirectedFrom`, and a page's server can
-#: ask after the lifecycle has seen the whole request. There is one favicon
-#: request per document, so 64 is far more than either can need, and the bound
-#: is what keeps a long session from growing it for ever.
-_KEPT = 64
-
 
 def is_favicon_url(url: str) -> bool:
     """Upstream's test, on the URL without its fragment."""
@@ -49,7 +51,7 @@ class FaviconRequests:
     """The favicon requests of one session: fed by its lifecycle, asked by anyone."""
 
     def __init__(self) -> None:
-        self._ids: "OrderedDict[str, None]" = OrderedDict()
+        self._ids: Set[str] = set()
 
     def see(self, method: str, params: dict) -> bool:
         """Read one `Network.*` event and say whether it is a favicon's.
@@ -65,9 +67,7 @@ class FaviconRequests:
         if not (is_favicon_url(params.get("url") or "")
                 or params.get("redirectedFrom") in self._ids):
             return False
-        self._ids[request_id] = None
-        while len(self._ids) > _KEPT:
-            self._ids.popitem(last=False)
+        self._ids.add(request_id)
         return True
 
     def is_favicon(self, request_id: Optional[str]) -> bool:
