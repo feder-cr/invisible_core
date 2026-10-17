@@ -54,126 +54,9 @@ _NAVIGATOR_OVERRIDES: Dict[str, str] = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────
-#  System colors - FP Pro probes getComputedStyle(div) with CSS system
-#  keywords (ButtonFace, Menu, Highlight, …) and hashes the result into
-#  signal s142. On Linux, Firefox resolves these via GTK theme → GTK
-#  RGB values diverge from Windows Win32 palette → server-side anomaly
-#  even with Windows UA. Declaring the palette retail 151 answers on
-#  Windows, for both colour schemes, closes the gap on both builds.
-# ──────────────────────────────────────────────────────────────────────
-
-_WIN_LIGHT_COLORS: Dict[str, str] = {
-    # Measured against stock Firefox 151 on Windows, 2026-08-09, not chosen.
-    # A page resolves every one of these through getComputedStyle, and our Linux
-    # build answered GTK's values for all seven: menuhover was rgb(53,132,228)
-    # against rgba(0,0,0,0.118), oddtreerow was transparent against white,
-    # dialogtext was rgb(46,52,54) against black. Eight colours in one call is a
-    # desktop-environment readout, which is a stronger tell than any single one.
-    #
-    # The names are NOT uniform and that is upstream's doing, not a typo here:
-    # nsXPLookAndFeel.cpp spells cellhighlight with a hyphen and menuhover,
-    # menuhovertext, menubarhovertext and oddtreerow with an UNDERSCORE. Naming
-    # all seven with hyphens left exactly those four unset, and the measurement
-    # said so - Linux went from 8 divergences to 4, and the 4 were the 4.
-    "ui.-moz-cellhighlight":           "#CECECE",
-    # F0F0F0. This one value was declared three times in two days, twice from a
-    # binary that was not the right judge, and the sequence is worth more than
-    # the number.
-    #
-    #   declared      FFFFFF   no measurement behind it
-    #   2026-08-09    F0F0F0   judged by C:/tmp/ff151-win2
-    #   2026-08-09    FFFFFF   judged by C:/tmp/retail151, "the signed retail"
-    #   2026-08-10    F0F0F0   judged by a binary verified to be both
-    #
-    # ff151-win2 reports 151.0 and is not retail: Get-AuthenticodeSignature
-    # says NotSigned, ProductName is "Nightly", IsPrivateBuild is true. Right
-    # version, wrong build. So the second row was rejected - correctly.
-    #
-    # C:/tmp/retail151 was then downloaded and extracted to be the answer to
-    # that, and its application.ini says Version=153.0.3: the extraction had
-    # failed and the directory kept what was already in it. Right provenance,
-    # wrong version, and the name said 151 both times. So the third row was
-    # measured against 153, which genuinely answers white here - the difference
-    # is upstream drift between the two majors, which is exactly the thing
-    # rule 4's same-major clause exists to keep out of our numbers.
-    #
-    # The fourth row is C:/tmp/ffjudge-151.0: application.ini Version=151.0
-    # BuildID=20260516144017, Authenticode Valid, CN=Mozilla Corporation,
-    # ProductName Firefox, IsPrivateBuild false. Both checks, on the same
-    # binary, before it was allowed to decide anything. It answers
-    # rgb(240,240,240), which means the FIRST correction had the right value
-    # from the wrong evidence - and a right answer from a bad judge is still
-    # not knowledge, because the next value it decides will be wrong.
-    #
-    # Measured the same day across all 35 keywords: our Windows build differs
-    # from that judge on this one field and no other, and 6 of the 35 do not
-    # resolve from content at all. That 1-of-35 is why a wrong judge survives
-    # so long - it agrees almost everywhere.
-    "ui.-moz-dialog":                  "#F0F0F0",
-    "ui.-moz-dialogtext":              "#000000",
-    "ui.-moz_menubarhovertext":        "#15141A",
-    "ui.-moz_menuhover":               "#0000001E",
-    "ui.-moz_menuhovertext":           "#15141A",
-    "ui.-moz_oddtreerow":              "#FFFFFF",
-    "ui.activeborder":              "#B4B4B4",
-    "ui.activecaption":             "#99B4D1",
-    "ui.appworkspace":              "#ABABAB",
-    "ui.background":                "#000000",
-    "ui.buttonface":                "#F0F0F0",
-    "ui.buttonhighlight":           "#FFFFFF",
-    "ui.buttonshadow":              "#A0A0A0",
-    "ui.buttontext":                "#000000",
-    "ui.buttonborder":              "#000000",
-    "ui.captiontext":               "#000000",
-    "ui.graytext":                  "#6D6D6D",
-    "ui.highlight":                 "#0078D7",
-    "ui.highlighttext":             "#FFFFFF",
-    "ui.inactiveborder":            "#F4F7FC",
-    "ui.inactivecaption":           "#BFCDDB",
-    "ui.inactivecaptiontext":       "#434E54",
-    "ui.infobackground":            "#FFFFE1",
-    "ui.infotext":                  "#000000",
-    "ui.menu":                      "#F9F9FB",
-    "ui.menutext":                  "#000000",
-    "ui.scrollbar":                 "#C8C8C8",
-    "ui.threeddarkshadow":          "#696969",
-    "ui.threedface":                "#F0F0F0",
-    "ui.threedhighlight":           "#FFFFFF",
-    "ui.threedlightshadow":         "#E3E3E3",
-    "ui.threedshadow":              "#A0A0A0",
-    "ui.window":                    "#FFFFFF",
-    "ui.windowframe":               "#646464",
-    "ui.windowtext":                "#000000",
-    "ui.mark":                      "#FFFF00",
-    "ui.marktext":                  "#000000",
-    "ui.accentcolor":                  "#0060DF",
-    "ui.accentcolortext":           "#FFFFFF",
-    "ui.selecteditem":              "#0078D7",
-    "ui.selecteditemtext":          "#FFFFFF",
-    "ui.-moz-hyperlinktext":        "#0066CC",
-    "ui.-moz-activehyperlinktext":  "#EE0000",
-    "ui.-moz-visitedhyperlinktext": "#551A8B",
-}
-
-#: The names whose value changes in the DARK scheme, as `ui.<name>.dark`.
-#: Measured on retail 151 on Windows 11 on 2026-10-17, a `color-scheme: dark`
-#: box against a light one, all 56 keywords: these ten move and the other 46
-#: answer the same in both schemes, so the engine's fallback from `.dark` to
-#: the plain name (GetColorFromPref) gives them their value from the table
-#: above. The alpha is two hex digits: rgba(0,221,255,0.306) is 0x4E/255.
-_WIN_DARK_COLORS: Dict[str, str] = {
-    "ui.highlight.dark":              "#00DDFF4E",
-    "ui.highlighttext.dark":          "#000000",
-    "ui.selecteditem.dark":           "#00DDFF",
-    "ui.selecteditemtext.dark":       "#2B2A33",
-    "ui.-moz-dialog.dark":            "#23222B",
-    "ui.-moz-dialogtext.dark":        "#FBFBFE",
-    "ui.-moz-cellhighlight.dark":     "#00DDFF",
-    "ui.-moz_menuhover.dark":         "#FFFFFF1E",
-    "ui.-moz_menuhovertext.dark":     "#FBFBFE",
-    "ui.-moz_oddtreerow.dark":        "#23222B",
-}
+# The system colour palette lives in `_fpforge.palette`, the default of the
+# `desktop.palette` field: a value a pref decides is a field of the Profile,
+# and this module only writes it (`_apply_theme`).
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1577,6 +1460,7 @@ def _apply_voices(prefs: Dict[str, Any], profile: Profile,
 def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     """Dark mode, the LookAndFeel values that read the host, and the Windows
     colour palette for both schemes."""
+    d = profile.desktop
     prefs["ui.systemUsesDarkTheme"] = int(profile.dark_theme)
     # The same thing said to the other reader. `ui.systemUsesDarkTheme` is read
     # by LookAndFeel; `prefers-color-scheme` is not, because nsPresContext looks
@@ -1608,14 +1492,13 @@ def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     # or one `matchMedia('(resolution: ...)')`.
     #
     # 1.0 is what a machine at the default setting reports, which is what the
-    # personas claim, and it is the only value that can be declared here: the
-    # DPR a persona has is `screen.dpr`, and a second factor multiplying it
-    # would be a second number for one fact. Both development machines are at
-    # the default, so this agreed cross-OS by coincidence and no comparison
-    # could have caught it - the same shape as the colour depth, which read the
-    # real panel for months while both machines happened to be 24-bit.
+    # personas claim (`desktop.text_scale`, 100). Both development machines
+    # are at the default, so this agreed cross-OS by coincidence and no
+    # comparison could have caught it - the same shape as the colour depth,
+    # which read the real panel for months while both machines happened to be
+    # 24-bit.
     #
-    # ⛔ AN INT, 100, AND THE TYPE IS THE WHOLE STORY. This is NOT read by
+    # ⛔ AN INT, PERCENT, AND THE TYPE IS THE WHOLE STORY. This is NOT read by
     # `Preferences::GetFloat`: nsXPLookAndFeel::GetFloatValue reads every name
     # of its `sFloatPrefs` table with `Preferences::GetInt` and divides by 100.
     # Until 49.46.0 it was the STRING "1.0", reasoned from the other float
@@ -1637,38 +1520,44 @@ def _apply_theme(prefs: Dict[str, Any], profile: Profile) -> None:
     # wrapper composes - 14 launches. The quotes cured the crash and turned the
     # declaration into a read that failed in silence: the type was wrong in a
     # new way, and nothing looked at the type.
-    prefs["ui.textScaleFactor"] = 100
-    #: 0 = let the locale decide, which is what Windows does. On Linux this
-    #: IntID reads GNOME's `org.gnome.desktop.interface clock-format` live and
-    #: OSPreferences_gtk overrides the ICU pattern with it, so a host set to
-    #: 24h changed `Intl.DateTimeFormat().resolvedOptions().hourCycle` and every
-    #: `toLocaleTimeString()`. Windows has no case for this IntID at all, so
-    #: declaring 0 is what makes the two behave the same way.
-    prefs["ui.hourCycle"] = 0
-    #: Windows hardcodes 1 (select the whole field when tabbing into it); GTK
-    #: reads the live `gtk-entry-select-on-focus` setting, which a user can turn
-    #: off. A page reads the difference with `input.selectionStart` after
-    #: focusing a pre-filled field.
-    prefs["ui.selectTextfieldsOnKeyFocus"] = 1
+    prefs["ui.textScaleFactor"] = int(d.text_scale)
+    # The two below and the rest of `profile.desktop` carry their reasons on
+    # the field (DesktopProfile); here they are only written.
+    prefs["ui.hourCycle"] = int(d.hour_cycle)
+    prefs["ui.selectTextfieldsOnKeyFocus"] = int(d.select_on_focus)
     # The palette, for BOTH colour schemes and for every persona. A page asks
     # for a scheme per element (`color-scheme: dark`), whatever the persona's
     # own theme is, and retail answers from the scheme asked for: measured on
-    # retail 151 with the OS in dark, a `light` box gets exactly
-    # _WIN_LIGHT_COLORS and a `dark` box gets _WIN_DARK_COLORS over it. Until
-    # 49.46.0 the palette was emitted for light personas only and never in
-    # `.dark`, so a dark persona's colours were the HOST's on both schemes,
-    # and a light persona's dark box answered light ones (28-valori-dell-host.md
-    # A4). The engine tries `ui.<name>.dark` first in the dark scheme and falls
-    # back to `ui.<name>` (GetColorFromPref), so the dark table carries only
-    # the names whose value changes.
-    prefs.update(_WIN_LIGHT_COLORS)
-    prefs.update(_WIN_DARK_COLORS)
-    #: Windows' own value: the content-exposed AccentColor is Firefox's blue
-    #: stand-in, not the system's accent. Linux defaults to true and takes the
-    #: GTK theme's accent through a different path (StaticPrefList.yaml,
-    #: ShouldUseStandinsForNativeColorForNonNativeTheme); with the palette above
-    #: the two answered alike, by a different route on each build.
-    prefs["widget.non-native-theme.use-theme-accent"] = False
+    # retail 151 with the OS in dark, a `light` box gets the light values and
+    # a `dark` box the dark ones. Until 49.46.0 the palette was emitted for
+    # light personas only and never in `.dark`, so a dark persona's colours
+    # were the HOST's on both schemes, and a light persona's dark box answered
+    # light ones (28-valori-dell-host.md A4). The engine tries `ui.<name>.dark`
+    # first in the dark scheme and falls back to `ui.<name>`
+    # (GetColorFromPref), so a record's dark part is only there when it moves.
+    prefs.update(_palette_prefs(d.palette))
+    prefs["widget.non-native-theme.use-theme-accent"] = bool(d.theme_accent)
+
+
+def _palette_prefs(palette: str) -> Dict[str, str]:
+    """`desktop.palette` as prefs: `ui.<name>` from each record's light part,
+    `ui.<name>.dark` from its dark part when there is one. A record of another
+    shape is refused, not skipped: a pinned palette with a typo would
+    otherwise lose that colour to the host in silence."""
+    out: Dict[str, str] = {}
+    for number, line in enumerate(palette.splitlines(), 1):
+        if not line.strip():
+            continue
+        parts = line.split("|")
+        if len(parts) != 3 or not parts[0].startswith("ui.") or not parts[1]:
+            raise ValueError(
+                "desktop.palette line %d is not 'ui.<name>|<light>|<dark or "
+                "nothing>': %r" % (number, line))
+        name, light, dark = parts
+        out[name] = light
+        if dark:
+            out[name + ".dark"] = dark
+    return out
 
 
 def _apply_desktop(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -1678,54 +1567,28 @@ def _apply_desktop(prefs: Dict[str, Any], profile: Profile) -> None:
     differs between the Windows and the Linux build, so the same persona
     answered with the machine it ran on (28-valori-dell-host.md, group A,
     measured on three arms: retail 151 on Windows 11, our Windows build, our
-    Linux build). The values are retail's on Windows 11, declared on both
-    builds. None needs the engine: each is read before the platform code.
+    Linux build). Each is a field of the Profile - `screen.refresh_hz` and the
+    `desktop` group, whose docs say what reads it and why the default is
+    retail's - and the same on both builds. None needs the engine: each is
+    read before the platform code.
     """
+    d = profile.desktop
     #: requestAnimationFrame's cadence (A1). At -1 the engine follows the
     #: host's display: 119.9 Hz on this workbench's Windows, 58.4 on its
     #: Linux. A positive value runs the software vsync at that rate on both
     #: (gfxPlatform::ForceSoftwareVsync).
-    prefs["layout.frame_rate"] = profile.screen.refresh_hz
-    # ── Scrollbars (A2): style, overlay and size ───────────────────────────
-    # A page reads them as `offsetWidth - clientWidth` of a scrolling box.
-    # 5 is Windows 11's drawing (Theme.cpp ScrollbarStyle); at 0 the engine
-    # picks by platform, GTK on Linux, whose classic scrollbar is a fixed
-    # 12px. Windows 11 because the persona is: the window frame is retail's
-    # on Windows 11 (constants.WINDOW_FRAME_BY_DPR). 17 is SM_CXVSCROLL at
-    # 96 dpi, the width a non-overlay Windows scrollbar takes, which a user
-    # can change in the registry and the engine would otherwise read live.
-    prefs["ui.useOverlayScrollbars"] = int(profile.hardware.overlay_scrollbars)
-    prefs["widget.non-native-theme.scrollbar.style"] = 5
-    prefs["ui.systemScrollbarSize"] = 17
-    #: How far a real pointer moves before `dragstart` fires (A3): Windows
-    #: SM_CXDRAG - 1, 3 at the default; GTK's gtk-dnd-drag-threshold, 8.
-    prefs["ui.dragThresholdX"] = 3
-    prefs["ui.dragThresholdY"] = 3
-    #: A click in a scrollbar's track pages, it does not jump there (A5).
-    #: all.js says 0 outside GTK; GTK reads the live
-    #: gtk-primary-button-warps-slider, true by default.
-    prefs["ui.scrollToClick"] = 0
-    #: Document colours (A6): 0 on Windows, "only with the OS high-contrast
-    #: theme"; 1 on Linux, "never" (PreferenceSheet.cpp). With
-    #: `hardware.accessibility_overrides` on, Windows forces its colours onto
-    #: the page and `forced-colors: active` matches; Linux did neither.
-    prefs["browser.display.document_color_use"] = 0
-    #: A page may style a <select>'s popup on Windows; all.js turns it off on
-    #: GTK (A6).
-    prefs["dom.forms.select.customstyling"] = True
-    #: A double click selects the word AND the space after it on Windows,
-    #: the word alone on Linux; a page reads it with getSelection() (A13).
-    prefs["layout.word_select.eat_space_to_next_word"] = True
-    #: The colour profile tagged images are converted to (A8). Unset, it is
-    #: the HOST's monitor profile (GetICMProfileW on Windows, _ICC_PROFILE on
-    #: X11, none under Xvfb), and a canvas below the 64x64 substitution floor
-    #: reads the converted bytes back. sRGB is what a monitor without a
-    #: custom profile gives.
-    prefs["gfx.color_management.force_srgb"] = True
-    #: The OS client-certificate module (A11) loads on Windows only, and with
-    #: it the machine's personal certificates answer a server that asks for
-    #: one. Off on both builds: the persona has no client certificates.
-    prefs["security.osclientcerts.autoload"] = False
+    prefs["layout.frame_rate"] = int(profile.screen.refresh_hz)
+    prefs["ui.useOverlayScrollbars"] = int(d.overlay_scrollbars)            # A2
+    prefs["widget.non-native-theme.scrollbar.style"] = int(d.scrollbar_style)
+    prefs["ui.systemScrollbarSize"] = int(d.scrollbar_size)
+    prefs["ui.dragThresholdX"] = int(d.drag_threshold)                      # A3
+    prefs["ui.dragThresholdY"] = int(d.drag_threshold)
+    prefs["ui.scrollToClick"] = int(d.scroll_to_click)                      # A5
+    prefs["browser.display.document_color_use"] = int(d.document_colors)    # A6
+    prefs["dom.forms.select.customstyling"] = bool(d.select_styling)
+    prefs["layout.word_select.eat_space_to_next_word"] = bool(d.word_select_eats_space)  # A13
+    prefs["gfx.color_management.force_srgb"] = bool(d.srgb_output)          # A8
+    prefs["security.osclientcerts.autoload"] = bool(d.os_client_certs)      # A11
 
 
 def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:

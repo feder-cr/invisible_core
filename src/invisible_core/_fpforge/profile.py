@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import zipfile
-from dataclasses import dataclass, field, replace as _dc_replace
+from dataclasses import dataclass, field, fields as _dc_fields, replace as _dc_replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +12,7 @@ from ._sampler import sample as _sample_raw
 # module scope, so there is no cycle to work around - verified by importing the
 # package, this module and `_webgl_personas` each first in a fresh interpreter.
 from .._webgl_personas import choose_persona as _choose_persona
+from .palette import PALETTE
 
 
 @dataclass(frozen=True)
@@ -126,15 +127,6 @@ class ScreenProfile:
 class HardwareProfile:
     concurrency: int
     storage_quota_mb: int
-    #: Windows 11's "Automatically hide scroll bars" (Settings, Accessibility,
-    #: Visual effects), on by default: scrollbars draw over the content and a
-    #: scrolling box loses no width to them, so `offsetWidth - clientWidth`
-    #: is 0. Off, they take 17 CSS px. Emitted as `ui.useOverlayScrollbars`,
-    #: which the engine reads before it asks the platform - on Windows the live
-    #: setting (WindowsUIUtils), on Linux GTK's own overlay switch. A field,
-    #: like accessibility_overrides, because it is a setting a real user
-    #: changes, and one a page reads in one line.
-    overlay_scrollbars: bool
     #: navigator.maxTouchPoints. NOT sampled: a desktop Windows machine reports
     #: 0, and the GPU personas we ship are all desktop parts, so varying this
     #: would contradict the rest of the identity.
@@ -329,6 +321,83 @@ class FontProfile:
     freetype_contrast: int = 100       # /100  -> 1.0
 
 
+@dataclass(frozen=True)
+class DesktopProfile:
+    """The Windows desktop settings a page reads, declared instead of asked.
+
+    Each field is a value a pref decides whose engine default either asks the
+    HOST or differs between our Windows and our Linux build, so the same
+    persona answered with the machine it ran on (28-valori-dell-host.md,
+    group A, measured on three arms on 2026-10-17: retail 151 on Windows 11,
+    our Windows build, our Linux build). The defaults are retail's, and they
+    are the ONLY copy: `generate_profile` seeds the raw dict from them and the
+    pin table is built from these fields, so a field added here is pinnable
+    and emitted without a second list to keep in step. Not sampled: the
+    persona is an ordinary Windows 11 desktop at its defaults, and varying
+    these would invent a diversity nobody has measured.
+    """
+    #: `ui.textScaleFactor`, in percent: Windows' "Text size" slider. It
+    #: MULTIPLIES the devicePixelRatio (SystemZoomSettings), so 100 is the
+    #: only value that leaves `screen.dpr` the one number for the DPR; a pin
+    #: of 125 is a user with bigger text, on top of whatever dpr says.
+    text_scale: int = 100
+    #: Windows 11's "Automatically hide scroll bars", on by default: scrollbars
+    #: draw over the content and a scrolling box loses no width to them,
+    #: `offsetWidth - clientWidth` is 0. Off, they take `scrollbar_size`.
+    overlay_scrollbars: bool = True
+    #: The scrollbar drawing (widget.non-native-theme.scrollbar.style,
+    #: Theme.cpp): 5 Windows 11, 4 Windows 10, 2 GTK, 0 "the platform's",
+    #: which on our Linux build was GTK's fixed 12px. Windows 11 because the
+    #: window frame is retail's on Windows 11 (constants.WINDOW_FRAME_BY_DPR).
+    scrollbar_style: int = 5
+    #: SM_CXVSCROLL at 96 dpi, the width a non-overlay scrollbar takes: a
+    #: registry setting the engine would otherwise read live.
+    scrollbar_size: int = 17
+    #: How far a real pointer moves before `dragstart`, both axes: Windows
+    #: SM_CXDRAG - 1, 3 at the default; GTK's gtk-dnd-drag-threshold, 8.
+    #: Measured with the pointer: retail-like 4px to start, Linux 9 before.
+    drag_threshold: int = 3
+    #: A click in a scrollbar's track jumps there instead of paging. Off on
+    #: Windows; GTK reads the live gtk-primary-button-warps-slider.
+    scroll_to_click: bool = False
+    #: browser.display.document_color_use: 0 on Windows ("only with the OS
+    #: high-contrast theme"), 1 on Linux ("never"); with
+    #: `hardware.accessibility_overrides` on, Windows forces its colours onto
+    #: the page and `forced-colors: active` matches.
+    document_colors: int = 0
+    #: A page may style a <select>'s popup (dom.forms.select.customstyling):
+    #: true on Windows, false on GTK.
+    select_styling: bool = True
+    #: A double click selects the word AND the space after it
+    #: (layout.word_select.eat_space_to_next_word): Windows, not Linux. A page
+    #: reads it with getSelection() after a real double click.
+    word_select_eats_space: bool = True
+    #: Tagged images are converted to sRGB (gfx.color_management.force_srgb)
+    #: instead of the HOST's monitor profile (GetICMProfileW, _ICC_PROFILE),
+    #: which a canvas below the 64x64 substitution floor reads back.
+    srgb_output: bool = True
+    #: The OS client-certificate module (security.osclientcerts.autoload):
+    #: with it the machine's personal certificates answer a server that asks
+    #: for one. Off: the persona has none.
+    os_client_certs: bool = False
+    #: The content-exposed AccentColor follows the theme's accent
+    #: (widget.non-native-theme.use-theme-accent): false on Windows, where it
+    #: is Firefox's blue stand-in; true on Linux, the GTK theme's.
+    theme_accent: bool = False
+    #: ui.hourCycle, 0 = the locale decides, which is what Windows does. On
+    #: Linux this IntID read GNOME's clock-format live, so a host set to 24h
+    #: changed every `toLocaleTimeString()`.
+    hour_cycle: int = 0
+    #: Tabbing into a pre-filled field selects all of it
+    #: (ui.selectTextfieldsOnKeyFocus): hardcoded on Windows, the live
+    #: gtk-entry-select-on-focus on Linux.
+    select_on_focus: bool = True
+    #: The system colours, light and dark, as `ui.<name>|<light>|<dark>`
+    #: records, one per line, the dark part empty where the scheme does not
+    #: move it. See `_fpforge.palette` for how each was measured.
+    palette: str = PALETTE
+
+
 # ──────────────────────────────────────────────────────────────────────
 #  Pin map: flat dotted-path -> value. Set via `pin=` on generate_profile.
 #
@@ -355,8 +424,7 @@ _PIN_GROUPS = {
     # pretence that it is a knob. Pin `screen.width`/`height` to choose a screen.
     "screen": {"width", "height", "dpr", "taskbar_px", "color_depth",
                "refresh_hz"},
-    "hardware": {"concurrency", "storage_quota_mb", "overlay_scrollbars",
-                 "max_touch_points",
+    "hardware": {"concurrency", "storage_quota_mb", "max_touch_points",
                  "voices", "fake_media_devices", "media_enumeration_ms",
                  "storage_enabled", "generics",
                  "accessibility_overrides"},
@@ -387,6 +455,13 @@ _PIN_GROUPS = {
              "freetype_gamma", "freetype_contrast"},
 }
 _PIN_TOP = {"dark_theme", "branding"}
+
+#: The desktop group, read off its dataclass: every field is pinnable, its
+#: raw key is `desktop_<field>`, and its default is the dataclass's. One list,
+#: the class, instead of three to keep in step.
+_DESKTOP_DEFAULTS = {f.name: f.default for f in _dc_fields(DesktopProfile)}
+_DESKTOP_RAW = {name: "desktop_" + name for name in _DESKTOP_DEFAULTS}
+_PIN_GROUPS["desktop"] = set(_DESKTOP_DEFAULTS)
 
 
 def _validate_pin_key(key: str) -> None:
@@ -425,6 +500,7 @@ class Profile:
     codec: CodecProfile
     webgl: WebGLProfile
     font: FontProfile
+    desktop: DesktopProfile
     dark_theme: bool
     # The branding a page reads: one of BRANDING_SETS, or the absolute path
     # of a zip archive holding exactly BRANDING_FILES at its root.
@@ -491,9 +567,9 @@ _PIN_TO_RAW = {
     "hardware.storage_enabled": "storage_enabled",
     "hardware.generics": "generics",
     "hardware.accessibility_overrides": "accessibility_overrides",
-    "hardware.overlay_scrollbars": "overlay_scrollbars",
     "dark_theme": "dark_theme",
     "branding": "branding",
+    **{"desktop." + name: raw_key for name, raw_key in _DESKTOP_RAW.items()},
 }
 
 #: The rasterisation parameters a Windows machine reports, and the FreeType
@@ -602,9 +678,6 @@ STORAGE_ENABLED = True
 
 #: An ordinary desktop with no accessibility overrides turned on.
 ACCESSIBILITY_OVERRIDES = False
-
-#: Windows 11's default, see HardwareProfile.overlay_scrollbars.
-OVERLAY_SCROLLBARS = True
 
 #: The files a page can ask the branding for, under chrome://branding/content/
 #: and resource://usercontext-content/branding/ - every name the branding
@@ -876,7 +949,9 @@ def generate_profile(
     raw.setdefault("storage_enabled", STORAGE_ENABLED)
     raw.setdefault("generics", GENERICS)
     raw.setdefault("accessibility_overrides", ACCESSIBILITY_OVERRIDES)
-    raw.setdefault("overlay_scrollbars", OVERLAY_SCROLLBARS)
+    # The desktop group is seeded from its dataclass defaults, its only copy.
+    for name, raw_key in _DESKTOP_RAW.items():
+        raw.setdefault(raw_key, _DESKTOP_DEFAULTS[name])
     raw.setdefault("branding", BRANDING)
     if pin:
         raw = _apply_pins_to_raw(raw, pin)
@@ -920,7 +995,6 @@ def generate_profile(
         hardware=HardwareProfile(
             concurrency=int(raw["hw_concurrency"]),
             storage_quota_mb=int(raw["storage_quota_mb"]),
-            overlay_scrollbars=bool(raw["overlay_scrollbars"]),
             max_touch_points=int(raw["max_touch_points"]),
             voices=str(raw["voices"]),
             fake_media_devices=bool(raw["fake_media_devices"]),
@@ -958,6 +1032,9 @@ def generate_profile(
             freetype_gamma=int(raw["font_freetype_gamma"]),
             freetype_contrast=int(raw["font_freetype_contrast"]),
         ),
+        desktop=DesktopProfile(**{
+            name: type(_DESKTOP_DEFAULTS[name])(raw[raw_key])
+            for name, raw_key in _DESKTOP_RAW.items()}),
         dark_theme=bool(raw["dark_theme"]),
         branding=_branding(raw["branding"]),
         browsing_history=list(raw.get("browsing_history") or []),

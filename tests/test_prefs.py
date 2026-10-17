@@ -16,11 +16,8 @@ import sys
 import pytest
 
 from invisible_core._fpforge import generate_profile
-from invisible_core.prefs import (
-    _WIN_DARK_COLORS,
-    _WIN_LIGHT_COLORS,
-    translate_profile_to_prefs,
-)
+from invisible_core._fpforge.palette import _WIN_DARK_COLORS, _WIN_LIGHT_COLORS
+from invisible_core.prefs import translate_profile_to_prefs
 
 
 @pytest.mark.unit

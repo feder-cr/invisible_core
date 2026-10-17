@@ -362,7 +362,6 @@ def test_no_profile_constant_is_shadowed_by_the_sampler_s_locked_dict():
         "font_freetype_contrast": "FONT_FREETYPE_CONTRAST",
         "font_dialog_family": "FONT_DIALOG_FAMILY",
         "screen_refresh_hz": "SCREEN_REFRESH_HZ",
-        "overlay_scrollbars": "OVERLAY_SCROLLBARS",
     }
     clashing = sorted(k for k in seeded if k in _sampler._LOCKED)
     assert not clashing, (

@@ -74,7 +74,9 @@ def test_the_three_form_control_fonts_are_the_dialog_font(monkeypatch):
 
 @pytest.mark.parametrize("pin,pref,value", [
     ({"screen.refresh_hz": 144}, "layout.frame_rate", 144),
-    ({"hardware.overlay_scrollbars": False}, "ui.useOverlayScrollbars", 0),
+    ({"desktop.overlay_scrollbars": False}, "ui.useOverlayScrollbars", 0),
+    ({"desktop.text_scale": 125}, "ui.textScaleFactor", 125),
+    ({"desktop.palette": "ui.highlight|#112233|#445566"}, "ui.highlight.dark", "#445566"),
     ({"font.dialog_family": "Tahoma"}, "ui.font.-moz-field", "Tahoma"),
 ])
 def test_the_desktop_fields_are_pinnable_like_every_other_surface(monkeypatch, pin, pref, value):
@@ -86,3 +88,43 @@ def test_a_caller_overlay_still_wins_over_the_desktop(monkeypatch):
     prefs = P.translate_profile_to_prefs(generate_profile(42), timezone=TZ,
                                          extra_prefs={"layout.frame_rate": 75})
     assert prefs["layout.frame_rate"] == 75
+
+
+def test_both_builds_write_the_same_theme_and_desktop_byte_for_byte(monkeypatch):
+    """Every pref the two desktop sections write, compared whole on both
+    platforms - values AND types - so a branch added inside either one is
+    caught, not only on the keys listed above."""
+    for seed, pin in ((42, {}), (7, {"dark_theme": True}),
+                      (0, {"desktop.overlay_scrollbars": False})):
+        written = {}
+        for platform in ("win32", "linux"):
+            monkeypatch.setattr(P.sys, "platform", platform)
+            prefs = {}
+            profile = generate_profile(seed, pin=pin)
+            P._apply_theme(prefs, profile)
+            P._apply_desktop(prefs, profile)
+            written[platform] = {k: (type(v).__name__, v) for k, v in prefs.items()}
+        assert written["win32"] == written["linux"], seed
+
+
+def test_the_desktop_defaults_are_their_only_copy():
+    """The group is seeded from its dataclass defaults and nothing else: a
+    profile without pins carries exactly `DesktopProfile()`, and no raw key of
+    the group is also injected by the sampler, which would win over it."""
+    from invisible_core._fpforge import _sampler
+    from invisible_core._fpforge.profile import DesktopProfile, _DESKTOP_RAW
+
+    assert generate_profile(42).desktop == DesktopProfile()
+    assert not set(_DESKTOP_RAW.values()) & set(_sampler._LOCKED)
+
+
+@pytest.mark.parametrize("record", [
+    "ui.highlight|#112233",            # two parts
+    "highlight|#112233|",              # not a ui. name
+    "ui.highlight||#445566",           # no light value
+])
+def test_a_malformed_palette_record_is_refused(monkeypatch, record):
+    """A pinned palette with a typo would otherwise lose that colour to the
+    host in silence."""
+    with pytest.raises(ValueError, match="desktop.palette line 1"):
+        _prefs(monkeypatch, "win32", **{"desktop.palette": record})

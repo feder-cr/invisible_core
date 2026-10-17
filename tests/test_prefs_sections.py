@@ -258,17 +258,15 @@ def test_the_theme_moves_the_os_flag_and_not_the_palette(profile):
     and asserted that a dark theme brought NO palette - the host's colours on
     both schemes. Both schemes' tables now go to every persona (A4 of
     28-valori-dell-host.md); the theme decides only what the OS says it is."""
-    dark, light = {}, {}
+    from invisible_core._fpforge.palette import _WIN_DARK_COLORS, _WIN_LIGHT_COLORS
 
-    class _P:
-        dark_theme = True
-    P._apply_theme(dark, _P())
+    dark, light = {}, {}
+    P._apply_theme(dark, generate_profile(42, pin={"dark_theme": True}))
     assert dark["ui.systemUsesDarkTheme"] == 1
 
-    _P.dark_theme = False
-    P._apply_theme(light, _P())
+    P._apply_theme(light, generate_profile(42, pin={"dark_theme": False}))
     assert light["ui.systemUsesDarkTheme"] == 0
-    palette = set(P._WIN_LIGHT_COLORS) | set(P._WIN_DARK_COLORS)
+    palette = set(_WIN_LIGHT_COLORS) | set(_WIN_DARK_COLORS)
     assert palette <= set(dark) and palette <= set(light)
     assert {k: dark[k] for k in palette} == {k: light[k] for k in palette}
 

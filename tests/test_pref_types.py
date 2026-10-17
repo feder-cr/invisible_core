@@ -226,7 +226,7 @@ def _emitted(monkeypatch) -> Dict[str, list]:
     # Seeds move the sampled values; these pins move WHICH prefs exist or the
     # branch a value comes from, so one seed is enough for them.
     switches = [{"hardware.accessibility_overrides": True},
-                {"hardware.max_touch_points": 10}, {"hardware.overlay_scrollbars": False},
+                {"hardware.max_touch_points": 10}, {"desktop.overlay_scrollbars": False},
                 {"hardware.storage_enabled": False}, {"hardware.fake_media_devices": False}]
     runs = [(seed, pin, vd) for seed in (0, 42, 1561645783)
             for pin in ({}, {"dark_theme": True}) for vd in (False, True)]
