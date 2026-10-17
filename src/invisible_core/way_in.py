@@ -105,16 +105,20 @@ def _docstrings(tree: ast.AST) -> set:
 
 
 def scan_source(text: str) -> list:
-    """(line number, literal) for every string literal of a Python source that
+    """(line number, command) for every string literal of a Python source that
     is not a docstring and teaches a way in other than uv. An f-string is read
-    through its literal parts, which is where the words of a message are."""
+    through its literal parts, which is where the words of a message are. The
+    finding names the command found, not the literal: a message spans lines,
+    and its first characters are rarely the part that is wrong."""
     tree = ast.parse(text)
     skip = _docstrings(tree)
     out = []
     for node in ast.walk(tree):
         if (isinstance(node, ast.Constant) and isinstance(node.value, str)
-                and id(node) not in skip and refused_in(node.value)):
-            out.append((node.lineno, node.value.strip()[:120]))
+                and id(node) not in skip):
+            found = refused_in(node.value)
+            if found:
+                out.append((node.lineno, "; ".join(found)))
     return sorted(out)
 
 
