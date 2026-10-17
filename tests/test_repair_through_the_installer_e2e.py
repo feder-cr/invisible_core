@@ -84,11 +84,32 @@ def _python(venv: Path) -> Path:
     return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def _this_version() -> str:
+    """The version this checkout derives, by running `_version.py` from its
+    path: importing the package would read whatever copy is installed."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_this_version", ROOT / "src" / "invisible_core" / "_version.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.__version__
+
+
 def _published() -> str:
-    """The last version the ledger records, which is the one the index serves
-    and the one this checkout is not."""
+    """The newest version the ledger records that is NOT this checkout's: the
+    stub pins it, so the pin is off by construction and the repair has to run.
+
+    ⛔ THE LAST ENTRY IS NOT ENOUGH. Between a release and the next bump the
+    newest entry IS this checkout's version - on the ledger's own pull request
+    and on main after it lands - and then the stub pinned the core that was
+    already installed, nothing needed repairing, and every case failed on the
+    missing repair line (the ledger PR of 49.45.0, 2026-10-17)."""
     released = json.loads((ROOT / "PUBLISHED.json").read_text(encoding="utf-8"))["released"]
-    return released[-1]["version"]
+    here = _this_version()
+    for entry in reversed(released):
+        if entry["version"] != here:
+            return entry["version"]
+    raise AssertionError(f"the ledger records no version other than {here}")
 
 
 def _stub_wheel(where: Path, pin: str) -> Path:
