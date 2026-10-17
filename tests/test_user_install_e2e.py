@@ -22,6 +22,8 @@ release.
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -50,7 +52,25 @@ REPO = "invisible_core"
 # `test_the_install_e2e_never_imports_the_package_under_test` keeps it that way.
 # The wrapper's test_release_e2e.py carries the same rule in prose and has since
 # the day it hit the same wall.
+#
+# ⛔ AND NOTHING THAT POINTS AT A CHECKOUT CROSSES INTO THE VENV. conftest.py
+# puts this tree's `src` on PYTHONPATH for every child a test spawns, which is
+# right for every other file and exactly wrong here: the venv's python then
+# imports THIS CHECKOUT, not the copy the index served. Measured 2026-10-17 on
+# the first run of the uv fixture: the installed distribution said 49.44.0
+# (the index) and the module said 49.45.0 (this tree), inside "one" install.
+# From 2026-09-16, when conftest.py started exporting it, to that day, every
+# check here that imports the package read the checkout: the Playwright check
+# read the checkout's imports, and "the packaged seal is in the wheel" found the
+# checkout's seal.json, so a wheel without it would have passed. The wrapper's
+# test_release_e2e.py strips the same variables, for the same measured reason.
+_LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "INVISIBLE_SEAL_FILE")
+
+
 def _run(cmd, *, timeout: int = 600, check: bool = True, env=None, cwd=None):
+    env = dict(os.environ if env is None else env)
+    for k in _LEAKS:
+        env.pop(k, None)
     r = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
                        timeout=timeout, env=env,
                        cwd=str(cwd) if cwd is not None else None)
@@ -67,23 +87,58 @@ def _venv_python(venv):
     return Path(venv) / bindir / ("python.exe" if os.name == "nt" else "python")
 
 
-def _make_venv(target):
-    _run([sys.executable, "-m", "venv", target], timeout=300)
-    py = _venv_python(target)
-    assert py.exists(), "no venv python at {}".format(py)
-    _run([py, "-m", "pip", "install", "--upgrade", "pip", "--quiet"], timeout=300)
-    return py
+def _uv() -> str:
+    """The uv the README's way in needs. Missing is a FAILURE, not a skip: the
+    workflow installs it with uv's own installer, so a runner without it is a
+    broken job, and a skip would read as a pass."""
+    found = shutil.which("uv")
+    if not found:
+        pytest.fail("uv is not on PATH, and the README installs this package with "
+                    "uv: the job has to put it there (user-install.yml does, with "
+                    "uv's own installer)")
+    return found
+
+
+def readme_install_lines() -> list:
+    """The README's install fence: the code block that adds this distribution
+    with `uv add`. Read from the README so the test runs what a person copies,
+    not a copy of it that can drift."""
+    readme = Path(__file__).resolve().parents[1] / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    for body in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):
+        lines = [l.strip() for l in body.splitlines() if l.strip()]
+        if any(l.split()[:2] == ["uv", "add"] and DIST in l.split() for l in lines):
+            return lines
+    raise AssertionError(
+        f"README.md has no code block that installs {DIST} with `uv add`, so "
+        f"there is no way in for this test to follow")
 
 
 @pytest.fixture(scope="module")
 def clean_venv():
-    """An empty venv with nothing but pip, plus this distribution.
+    """A project `uv init` made, with the README's install lines run inside it,
+    from the index. Returns the project's interpreter.
+
+    The project is the README's precondition (`uv add` adds to one); the lines
+    after it are the README's own. A venv uv makes has no pip in it, and that is
+    the environment a person who followed the README is in.
+
+    `UV_NO_CACHE` is environment, not a change to the lines: a cached index
+    answer would hide a forgotten publish, which is what `--no-cache-dir` did
+    for the pip version of this fixture.
 
     Module-scoped: the install pulls the whole dependency tree."""
+    uv = _uv()
     root = Path(tempfile.mkdtemp(prefix="invcore-e2e-"))
+    env = dict(os.environ, UV_NO_CACHE="1")
     try:
-        py = _make_venv(root / "venv")
-        _run([py, "-m", "pip", "install", "--no-cache-dir", DIST], timeout=900)
+        project = root / "project"
+        _run([uv, "init", "--python", ">=3.11", "--no-workspace", "--vcs", "none",
+              str(project)], timeout=300, env=env)
+        for line in readme_install_lines():
+            _run(shlex.split(line), cwd=project, timeout=900, env=env)
+        py = _venv_python(project / ".venv")
+        assert py.exists(), "the README's lines made no venv at {}".format(py)
         yield py
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -92,7 +147,7 @@ def clean_venv():
 def test_it_installs_from_the_index_with_nothing_else_present(clean_venv: Path):
     """No Playwright, no wrapper, no manager. The core has to stand alone -
     that is the whole reason it was split out of the wrapper."""
-    _run([str(clean_venv), "-m", "pip", "check"], timeout=180)
+    _run([_uv(), "pip", "check", "--python", str(clean_venv)], timeout=180)
     out = _run([str(clean_venv), "-c",
                 "import invisible_core; print('OK', invisible_core.__name__)"],
                timeout=120).stdout

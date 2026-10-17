@@ -253,11 +253,15 @@ def _build_once(root: Path, outdir: Path, isolated: bool) -> tuple[Path, Path]:
         cmd.insert(4, "--no-isolation")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
+        from .installer import install
+        from .pin import format_command
+
         tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-15:]
         raise GateBroken(
             "the build failed, so there is nothing to compare:\n  "
             + "\n  ".join(tail)
-            + "\n\nIf the backend is missing: pip install build hatchling"
+            + "\n\nIf the backend is missing: "
+            + format_command(install("invisible-core", "build", "hatchling"))
         )
     whls = list(outdir.glob("*.whl"))
     tars = list(outdir.glob("*.tar.gz"))

@@ -94,10 +94,19 @@ the core's bytes without hardcoding one, which is a second source of truth and
 the original bug again. Content belongs to the publish gate, where the previous
 release's digest is available to compare against.
 
-Keep this module's imports to the standard library, and keep the two sibling
+Keep this module's imports to the standard library, and keep the sibling
 imports it needs inside the functions that need them. If it ever grows a
 module-level import of anything heavier, a core that is broken in some other way
 produces a traceback about an internal module instead of the remedy.
+
+ONE SIBLING IS BOUND AT IMPORT, AND IT HAS TO BE: `installer`, which is
+standard library only. The code that runs after a repair is THIS module, but the
+files on disk are the version just installed, and a function-level import reads
+the files. Measured 2026-10-17 in the e2e of the repair: the repair to 49.44.0
+succeeded, and the check that followed died on `No module named
+'invisible_core.installer'`, because it imported the installer lazily from a
+release that does not have it. Bound here, the module that formed the command is
+the module that renders it, whatever version the repair put on disk.
 """
 from __future__ import annotations
 
@@ -112,6 +121,8 @@ from importlib.metadata import (
     version as _pkg_version,
 )
 from typing import Iterable, NamedTuple, Optional, Sequence
+
+from .installer import UV, install, runnable
 
 CORE_NAME = "invisible-core"
 
@@ -129,11 +140,11 @@ AUTOFIX_ENV = "INVISIBLE_CORE_AUTOFIX"
 #: so a repaired process that re-execs something cannot start the loop again.
 AUTOFIX_ATTEMPTED_ENV = "INVISIBLE_CORE_AUTOFIX_ATTEMPTED"
 
-#: How long the repair's pip is allowed to take before it is stopped. The repair
-#: runs from the first line of a consumer's __init__ with output captured, so an
-#: unbounded pip means an import that hangs with nothing on screen. Generous
-#: enough for a slow link (the core is pure Python but pulls a handful of deps),
-#: bounded so the failure is a message rather than a silence.
+#: How long the repair's install is allowed to take before it is stopped. The
+#: repair runs from the first line of a consumer's __init__ with output captured,
+#: so an unbounded install means an import that hangs with nothing on screen.
+#: Generous enough for a slow link (the core is pure Python but pulls a handful
+#: of deps), bounded so the failure is a message rather than a silence.
 INSTALL_TIMEOUT_ENV = "INVISIBLE_CORE_AUTOFIX_TIMEOUT"
 _INSTALL_TIMEOUT_DEFAULT = 300.0
 
@@ -425,6 +436,33 @@ def declared_core_pin(dist_name: str) -> Optional[str]:
     return pin_declaration(dist_name).version
 
 
+def installed_consumers() -> list:
+    """The installed distributions that declare a requirement on
+    invisible-core, by name and sorted.
+
+    Read from this environment's metadata through the one requirement parser,
+    so a client nobody wrote down is in the answer the moment it is installed.
+    The remedy for a retired engine named one client for everybody until
+    49.45.0 (invisible-playwright, "or invisible-firefox", deleted on
+    2026-08-18), which sent an invisible-selenium user to a package they do not
+    have.
+    """
+    from importlib.metadata import distributions
+
+    core = normalise_name(CORE_NAME)
+    found = set()
+    for d in distributions():
+        name = d.metadata["Name"]
+        if not name:
+            continue
+        for req in d.requires or ():
+            parsed = parse_requirement(req)
+            if parsed is not None and parsed.name == core:
+                found.add(name)
+                break
+    return sorted(found)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  The facts
 # ─────────────────────────────────────────────────────────────────────────────
@@ -554,8 +592,6 @@ def pin_problem(
     a pure verdict function proves nothing about what is fed into it.
     """
     consumer = f"{dist_name} {dist_version}" if dist_version else dist_name
-    want_cmd = (f'pip install "{CORE_NAME}=={want}"' if want
-                else f"pip install --force-reinstall {dist_name}")
 
     if not want:
         # Nothing declared: not checkable. The caller reports it as such.
@@ -575,7 +611,7 @@ def pin_problem(
             f"Repairing this replaces the editable install with a copy from the index: "
             f"the tree above stays on disk, but imports stop coming from it and edits "
             f"in it stop having any effect. To reattach it afterwards:\n"
-            f"  {format_command(['pip', 'install', '-e', str(editable_path)])}\n"
+            f"  {format_command(install(CORE_NAME, '-e', str(editable_path)))}\n"
             f"To keep this pair instead, move the pin in {dist_name}'s pyproject.toml to "
             f"{shown}, or roll the core's seal back to the release {dist_name} was "
             f"built against.\n"
@@ -589,10 +625,11 @@ def pin_problem(
             f"  {consumer} requires  {CORE_NAME}=={want}\n"
             f"  the files on disk say  {CORE_NAME} {shown}   ({_DERIVED_FROM})\n"
             f"  the install record says {CORE_NAME} {recorded}\n"
-            f"pip and pip check read the record, so both report this environment as "
-            f"healthy. The files are what actually runs, and a plain install is a "
-            f"no-op here because pip believes {want} is already present.\n"
-            f'Run: pip install --force-reinstall "{CORE_NAME}=={want}"'
+            f"The installer and its consistency check read the record, so both "
+            f"report this environment as healthy. The files are what actually runs, "
+            f"and a plain install is a no-op here because the installer believes "
+            f"{want} is already present.\n"
+            f"Run: {format_command(repair_command(want, recorded))}"
         )
 
     return (
@@ -603,9 +640,49 @@ def pin_problem(
         f"protocol expectations are generated per engine release, so a core from "
         f"another release describes a browser you are not running.\n"
         f"An install that skipped dependency resolution is the usual cause: "
-        f"pip install --no-deps, or a lockfile that pins the two packages separately.\n"
-        f"Run: {want_cmd}"
+        f"an install with --no-deps, or a lockfile that pins the two packages "
+        f"separately.\n"
+        f"Run: {format_command(repair_command(want, recorded))}"
     )
+
+
+def repair_command(want: str, recorded: Optional[str]) -> list:
+    """THE command that puts `invisible-core=={want}` in place: the one the
+    message tells the user to run and the one the repair runs. They were two
+    constructions until 49.45.0, and they differed.
+
+    It replaces the CORE and nothing else. The repair used to run
+    `--force-reinstall`, which reinstalls every dependency too, and the repair
+    runs inside a process that has already imported the core and so psutil.
+    Measured 2026-10-17 on Windows, in a venv whose core had been imported:
+    with pip 23.2.1 (what a venv of Python 3.12.0 is seeded with)
+    `--force-reinstall` exited 1 on
+    `[WinError 5] Access is denied: ...\\~sutil\\_psutil_windows.pyd` (a loaded
+    extension cannot be deleted) and rolled back, while a plain install of the
+    pinned version and `--force-reinstall --no-deps` both succeeded. Bisected the
+    same day: pip 23.3.2, 24.0, 24.2, 24.3.1, 25.0.1, 25.1.1, 25.2 and 26.2.1 all
+    survive the force-reinstall, and uv survives all three forms. So the repair
+    failed only where the venv's pip is that old, which is a venv nobody
+    upgraded; replacing the core alone works with every version tried.
+
+    A plain install is enough whenever the record names another version: the
+    installer replaces the core and touches a dependency only if the pinned core
+    needs a different one. When the record ALREADY names the pin (the files are
+    another version under it), a plain install is a no-op, so the core's files
+    are reinstalled with `--force-reinstall --no-deps`: the record says the
+    dependencies of that version were resolved when it was installed.
+
+    KNOWN LIMITS. With a stale record the dependencies are not resolved again,
+    so one changed by something else after that install stays as it is; the
+    check after the repair sees it only if the import fails. And when the pinned
+    core raises the minimum of a dependency this process has loaded (psutil, on
+    Windows), the plain install has to replace that file and fails the same way
+    the force-reinstall did: the repair reports it, rolls nothing forward, and
+    the message hands over this same command, which works from a new process.
+    """
+    if recorded == want:
+        return install(CORE_NAME, "--force-reinstall", "--no-deps", f"{CORE_NAME}=={want}")
+    return install(CORE_NAME, f"{CORE_NAME}=={want}")
 
 
 def pin_report(dist_name: str) -> dict:
@@ -696,8 +773,8 @@ class InstallOutcome(NamedTuple):
     detail: str
 
 
-def _run_pip(cmd: Sequence[str], *, execute: bool) -> InstallOutcome:
-    """The single choke point every pip command in this module goes through.
+def _run_installer(cmd: Sequence[str], *, execute: bool) -> InstallOutcome:
+    """The single choke point every install command in this module goes through.
 
     The seam is deliberately used for FORMATTING as well as for running:
     execute=False renders the command and runs nothing. If it only ever fired on
@@ -705,47 +782,61 @@ def _run_pip(cmd: Sequence[str], *, execute: bool) -> InstallOutcome:
     lets an installer be wired into a module whose tests are still green.
 
     Nothing raises out of here. A locked-down environment, a read-only
-    site-packages, no network and no pip at all are all the same answer: ok is
-    False and detail says why, and the caller degrades to the message.
+    site-packages, no network and no installer at all are all the same answer:
+    ok is False and detail says why, and the caller degrades to the message.
+
+    The command arrives as `installer.install` spells it, so it may start with
+    `uv`, which a venv uv made does not contain: `installer.runnable` finds the
+    executable, and when there is none that is one more failed attempt with a
+    reason, never a pip command run in an environment pip did not build.
     """
     shown = format_command(cmd)
     if not execute:
         return InstallOutcome(False, shown, "not executed")
+    tool = UV if list(cmd)[:1] == [UV] else "pip"
+    argv = runnable(cmd)
+    if argv is None:
+        return InstallOutcome(
+            False, shown,
+            "uv installed this environment and no uv executable is reachable from "
+            "this process ($UV is not set and there is none on PATH). Run the "
+            "command by hand where uv is available.")
     import subprocess
 
     # A timeout is not optional here. This runs from the first line of a
-    # consumer's package __init__, so a pip that stalls - a hung index, a
+    # consumer's package __init__, so an installer that stalls - a hung index, a
     # contended lock, a proxy that never answers - stalls the IMPORT, and with
     # capture_output there is not a single character on screen to explain it.
     # A user's script hanging forever with no output is a worse failure than the
     # mismatch this is repairing. On expiry we degrade like any other failure:
     # the original error is raised, carrying the command to run by hand.
     try:
-        completed = subprocess.run(list(cmd), capture_output=True, text=True,
+        completed = subprocess.run(argv, capture_output=True, text=True,
                                    timeout=_install_timeout())
     except subprocess.TimeoutExpired:
         return InstallOutcome(
             False, shown,
-            f"pip did not finish within {_install_timeout()}s and was stopped. "
+            f"{tool} did not finish within {_install_timeout()}s and was stopped. "
             f"Run the command by hand, or raise {INSTALL_TIMEOUT_ENV}.")
     except Exception as e:
         return InstallOutcome(False, shown, f"{type(e).__name__}: {e}")
     if completed.returncode == 0:
-        return InstallOutcome(True, shown, "pip exited 0")
+        return InstallOutcome(True, shown, f"{tool} exited 0")
     tail = " ".join(((completed.stderr or "") + " " + (completed.stdout or "")).split())
-    return InstallOutcome(False, shown, f"pip exited {completed.returncode}: {tail[-400:]}")
+    return InstallOutcome(False, shown, f"{tool} exited {completed.returncode}: {tail[-400:]}")
 
 
 #: The seam. Tests replace this with a recorder, which is what makes "which
 #: command was formed" and "was execution requested" two separate assertions.
-INSTALL_RUNNER = _run_pip
+INSTALL_RUNNER = _run_installer
 
 
 class RepairResult(NamedTuple):
     """attempted says whether the installer was reached at all, repaired says
     whether the environment is now correct IN THIS PROCESS. They are separate
-    because "we ran pip and it worked" is not the claim that matters; the claim
-    that matters is that the import about to happen gets the new files."""
+    because "we ran the installer and it worked" is not the claim that matters;
+    the claim that matters is that the import about to happen gets the new
+    files."""
     attempted: bool
     repaired: bool
     reason: str
@@ -793,8 +884,7 @@ def repair_core(
     if not want:
         return RepairResult(False, False, "nothing is declared to install", "", None, None)
 
-    cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall",
-           f"{CORE_NAME}=={want}"]
+    cmd = repair_command(want, recorded_core_version())
     shown = format_command(cmd)
 
     if not autofix_enabled():
@@ -820,7 +910,7 @@ def repair_core(
 
     # NEVER overwrite an editable install, and never guess that it is safe.
     #
-    # This module runs `pip install --force-reinstall` from the first line of a
+    # This module runs a `--force-reinstall` from the first line of a
     # consumer's `__init__`, so on a developer's machine it can replace their
     # working tree with the published wheel - and it did, three times in one
     # session on 2026-07-27. Twice it corrupted a measurement rather than merely
@@ -865,8 +955,8 @@ def repair_core(
         # to be worked out. Through format_command because a checkout path
         # routinely contains spaces on Windows, and a recovery line that breaks
         # on those machines helps only the people who did not need it.
-        remedy = (format_command(["pip", "install", "-e", verdict.path])
-                  if verdict.path else f"pip install -e <path-to-{CORE_NAME}>")
+        remedy = format_command(install(CORE_NAME, "-e",
+                                        verdict.path or f"<path-to-{CORE_NAME}>"))
         return RepairResult(
             False, False,
             f"{CORE_NAME} is an EDITABLE install{where} ({verdict.why}), so the "
@@ -886,7 +976,7 @@ def repair_core(
     # checkout, and on Windows those paths routinely contain spaces. A bare
     # f-string produced a command that breaks on exactly the machines that need
     # it - the recovery line worked only for people who did not need recovering.
-    recovery = format_command(["pip", "install", "-e", str(editable)]) if editable else None
+    recovery = format_command(install(CORE_NAME, "-e", str(editable))) if editable else None
     before = installed_core_version() or _UNDETERMINED
 
     _say(out, f"[{dist_name}] {CORE_NAME} {before} is installed, but {dist_name} "
@@ -907,8 +997,8 @@ def repair_core(
         return RepairResult(True, False, outcome.detail, shown, editable, recovery)
 
     # Pick it up without restarting. Everything under invisible_core goes, the
-    # finders' caches go, and the package is imported again from the files pip
-    # just wrote. installed_core_version() imports ._version inside the function,
+    # finders' caches go, and the package is imported again from the files the
+    # installer just wrote. installed_core_version() imports ._version inside the function,
     # so it reads the new module even though this frame belongs to the old one.
     for name in core_modules_loaded():
         sys.modules.pop(name, None)

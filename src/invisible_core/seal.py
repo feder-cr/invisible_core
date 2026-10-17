@@ -76,8 +76,23 @@ RELEASE_TAG_RE = re.compile(r"^firefox-(\d+)$")
 # the `invisible-core==N.N.N` every consumer declares and leaves `pip check`
 # with nothing to compare (measured: a violated direct reference reports
 # healthy).
-CORE_INSTALL_HINT = "pip install --upgrade invisible-core"
-CORE_REINSTALL_HINT = "pip install --force-reinstall invisible-core"
+#
+# Computed, not written: until 49.45.0 these were two `pip install` literals,
+# and the environment the README makes has no pip in it. `installer.install`
+# spells the command for the tool that installed the core, so the line works
+# where it is printed (`installer.py` has the measurement).
+def core_install_hint() -> str:
+    """The command that upgrades invisible-core in this environment."""
+    from .installer import install
+    from .pin import format_command
+    return format_command(install("invisible-core", "--upgrade", "invisible-core"))
+
+
+def core_reinstall_hint() -> str:
+    """The command that reinstalls invisible-core in this environment."""
+    from .installer import install
+    from .pin import format_command
+    return format_command(install("invisible-core", "--force-reinstall", "invisible-core"))
 
 # Provenance: the four juggler entries. Every build we ship carries at least one
 # of the two marker strings in each of them (measured 2026-07-25: PageHandler.js
@@ -327,7 +342,7 @@ def _parse_seal_bytes(raw: bytes, origin: str) -> Seal:
                    "`python -m invisible_core seal` for a local one).")
         raise SealError(
             f"seal at {origin} has schema {schema}, this invisible-core reads "
-            f"{readable}.{why} Upgrade invisible-core: {CORE_INSTALL_HINT}")
+            f"{readable}.{why} Upgrade invisible-core: {core_install_hint()}")
     assets = {}
     for name, a in (data.get("assets") or {}).items():
         build_id = (a.get("build_id") or "").strip()
@@ -369,7 +384,7 @@ def load_seal(path: "str | os.PathLike[str]") -> Seal:
     except OSError as e:
         raise SealError(
             f"cannot read the release seal at {p}: {e}. A packaged invisible-core always "
-            f"ships one; reinstall it: {CORE_REINSTALL_HINT}") from e
+            f"ships one; reinstall it: {core_reinstall_hint()}") from e
     return _parse_seal_bytes(raw, str(p))
 
 

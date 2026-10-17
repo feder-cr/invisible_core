@@ -102,9 +102,12 @@ _REMEDY = {
         "target, or an allowlist on the provider side",
         "something on this network refused to open the tunnel, so a transparent "
         "proxy is intercepting the request"),
+    # `{install}` is the one command in this table, and it is not written here:
+    # `_remedy` fills it in for the tool that installed the core, because the
+    # environment the README makes has no pip (`installer.py`).
     "socks_missing": (
-        "a socks:// proxy needs PySocks - pip install 'requests[socks]'",
-        "a socks:// proxy needs PySocks - pip install 'requests[socks]'"),
+        "a socks:// proxy needs PySocks - {install}",
+        "a socks:// proxy needs PySocks - {install}"),
     "dns_failure": (
         "the proxy HOSTNAME does not resolve - check it for a typo",
         "the echo endpoint hostname does not resolve, so this host has no working "
@@ -191,7 +194,13 @@ def _remedy(kind: str, proxied: bool) -> str:
     pair = _REMEDY.get(kind)
     if not pair:
         return kind
-    return pair[0] if proxied else pair[1]
+    text = pair[0] if proxied else pair[1]
+    if "{install}" in text:
+        from .installer import install
+        from .pin import CORE_NAME, format_command
+        text = text.replace(
+            "{install}", format_command(install(CORE_NAME, "requests[socks]")))
+    return text
 
 
 # `Tunnel connection failed: 407 Proxy Authentication Required` and friends. A

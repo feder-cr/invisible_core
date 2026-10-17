@@ -135,6 +135,65 @@ jobs:
           $verdict = (Get-Content $out -Raw | ConvertFrom-Json).verdict
           if ($verdict -ne "PASS") { throw "msix-host verdict: $verdict" }
 
+  # THE PIN REPAIR, THROUGH THE INSTALLER THAT BUILT THE ENVIRONMENT. It runs
+  # from the first line of every client's `__init__`, and until 49.45.0 it had
+  # never worked in a venv uv made: it has no pip, so `python -m pip` died on
+  # `No module named pip` (the README's way in is uv). And on Windows a venv
+  # whose pip is 23.2.1 refused `--force-reinstall` with WinError 5 over a
+  # psutil the process had loaded (23.3.2 and later do not). Measured 2026-10-17;
+  # `tests/test_repair_through_the_installer_e2e.py` builds both venvs with this
+  # checkout's wheel, puts the pin one release off, and asserts the import
+  # repairs itself. uv comes from its own installer, the way the README's
+  # reader gets it.
+  repair-through-the-installer:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - name: uv, from its own installer (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: uv, from its own installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: the repair, in a venv uv built and in one pip built
+        shell: bash
+        run: |
+          set -o pipefail   # or tee would swallow pytest's exit code
+          python -m pytest tests/test_repair_through_the_installer_e2e.py -m e2e \
+            -o addopts="" -v -rs | tee repair-report.txt
+      # Both directions or nothing: a run where one of them skipped is the
+      # half that used to be broken going unasked.
+      - name: Refuse a run in which the two directions did not both run
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path("repair-report.txt").read_text(encoding="utf-8", errors="ignore")
+          m = re.search(r"(\d+) passed", text)
+          passed = int(m.group(1)) if m else 0
+          if passed < 3:
+              print(f"only {passed} of the 3 cases ran (uv, the seeded pip, "
+                    f"pip 23.2.1)", file=sys.stderr)
+              sys.exit(1)
+          print(f"{passed} cases ran")
+          PY
+
   # THE ARM64 WINDOWS HOST RUNS THE x86_64 ENGINE, AND THIS IS WHERE THAT IS
   # MEASURED. `EMULATED_LEGS` in seal.py declares it; before 2026-09-25 an
   # ARM64 Python - the one uv installs on Snapdragon laptops - was refused with
@@ -229,7 +288,7 @@ jobs:
             "${{ steps.seal.outputs.version }}" ${{ steps.seal.outputs.platforms }}
 
   gate:
-    needs: [tests, msix-host, arm64-host, branding-is-retail]
+    needs: [tests, msix-host, arm64-host, branding-is-retail, repair-through-the-installer]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -239,7 +298,9 @@ jobs:
           echo "msix-host: ${{ needs.msix-host.result }}"
           echo "arm64-host: ${{ needs.arm64-host.result }}"
           echo "branding-is-retail: ${{ needs.branding-is-retail.result }}"
+          echo "repair-through-the-installer: ${{ needs.repair-through-the-installer.result }}"
           test "${{ needs.tests.result }}" = "success"
           test "${{ needs.msix-host.result }}" = "success"
           test "${{ needs.arm64-host.result }}" = "success"
           test "${{ needs.branding-is-retail.result }}" = "success"
+          test "${{ needs.repair-through-the-installer.result }}" = "success"

@@ -16,12 +16,13 @@
 #   * installing a blessed `playwright==<pin>` afterwards REPAIRS the venv. If
 #     the declared range resolves to a client the shipped Juggler cannot speak,
 #     that manual line turns the job green while every fresh install is broken.
-#     What a user gets is what pip resolves from the declaration, and that is
-#     what has to be under test.
+#     What a user gets is what the installer resolves from the declaration,
+#     and that is what has to be under test.
 #
 # So this workflow installs nothing from the checkout except the test files. It
-# takes `pip install invisible-core` from the index, in an empty venv, and
-# runs it the way somebody's first script would.
+# runs the README's install lines (`uv add invisible-core`, in a project
+# `uv init` made) against the index, and runs the result the way somebody's
+# first script would.
 #
 # WHY IT MUST NOT BE MADE TOLERANT.
 # There is a real window in which this cannot pass: between publishing the core
@@ -237,6 +238,22 @@ jobs:
                   sys.exit(0)
               time.sleep(10)
           PY
+
+      # The README's way in is uv, so the user path is uv's: installed the way
+      # its own installer puts it, which is what the README's reader runs. A
+      # venv uv makes has no pip in it, and that is the environment under test.
+      - name: uv, from its own installer (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: uv, from its own installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: The user path, end to end
         env:

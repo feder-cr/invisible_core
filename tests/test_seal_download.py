@@ -596,7 +596,13 @@ def test_a_retired_engine_tag_says_so_instead_of_reporting_a_bare_404(
     msg = str(exc.value)
     assert "firefox-13" in msg and name in msg, msg
     assert "REMOVED on purpose" in msg, msg
-    assert "pip install --upgrade" in msg, msg
+    # The remedy is the upgrade of what installed the core, spelled by the tool
+    # that installed it: the same function the message calls, so a message that
+    # went back to a written command would no longer contain it.
+    from invisible_core.download import _upgrade_commands
+    commands = _upgrade_commands()
+    assert commands and all(c in msg for c in commands), msg
+    assert "invisible-firefox" not in msg, msg
     assert "seal inside invisible-core" in msg, (
         "the message must say where the tag came from; a user who thinks they "
         "chose it goes looking for a setting that does not exist:\n" + msg)
@@ -670,7 +676,11 @@ def test_the_download_path_never_installs_anything():
     import invisible_core.download as dl
 
     tree = ast.parse(pathlib.Path(dl.__file__).read_text(encoding="utf-8"))
-    banned = {"repair_retired_engine", "repair_core", "INSTALL_RUNNER", "_run_pip"}
+    # `_run_installer` is the seam since 49.45.0, `_run_pip` its old name, and
+    # `runnable` what turns a printed command into one that can be started:
+    # this module builds commands with `installer.install` to PRINT them.
+    banned = {"repair_retired_engine", "repair_core", "INSTALL_RUNNER", "_run_pip",
+              "_run_installer", "runnable"}
     hits = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id in banned:

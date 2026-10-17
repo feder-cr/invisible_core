@@ -157,6 +157,25 @@ def _resolve_asset_url(tag: str, asset_name: str) -> str:
 OLDEST_PUBLISHED_TAG_NUMBER = 14
 
 
+def _upgrade_commands() -> list:
+    """One upgrade command per installed distribution that depends on
+    invisible-core, in the tool that installed it; the core itself when none
+    does.
+
+    The remedy for a retired engine is to move the pin, and the pin lives in
+    whichever package installed the core. This line used to name one package
+    for everybody (`invisible-playwright`, "or invisible-firefox", a package
+    deleted on 2026-08-18) and in pip, so an invisible-selenium user built with
+    uv was told to upgrade a package they do not have with a tool their venv
+    does not contain. The environment knows both answers.
+    """
+    from .installer import install
+    from .pin import CORE_NAME, format_command, installed_consumers
+
+    names = installed_consumers() or [CORE_NAME]
+    return [format_command(install(n, "--upgrade", n)) for n in names]
+
+
 def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
     """What to say when the engine archive is not there.
 
@@ -202,7 +221,7 @@ def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
             "usually means an install pinned to a git ref rather than to a release - "
             "including a pin inside some other project that depends on this one.",
             "",
-            "  pip install --upgrade invisible-playwright     # or invisible-firefox",
+            *("  " + c for c in _upgrade_commands()),
             "",
             "If the pin is not yours to move, the project that owns it has to move "
             "it: a git ref from before the move can never download an engine again.",

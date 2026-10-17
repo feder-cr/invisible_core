@@ -522,15 +522,17 @@ def test_no_refusal_tells_a_user_to_install_from_git(tmp_path, sealed):
     """A `pip install git+https://...` installs a PEP 508 direct reference,
     which carries no version specifier: it bypasses the `invisible-core==N.N.N`
     every consumer declares and leaves `pip check` with nothing to compare.
-    Every remedy this package prints has to be the index form."""
+    Every remedy this package prints has to be the index form.
+
+    The hints are computed since 49.45.0 (the installer of this environment
+    spells them), so the question is asked of what they compute: the thing
+    installed is the bare distribution name, which is the index form, and a
+    source scan for a `pip install` literal would have nothing left to find."""
     import invisible_core.seal as seal_mod
 
-    src = Path(seal_mod.__file__).read_text(encoding="utf-8")
-    offenders = [l.strip() for l in src.splitlines() if "pip install" in l and "git+" in l]
-    assert not offenders, f"a git-install remedy is back in seal.py: {offenders}"
-    assert "invisible-core" in seal_mod.CORE_INSTALL_HINT
-    assert "git+" not in seal_mod.CORE_INSTALL_HINT
-    assert "git+" not in seal_mod.CORE_REINSTALL_HINT
+    for hint in (seal_mod.core_install_hint(), seal_mod.core_reinstall_hint()):
+        assert hint.split()[-1] == "invisible-core", hint
+        assert "git+" not in hint, hint
 
     # and the two messages that actually carry them
     p = tmp_path / "s1.json"
@@ -540,8 +542,8 @@ def test_no_refusal_tells_a_user_to_install_from_git(tmp_path, sealed):
     }, sort_keys=True), encoding="utf-8")
     with pytest.raises(SealError) as exc:
         load_seal(p)
-    assert seal_mod.CORE_INSTALL_HINT in str(exc.value), str(exc.value)
+    assert seal_mod.core_install_hint() in str(exc.value), str(exc.value)
 
     with pytest.raises(SealError) as exc:
         load_seal(tmp_path / "does-not-exist.json")
-    assert seal_mod.CORE_REINSTALL_HINT in str(exc.value), str(exc.value)
+    assert seal_mod.core_reinstall_hint() in str(exc.value), str(exc.value)
