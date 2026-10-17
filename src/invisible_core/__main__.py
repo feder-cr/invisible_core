@@ -94,6 +94,7 @@ from typing import List, Optional, Sequence, Tuple
 from ._pin import CORE_NAME as CORE_DIST
 from ._pin import format_command
 from ._pin import pin_from_requirements
+from ._pin import repair_command
 from ._version import __version__ as DERIVED_CORE_VERSION
 from .download import (cache_root, clear_cache, engine_root, engine_status, ensure_binary,
                        iter_cached_engines)
@@ -130,7 +131,7 @@ _format_command = format_command
 
 
 def _refuse_to_install(cmd: Sequence[str], *, execute: bool) -> str:
-    """The single choke point every pip command in this module goes through.
+    """The single choke point every install command in this module goes through.
 
     execute=False means "format this for a human to run", which is the only
     thing doctor ever asks for. execute=True means somebody wired an installer
@@ -154,7 +155,7 @@ INSTALL_RUNNER = _refuse_to_install
 
 
 def _offer_install(cmd: Sequence[str]) -> str:
-    """Turn a pip command into text for the user. Never runs it.
+    """Turn an install command into text for the user. Never runs it.
 
     Every install command in this module is built here and nowhere else, so
     "the doctor made no install call" is a fact about a code path that is
@@ -247,8 +248,8 @@ def _package_section(facts_of=None
         lines.append(f"  {'':<21}no install record for this distribution "
                      f"(running from a source checkout)")
     elif recorded != DERIVED_CORE_VERSION:
-        lines.append(f"  {'':<21}install record says {recorded}  (STALE RECORD: pip and "
-                     f"pip check read this, the files are what runs)")
+        lines.append(f"  {'':<21}install record says {recorded}  (STALE RECORD: the "
+                     f"installer and its check read this, the files are what runs)")
 
     problems: List[PinProblem] = []
     unverified: List[PinUnverified] = []
@@ -295,7 +296,7 @@ def _pin_remedy(p: PinProblem) -> List[str]:
     ]
     if p.recorded and p.recorded != p.have:
         out.append(f"  the install record says {CORE_DIST} {p.recorded}  "
-                   f"(so pip and pip check call this environment healthy)")
+                   f"(so the installer and its check call this environment healthy)")
     if not e.safe_to_reinstall:
         if e.state == EDITABLE:
             out.append(f"  {CORE_DIST} is an EDITABLE install at "
@@ -315,13 +316,17 @@ def _pin_remedy(p: PinProblem) -> List[str]:
             "  or roll the core's seal back to the release that consumer was built against.",
         ]
         return out
-    force = ["--force-reinstall"] if p.recorded == p.want else []
-    if force:
-        out.append("  A plain install is a no-op here: pip believes the pinned version is "
-                   "already present.")
-    # The ONLY place in this module where a pip command comes into existence.
-    cmd = [Path(sys.executable).name, "-m", "pip", "install", *force,
-           f"{CORE_DIST}=={p.want}"]
+    if p.recorded == p.want:
+        out.append("  A plain install is a no-op here: the installer believes the pinned "
+                   "version is already present.")
+    # The ONLY place in this module where an install command comes into
+    # existence, and it is the import-time repair's own command
+    # (`_pin.repair_command`): what the doctor prints and what the repair runs
+    # cannot disagree. It is spelled by the tool that installed the core (this
+    # used to be `python.exe -m pip install`, and the environment the README
+    # makes has no pip) and names the interpreter by its full path, so the line
+    # lands in the environment that was diagnosed.
+    cmd = repair_command(p.want, p.recorded)
     out += [
         "  doctor does not install Python packages. Run this yourself:",
         "    " + _offer_install(cmd),

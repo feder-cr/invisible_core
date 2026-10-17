@@ -11,7 +11,7 @@ gate which has only ever printed PASS is not a gate.
      Last\\...` is an ordinary Windows path, and this printed line is the whole
      handed-over undo for the one repair that costs the user something - it
      detaches their environment from their working tree.
-  C  ``_run_pip`` is bounded by a timeout. It runs from the first line of a
+  C  ``_run_installer`` is bounded by a timeout. It runs from the first line of a
      consumer's package ``__init__``, so a pip that stalls stalls the IMPORT,
      and ``capture_output=True`` means there is not one character on screen to
      explain why.
@@ -64,12 +64,18 @@ def test_the_repair_message_quotes_a_spaced_editable_path():
         have="18.1.0",
         editable_path=SPACED,
     )
+    from invisible_core.installer import install
+
     assert report is not None, "a real mismatch produced no message at all"
-    assert "pip install -e" in report
-    line = next(l for l in report.splitlines() if "pip install -e" in l)
+    want = install(_pin.CORE_NAME, "-e", SPACED)
+    rendered = _pin.format_command(want)
+    assert rendered in report, report
+    line = next(l for l in report.splitlines() if rendered in l)
     tokens = shlex.split(line.strip(), posix=False)
-    assert len(tokens) == 4, f"the printed line splits into {len(tokens)}: {tokens}"
-    assert tokens[3].strip('"') == SPACED
+    # As many tokens as the command has, the path among them as ONE: split in
+    # two, the installer is handed a truncated path that does not exist.
+    assert len(tokens) == len(want), f"the printed line splits into {len(tokens)}: {tokens}"
+    assert tokens[-1].strip('"') == SPACED
 
 
 def test_repair_core_builds_its_reattach_command_through_format_command():
@@ -127,7 +133,7 @@ def test_a_stalled_command_is_stopped_rather_than_waited_on(monkeypatch):
     """
     monkeypatch.setenv(_pin.INSTALL_TIMEOUT_ENV, "1")
     started = time.monotonic()
-    outcome = _pin._run_pip(
+    outcome = _pin._run_installer(
         [sys.executable, "-c", "import time; time.sleep(30)"], execute=True)
     elapsed = time.monotonic() - started
 
@@ -161,10 +167,10 @@ def test_a_malformed_knob_falls_back_instead_of_disabling_the_bound(monkeypatch)
 
 
 def test_a_command_that_exits_nonzero_is_reported_not_raised():
-    """Nothing raises out of _run_pip: it is called from an import, where an
-    exception is the failure mode being avoided."""
-    outcome = _pin._run_pip([sys.executable, "-c", "raise SystemExit(3)"],
-                            execute=True)
+    """Nothing raises out of _run_installer: it is called from an import, where
+    an exception is the failure mode being avoided."""
+    outcome = _pin._run_installer([sys.executable, "-c", "raise SystemExit(3)"],
+                                  execute=True)
     assert outcome.ok is False
     assert "3" in outcome.detail
 
@@ -172,7 +178,7 @@ def test_a_command_that_exits_nonzero_is_reported_not_raised():
 def test_not_executing_runs_nothing_and_still_renders_the_command():
     """The seam is used for FORMATTING as well as running; if it only fired on
     execution it would be dead in normal operation."""
-    outcome = _pin._run_pip(["pip", "install", "-e", SPACED], execute=False)
+    outcome = _pin._run_installer(["pip", "install", "-e", SPACED], execute=False)
     assert outcome.ok is False
     assert outcome.detail == "not executed"
     assert shlex.split(outcome.command, posix=False)[3].strip('"') == SPACED

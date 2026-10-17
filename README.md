@@ -33,7 +33,7 @@ a Firefox patched at the C++ source level so the fingerprint is produced by the
 browser instead of injected into the page.
 
 ```bash
-pip install invisible-core
+uv add invisible-core
 ```
 
 ```python

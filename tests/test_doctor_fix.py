@@ -51,6 +51,7 @@ import pytest
 
 from invisible_core import __main__ as doctor
 from invisible_core import _pin
+from invisible_core.installer import install
 from invisible_core.__main__ import EDITABLE, NOT_EDITABLE, UNKNOWN, DistFacts
 
 CORE = "invisible-core"
@@ -244,12 +245,14 @@ def test_the_install_seam_is_on_the_hot_path_and_is_never_asked_to_run(env, caps
     out = capsys.readouterr().out
 
     assert env.install.formatted, "no pip command went through the seam, so the seam is dead"
-    assert env.install.formatted == [[Path(doctor.sys.executable).name, "-m", "pip",
-                                      "install", f"{CORE}=={OTHER}"]]
+    # installer.install's command: the tool that installed the core, and this
+    # interpreter by its full path, so the line lands in the environment that
+    # was diagnosed (it named only `python.exe` until 49.45.0).
+    assert env.install.formatted == [install(CORE, f"{CORE}=={OTHER}")]
     assert env.install.executed == [], "doctor asked for an install to RUN"
     # The text the user sees is the text the seam produced, so a bypass that
     # printed its own command would be caught here too.
-    assert f'-m pip install "{CORE}=={OTHER}"' in out
+    assert _pin.format_command(install(CORE, f"{CORE}=={OTHER}")) in out
     assert rc == 1
 
 
@@ -377,7 +380,12 @@ def test_the_doctor_imports_only_the_reading_half_of_pin():
                # gate exists so a new name from a module that CAN install has to
                # be looked at by somebody, and widening it silently is the failure
                # it guards against.
-               "format_command"}
+               "format_command",
+               # Added 2026-10-17 (49.45.0): the command the import-time repair
+               # runs, so the doctor prints that one and not a third spelling.
+               # It builds a list of tokens and runs nothing; the seam above is
+               # still the only door to a process.
+               "repair_command"}
     tree = ast.parse(Path(doctor.__file__).read_text(encoding="utf-8"))
     imported = []
     for node in ast.walk(tree):
@@ -601,7 +609,7 @@ def test_a_clobbered_site_packages_is_unknown_and_an_intact_one_is_not(env, caps
     out = capsys.readouterr().out
     assert rc == 1
     assert env.install.formatted, "withheld the command from a plain index install too"
-    assert f'-m pip install "{CORE}=={OTHER}"' in out
+    assert _pin.format_command(install(CORE, f"{CORE}=={OTHER}")) in out
 
 
 def test_a_venv_inside_the_repo_is_not_mistaken_for_an_editable_install():
@@ -640,7 +648,7 @@ def test_fix_reports_a_python_package_mismatch_and_never_installs_it(env, capsys
     assert env.install.executed == []
     assert rc == 1
     assert "the Python packages are NOT repaired by doctor" in out
-    assert f'-m pip install "{CORE}=={OTHER}"' in out
+    assert _pin.format_command(install(CORE, f"{CORE}=={OTHER}")) in out
     assert "--force-reinstall" not in out, "the install record agrees, so plain install works"
 
 
@@ -655,12 +663,12 @@ def test_a_stale_install_record_is_told_to_force_reinstall(env, capsys):
     out = capsys.readouterr().out
 
     assert env.install.executed == []
-    assert env.install.formatted == [[Path(doctor.sys.executable).name, "-m", "pip",
-                                      "install", "--force-reinstall",
-                                      f"{CORE}=={OTHER}"]]
+    assert env.install.formatted == [
+        install(CORE, "--force-reinstall", "--no-deps", f"{CORE}=={OTHER}")]
     assert rc == 1
     assert "STALE RECORD" in out
-    assert f'-m pip install --force-reinstall "{CORE}=={OTHER}"' in out
+    assert _pin.format_command(
+        install(CORE, "--force-reinstall", "--no-deps", f"{CORE}=={OTHER}")) in out
     assert "A plain install is a no-op here" in out
 
 

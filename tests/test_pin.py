@@ -99,6 +99,10 @@ def make_core(
     # the guard between them and a force-reinstall was never once executed here.
     # test_the_stub_carries_every_module_pin_imports keeps the two in step.
     shutil.copy2(REAL_PKG / "_env.py", pkg / "_env.py")
+    # installer.py spells every install command pin.py forms, from the INSTALLER
+    # record of the environment (49.45.0). Copied for the same reason as _env.py:
+    # a stub without it raises on the first message, which is not a real install.
+    shutil.copy2(REAL_PKG / "installer.py", pkg / "installer.py")
     if with_version:
         text = (REAL_PKG / "_version.py").read_text(encoding="utf-8")
         text = re.sub(r"(?m)^CORE_REVISION\s*=\s*\d+", f"CORE_REVISION = {revision}", text)
@@ -115,9 +119,13 @@ def make_distinfo(
     version: str,
     requires: tuple[str, ...] = (),
     direct_url: dict | None = None,
+    installer: str | None = None,
 ) -> Path:
     """A real .dist-info directory. Requires-Dist lines are written verbatim, so
-    the parser is fed exactly what a building backend would have emitted."""
+    the parser is fed exactly what a building backend would have emitted.
+
+    `installer` writes the INSTALLER record a real installer leaves (`pip`,
+    `uv`), which is what decides how every install command is spelled."""
     d = site / f"{name.replace('-', '_')}-{version}.dist-info"
     d.mkdir(parents=True, exist_ok=True)
     lines = ["Metadata-Version: 2.1", f"Name: {name}", f"Version: {version}"]
@@ -125,6 +133,8 @@ def make_distinfo(
     (d / "METADATA").write_text("\n".join(lines) + "\n", encoding="utf-8")
     if direct_url is not None:
         (d / "direct_url.json").write_text(json.dumps(direct_url), encoding="utf-8")
+    if installer is not None:
+        (d / "INSTALLER").write_text(installer + "\n", encoding="utf-8")
     return d
 
 
@@ -581,9 +591,13 @@ def verdict(**kw):
 
 
 def test_a_plain_mismatch_names_both_versions_and_the_remedy():
+    from invisible_core.installer import install
+
     msg = verdict()
     assert msg and "18.0.0" in msg and "19.0.0" in msg
-    assert 'pip install "invisible-core==18.0.0"' in msg
+    # The command the tool that installed the core spells (installer.py): a
+    # written `pip install` here would be wrong in the venv uv makes.
+    assert _pin.format_command(install("invisible-core", "invisible-core==18.0.0")) in msg
     assert "--no-deps" in msg
 
 
@@ -592,8 +606,15 @@ def test_a_stale_install_record_is_told_to_force_reinstall():
     healthy. A plain install is a no-op because pip believes the pin is already
     satisfied; only --force-reinstall repairs it."""
     msg = verdict(recorded="18.0.0")
-    assert msg and 'pip install --force-reinstall "invisible-core==18.0.0"' in msg
-    assert "pip check" in msg
+    from invisible_core.installer import install
+
+    # The core's files only: `--no-deps`, because a force-reinstall of the
+    # dependencies dies on Windows over a psutil the process has loaded.
+    assert msg and _pin.format_command(install(
+        "invisible-core", "--force-reinstall", "--no-deps", "invisible-core==18.0.0")) in msg
+    # Why a plain install will not do: the installer's own consistency check
+    # (`pip check`, `uv pip check`) reads the same record and calls it healthy.
+    assert "consistency check" in msg
 
 
 def test_the_mismatch_message_names_the_file_the_version_comes_from():
@@ -667,7 +688,7 @@ def test_every_pip_command_goes_through_the_one_seam():
     assert SOURCE.count("import subprocess") == 1, SOURCE.count("import subprocess")
     assert "pip.main" not in SOURCE
     assert "check_call" not in SOURCE
-    body = SOURCE.split("def _run_pip(")[1].split("\nINSTALL_RUNNER")[0]
+    body = SOURCE.split("def _run_installer(")[1].split("\nINSTALL_RUNNER")[0]
     assert "import subprocess" in body, "subprocess is reached outside the seam"
 
 
@@ -964,8 +985,11 @@ def run_autofix(
 
 
 def mismatched_site(tmp_path, *, name="site", tag="firefox-18", want="19.0.0",
-                    direct_url=None):
-    """A stub environment whose core is one engine release behind its consumer."""
+                    direct_url=None, installer=None):
+    """A stub environment whose core is one engine release behind its consumer.
+
+    `installer` is the INSTALLER record of the core: `uv` for the environment
+    the README makes, `pip` for the one every user before 0.38 has."""
     # Under a directory literally named site-packages, because that is the one
     # confident negative _editable_of has: no direct_url.json AND the importable
     # files in site-packages is what an ordinary index install looks like and
@@ -973,7 +997,8 @@ def mismatched_site(tmp_path, *, name="site", tag="firefox-18", want="19.0.0",
     # "files outside site-packages", i.e. editable, and the repair refuses.
     site = tmp_path / name / "site-packages"
     make_core(site, tag=tag)
-    make_distinfo(site, "invisible-core", "18.0.0", direct_url=direct_url)
+    make_distinfo(site, "invisible-core", "18.0.0", direct_url=direct_url,
+                  installer=installer)
     make_distinfo(site, "fake-consumer", "1.2.3", (f"invisible-core=={want}",))
     return site
 
@@ -1001,10 +1026,78 @@ def test_the_repair_forms_the_pinned_install_command_and_asks_for_execution(tmp_
     assert len(out["calls"]) == 1, out["calls"]
     call = out["calls"][0]
     assert call["execute"] is True, call
+    # A plain install: the record names 18.0.0, so the installer replaces the
+    # core and leaves alone every dependency the pinned one does not change.
+    # `--force-reinstall` reinstalled them all, and a psutil this process has
+    # loaded cannot be deleted on Windows (repair_command has the measurement).
     assert call["cmd"][1:] == [
-        "-m", "pip", "install", "--force-reinstall", "invisible-core==19.0.0"], call
+        "-m", "pip", "install", "invisible-core==19.0.0"], call
     assert call["cmd"][0].lower().endswith(("python.exe", "python", "python3")) or \
         Path(call["cmd"][0]).exists(), call
+
+
+def test_a_core_uv_installed_is_repaired_through_uv(tmp_path):
+    """The environment `uv init` + `uv add` makes has no pip. Measured
+    2026-10-17: the repair ran `python -m pip`, died on `No module named pip`,
+    and the import failed. The command formed and run is uv's, aimed at this
+    interpreter, and the environment is repaired."""
+    site = mismatched_site(tmp_path, installer="uv")
+    out = run_autofix(site, new_tag="firefox-19")
+
+    assert len(out["calls"]) == 1, out["calls"]
+    call = out["calls"][0]
+    assert call["execute"] is True, call
+    assert call["cmd"][:4] == ["uv", "pip", "install", "--python"], call
+    assert call["cmd"][5:] == ["invisible-core==19.0.0"], call
+    assert out["after"] == "19.0.0", out
+    assert out["raised"] == [None], out["raised"]
+    assert "repairing it now: uv pip install --python" in out["said"], out["said"]
+
+
+def test_a_core_pip_installed_is_still_repaired_through_pip(tmp_path):
+    """The other direction: what pip built still gets pip, through this
+    interpreter's own `-m pip`."""
+    site = mismatched_site(tmp_path, installer="pip")
+    out = run_autofix(site, new_tag="firefox-19")
+
+    call = out["calls"][0]
+    assert call["execute"] is True, call
+    assert call["cmd"][1:] == ["-m", "pip", "install", "invisible-core==19.0.0"], call
+    assert out["after"] == "19.0.0", out
+
+
+def test_a_stale_record_is_repaired_by_replacing_the_core_alone(tmp_path):
+    """The record already names the pin while the files are another version, so
+    a plain install would be a no-op: the core's files are reinstalled, and only
+    those (`--no-deps`)."""
+    site = mismatched_site(tmp_path, want="18.0.0", tag="firefox-17")
+    out = run_autofix(site, new_tag="firefox-18")
+
+    call = out["calls"][0]
+    assert call["cmd"][1:] == [
+        "-m", "pip", "install", "--force-reinstall", "--no-deps",
+        "invisible-core==18.0.0"], call
+    assert out["after"] == "18.0.0", out
+
+
+def test_the_message_and_the_repair_name_the_same_command(tmp_path):
+    """They were two constructions until 49.45.0 and they differed: the
+    message said a plain install while the repair forced one. Now the line the
+    user is told to run is the line that was run."""
+    site = mismatched_site(tmp_path, installer="uv")
+    out = run_autofix(site, ok=False)
+    formed = _pin.format_command(out["calls"][0]["cmd"])
+    assert f"Run: {formed}" in out["raised"][0], (formed, out["raised"][0])
+
+
+def test_a_failed_repair_under_uv_hands_over_uv(tmp_path):
+    """When the repair cannot run, the line the user is told to run is the one
+    that works in their environment: uv's, not the pip their venv lacks."""
+    site = mismatched_site(tmp_path, installer="uv")
+    raised = run_autofix(site, ok=False)["raised"][0]
+
+    assert 'Run: uv pip install --python' in raised, raised
+    assert "-m pip install" not in raised, raised
 
 
 def test_the_repair_says_what_it_will_do_before_it_does_it_and_what_it_did_after(
