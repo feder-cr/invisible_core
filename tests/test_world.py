@@ -99,6 +99,70 @@ def test_a_default_test_cannot_start_a_display_server(tmp_path):
     assert "FileNotFoundError" not in _out(r), "the spawn was attempted:\n" + _out(r)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="_winapi is Windows")
+def test_a_default_test_cannot_reach_create_process_around_subprocess(tmp_path):
+    """`_winapi.CreateProcess` called directly raises only its own event, not
+    `subprocess.Popen`'s ([B345], 1c's review of PR #160)."""
+    r = _session(tmp_path, '''
+        import _winapi
+
+        def test_spawns(tmp_path):
+            exe = str(tmp_path / "missing" / "firefox.exe")
+            _winapi.CreateProcess(exe, '"%s" -version' % exe, None, None,
+                                  False, 0, None, None, None)
+    ''')
+    assert r.returncode == 1, _out(r)
+    assert "WorldRefused" in _out(r) and "start the engine" in _out(r), _out(r)
+    assert "FileNotFoundError" not in _out(r), "the spawn was attempted:\n" + _out(r)
+
+
+#: A script that borrows the display's name, as tests/test_headless.py's
+#: `fake_xvfb` does: put first on PATH, spawned by its bare name.
+_STAND_IN = '''
+    import os
+    import subprocess
+
+    def _spawn(where, content):
+        exe = where / "Xvfb"
+        exe.write_bytes(content)
+        exe.chmod(0o755)
+        os.environ["PATH"] = str(where) + os.pathsep + os.environ["PATH"]
+        try:
+            # By its bare name, as fake_xvfb does; Windows resolves none
+            # without an extension, so there the path.
+            subprocess.Popen([str(exe) if os.name == "nt" else "Xvfb", ":99"]).wait()
+        except OSError:
+            pass    # Windows does not run a script: the guard is what is judged
+'''
+
+
+def test_a_stand_in_the_test_wrote_is_not_a_display(tmp_path):
+    r = _session(tmp_path, _STAND_IN + '''
+    def test_display(tmp_path):
+        _spawn(tmp_path, b"#!/bin/sh\\nexit 0\\n")
+    ''')
+    assert r.returncode == 0, _out(r)
+
+
+@pytest.mark.parametrize("why", ["outside the session's temporary directory",
+                                 "not a script"])
+def test_only_a_script_in_the_sessions_own_directory_is_a_stand_in(tmp_path, why):
+    """A compiled Xvfb extracted into the temporary directory is the real one,
+    and a script elsewhere on the machine is not the test's own."""
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    where, content = ((repr(str(outside)), b"#!/bin/sh\nexit 0\n")
+                      if why.startswith("outside") else ("tmp_path", b"\x7fELF"))
+    r = _session(tmp_path, _STAND_IN + '''
+    import pathlib
+
+    def test_display(tmp_path):
+        _spawn(pathlib.Path(%s), %r)
+    ''' % (where, content))
+    assert r.returncode == 1, _out(r)
+    assert "WorldRefused" in _out(r) and "start a display" in _out(r), _out(r)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="a Win32 desktop")
 def test_a_hidden_desktop_is_not_the_world(tmp_path):
     """`CreateDesktopW` starts no process and reaches no network: an object of
@@ -238,8 +302,13 @@ def _functions(path: pathlib.Path):
 
 
 def _mentions(node, word: str) -> bool:
-    return any((isinstance(n, ast.Name) and n.id == word)
-               or (isinstance(n, ast.Attribute) and n.attr == word)
+    """`word` as a name or an attribute; a trailing `*` matches a prefix."""
+    if word.endswith("*"):
+        same = lambda name: name.startswith(word[:-1])  # noqa: E731
+    else:
+        same = lambda name: name == word  # noqa: E731
+    return any((isinstance(n, ast.Name) and same(n.id))
+               or (isinstance(n, ast.Attribute) and same(n.attr))
                for n in ast.walk(node))
 
 
@@ -263,11 +332,13 @@ def _core_functions() -> dict:
     return out
 
 
-#: Each way the core starts the engine, and the one function allowed to reach it.
+#: Each way the core starts the engine, and the one function allowed to reach
+#: it. `CreateProcess*` is every Win32 spelling: `W`, `A`, `AsUserW`,
+#: `WithLogonW`, and `_winapi.CreateProcess` itself.
 OWNERS = {
     "_spawn_windows": "juggler/connection.py::launch",
     "_spawn_posix": "juggler/connection.py::launch",
-    "CreateProcessW": "juggler/connection.py::_spawn_windows",
+    "CreateProcess*": "juggler/connection.py::_spawn_windows",
 }
 
 
@@ -287,7 +358,8 @@ def _first_call_line(fn, name: str) -> int:
 def test_the_core_starts_the_engine_only_where_it_says_so():
     """A spawn outside `launch`'s two would be invisible to the plugin:
     `CreateProcessW` through ctypes raises no event of its own. So each of the
-    two raises the core's event, before the call that creates the process."""
+    two raises the core's event, before the call that creates the process, and
+    no other function names any `CreateProcess`."""
     functions = _core_functions()
     for word, owner in OWNERS.items():
         reached_by = {name for name, fn in functions.items()

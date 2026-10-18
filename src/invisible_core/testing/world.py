@@ -24,7 +24,13 @@ e2e:
   created - on Windows that is `CreateProcessW` through ctypes, which no
   `subprocess` event sees - and any spawn of a program named like the engine;
 * a display server: a spawn of Xvfb, which Python's own `subprocess` event
-  shows. A Windows hidden desktop is not one: `CreateDesktopW` starts no
+  shows.
+
+A stand-in is neither: a script (`#!`) that the session wrote into its own
+temporary directory and that only borrows the name - the fake `Xvfb` that
+`tests/test_headless.py` puts first on PATH to drive the display's start
+without a display. A real engine or Xvfb is a compiled program, and one
+extracted into a temporary directory is still refused. A Windows hidden desktop is not one: `CreateDesktopW` starts no
   process and reaches no network, it is an object of the logon session
   released at stop, so the tests that make one stay in the default selection;
 * the network: a connection, a datagram or a name lookup that is not loopback.
@@ -49,8 +55,9 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import shutil
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pytest
 
@@ -61,10 +68,14 @@ _ENGINE_PROGRAMS = frozenset({"firefox", "firefox.exe", "firefox-bin"})
 _DISPLAY_PROGRAMS = frozenset({"xvfb", "xvfb-run"})
 _SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.spawn",
                            "os.exec", "os.system", "os.startfile"})
+#: Raised by `_winapi.CreateProcess`, which `subprocess.Popen` calls on Windows
+#: after its own event: a second event for the same child, so it names the
+#: program but is never counted as one. Called directly, it is the only event.
+_WIN32_SPAWN = "_winapi.CreateProcess"
 _ADDRESS_EVENTS = frozenset({"socket.connect", "socket.sendto"})
 _NAME_EVENTS = frozenset({"socket.getaddrinfo", "socket.gethostbyname",
                           "socket.gethostbyaddr"})
-_WATCHED = (frozenset({ENGINE_EVENT}) | _SPAWN_EVENTS
+_WATCHED = (frozenset({ENGINE_EVENT, _WIN32_SPAWN}) | _SPAWN_EVENTS
             | _ADDRESS_EVENTS | _NAME_EVENTS)
 
 #: The user property a call report carries when an e2e test touched nothing.
@@ -83,10 +94,11 @@ def _first_word(command) -> str:
     return text.split()[0] if text else ""
 
 
-def _program(event: str, args: tuple) -> str:
-    """The basename, lowercased, of what a spawn event starts."""
-    if event == "subprocess.Popen":
-        executable, argv = args[0], args[1]
+def _command(event: str, args: tuple) -> Tuple[str, object]:
+    """What a spawn event starts, as given, and the environment it gets."""
+    env = None
+    if event == "subprocess.Popen":  # executable, args, cwd, env
+        executable, argv, env = args[0], args[1], args[3]
         if executable:
             first = os.fsdecode(executable)
         elif isinstance(argv, (str, bytes)):
@@ -94,13 +106,35 @@ def _program(event: str, args: tuple) -> str:
         else:
             argv = list(argv or [])
             first = os.fsdecode(argv[0]) if argv else ""
+    elif event == _WIN32_SPAWN:  # application_name, command_line, cwd
+        first = os.fsdecode(args[0]) if args[0] else _first_word(args[1] or "")
     elif event == "os.system":
         first = _first_word(args[0])
-    elif event == "os.spawn":
-        first = os.fsdecode(args[1])
-    else:  # os.posix_spawn, os.exec, os.startfile: the path comes first
+    elif event == "os.spawn":  # mode, path, args, env
+        first, env = os.fsdecode(args[1]), args[3]
+    elif event in ("os.posix_spawn", "os.exec"):  # path, args, env
+        first, env = os.fsdecode(args[0]), args[2]
+    else:  # os.startfile: path, operation
         first = os.fsdecode(args[0])
+    return first, env
+
+
+def _program(first: str) -> str:
+    """The basename, lowercased."""
     return os.path.basename(first.replace("\\", "/")).lower()
+
+
+def _search_path(env) -> Optional[str]:
+    """The PATH a spawn resolves a bare name on: its own env, or ours."""
+    if env is None:
+        return os.environ.get("PATH")
+    try:
+        for key, value in dict(env).items():
+            if os.fsdecode(key).upper() == "PATH":
+                return os.fsdecode(value)
+    except (TypeError, ValueError):
+        pass
+    return None
 
 
 def _loopback(host) -> bool:
@@ -134,6 +168,26 @@ class _World:
         #: alive in `_defs`, so an id cannot be reused by another object.
         self.fixtures: Dict[int, List[str]] = {}
         self._defs: list = []
+        #: The session's temporary directory, real path: where a test's own
+        #: files live, stand-ins included.
+        self.scratch: Optional[str] = None
+
+    def stand_in(self, first: str, env=None) -> bool:
+        """A script the session wrote into its own temporary directory."""
+        if not self.scratch or not first:
+            return False
+        found = (first if os.path.dirname(first)
+                 else shutil.which(first, path=_search_path(env)))
+        if not found:
+            return False
+        path = os.path.realpath(found)
+        try:
+            if os.path.commonpath([path, self.scratch]) != self.scratch:
+                return False
+            with open(path, "rb") as f:
+                return f.read(2) == b"#!"
+        except (OSError, ValueError):
+            return False
 
     def enter(self, item) -> None:
         self.test = item.nodeid
@@ -159,14 +213,16 @@ class _World:
         if event not in _WATCHED:
             return
         if event == ENGINE_EVENT:
-            self.touch("start the engine (%s)" % (args[0],))
-        elif event in _SPAWN_EVENTS:
-            program = _program(event, args)
-            if program in _ENGINE_PROGRAMS:
-                self.touch("start the engine (%s)" % program)
-            elif program in _DISPLAY_PROGRAMS:
-                self.touch("start a display (%s)" % program)
-            else:
+            if not self.stand_in(os.fsdecode(args[0])):
+                self.touch("start the engine (%s)" % (args[0],))
+        elif event in _SPAWN_EVENTS or event == _WIN32_SPAWN:
+            first, env = _command(event, args)
+            program = _program(first)
+            named = program in _ENGINE_PROGRAMS or program in _DISPLAY_PROGRAMS
+            if named and not self.stand_in(first, env):
+                self.touch(("start the engine (%s)" if program in _ENGINE_PROGRAMS
+                            else "start a display (%s)") % program)
+            elif event != _WIN32_SPAWN:
                 self.children += 1
         elif event in _ADDRESS_EVENTS:
             address = args[1]
@@ -205,6 +261,12 @@ def pytest_configure(config) -> None:
     if not _INSTALLED:
         sys.addaudithook(_WORLD.hook)
         _INSTALLED = True
+
+
+def pytest_sessionstart(session) -> None:
+    factory = getattr(session.config, "_tmp_path_factory", None)
+    if factory is not None:
+        _WORLD.scratch = os.path.realpath(factory.getbasetemp())
 
 
 @pytest.hookimpl(hookwrapper=True)
