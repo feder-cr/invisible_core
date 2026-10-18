@@ -34,11 +34,11 @@ INI = "[pytest]\nmarkers =\n    e2e: needs the world\naddopts = -p no:cacheprovi
 
 
 def _session(tmp_path: pathlib.Path, tests: str, *args: str,
-             autoload: bool = False) -> subprocess.CompletedProcess:
+             autoload: bool = False, extra_env: dict = None) -> subprocess.CompletedProcess:
     (tmp_path / "pytest.ini").write_bytes(INI.encode())
     (tmp_path / "conftest.py").write_bytes(CONFTEST.encode())
     (tmp_path / "test_inner.py").write_bytes(textwrap.dedent(tests).encode())
-    env = dict(os.environ)
+    env = dict(os.environ, **(extra_env or {}))
     if not autoload:
         # Only the plugin under test: an installed plugin must not decide a case.
         env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
@@ -161,6 +161,45 @@ def test_only_a_script_in_the_sessions_own_directory_is_a_stand_in(tmp_path, why
     ''' % (where, content))
     assert r.returncode == 1, _out(r)
     assert "WorldRefused" in _out(r) and "start a display" in _out(r), _out(r)
+
+
+def test_a_default_test_runs_in_nobodys_configuration(tmp_path):
+    """The library's variables set in the shell that runs the suite: gone
+    while it collects and while a default test runs, there for an e2e test,
+    and back after a default test even if it set one itself. The seal file is
+    a real one: the core reads it at import, before any hook runs."""
+    seal = tmp_path / "seal.json"
+    seal.write_bytes((_SRC / "seal.json").read_bytes())
+    r = _session(tmp_path, '''
+        import os
+        import subprocess
+        import sys
+
+        import pytest
+
+        AT_COLLECTION = os.environ.get("INVISIBLE_PLAYWRIGHT_ENGINE_DIR")
+
+        def test_collected_without_it():
+            assert AT_COLLECTION is None
+
+        def test_default():
+            assert "INVISIBLE_PLAYWRIGHT_ENGINE_DIR" not in os.environ
+            assert "INVISIBLE_SEAL_FILE" not in os.environ
+            child = subprocess.run([sys.executable, "-c",
+                                    "import os; print(os.environ.get('INVISIBLE_SEAL_FILE'))"],
+                                   capture_output=True, text=True)
+            assert child.stdout.strip() == "None"
+            os.environ["INVISIBLE_CORE_AUTOFIX"] = "off"   # and never put back
+
+        @pytest.mark.e2e
+        def test_e2e():
+            assert os.environ["INVISIBLE_PLAYWRIGHT_ENGINE_DIR"] == "engines"
+            assert os.environ["INVISIBLE_SEAL_FILE"].endswith("seal.json")
+            assert "INVISIBLE_CORE_AUTOFIX" not in os.environ
+    ''', extra_env={"INVISIBLE_PLAYWRIGHT_ENGINE_DIR": "engines",
+                      "INVISIBLE_SEAL_FILE": str(seal)})
+    assert r.returncode == 0, _out(r)
+    assert "3 passed" in _out(r), _out(r)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="a Win32 desktop")
