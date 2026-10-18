@@ -17,6 +17,7 @@ The translation is split into:
 """
 from __future__ import annotations
 
+import functools
 import sys
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
@@ -1641,6 +1642,13 @@ def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
     prefs["juggler.locale.override"]   = locale.accept_languages
 
 
+@functools.lru_cache(maxsize=1)
+def _iana_zones() -> frozenset:
+    import zoneinfo
+
+    return frozenset(zoneinfo.available_timezones())
+
+
 def _apply_timezone(prefs: Dict[str, Any], timezone: Optional[str]) -> None:
     """The session's zone, which every session declares.
 
@@ -1662,6 +1670,20 @@ def _apply_timezone(prefs: Dict[str, Any], timezone: Optional[str]) -> None:
             "prepare_session_geo(timezone, proxy, locale).timezone decided "
             "from the exit, or an IANA name such as America/New_York"
             % (timezone,))
+    # ⛔ AND A ZONE THE ENGINE CANNOT OPEN IS REFUSED TOO, because there it
+    # becomes the host's. SpiderMonkey resolves a realm override that ICU does
+    # not know to the MACHINE's zone, in silence (js/src/vm/DateTime.cpp,
+    # DateTimeInfo::timeZone), and ICU's lookup is exact: "america/phoenix"
+    # names no zone. An explicit zone reached this line unchecked until the
+    # firefox-50 pin (resolve_session_timezone returns it as given); one from
+    # the exit was already checked in _geo.ip_to_timezone. Same spelling test
+    # here, the IANA database's own names, and the caller gets the right one.
+    if zone not in _iana_zones():
+        spelled = {z.lower(): z for z in _iana_zones()}.get(zone.lower())
+        raise ValueError(
+            "the session's timezone %r is not an IANA zone%s: the engine cannot "
+            "open it, and a zone it cannot open is the host's"
+            % (zone, " (did you mean %r?)" % spelled if spelled else ""))
     # juggler.timezone.override is the SOLE source of the session's zone: from
     # the firefox-50 engine one reader (intl/locale/StealthSessionPrefs.h)
     # gives it to every realm, worker and worklet whose context declares no

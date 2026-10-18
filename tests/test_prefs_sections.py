@@ -228,6 +228,28 @@ def test_no_timezone_is_refused_and_never_written_empty():
     assert prefs["juggler.timezone.override"] == "Europe/Rome"
 
 
+@pytest.mark.parametrize("zone, hint", [
+    ("america/phoenix", "America/Phoenix"),
+    ("Mars/Phobos", None),
+    ("+05:00", None),
+])
+def test_a_zone_the_engine_cannot_open_is_refused(zone, hint):
+    """A: the code was wrong. An explicit zone reached the pref unchecked,
+    and the engine's ICU opens only the exact IANA spelling: SpiderMonkey
+    resolves anything else to the MACHINE's zone, in silence
+    (js/src/vm/DateTime.cpp). The known-bad inputs are a wrong case, a name
+    that is no zone, and an offset Intl accepts but ICU does not open by name;
+    before this, all three were written as the session's zone."""
+    prefs = {}
+    with pytest.raises(ValueError, match="not an IANA zone") as err:
+        P._apply_timezone(prefs, zone)
+    assert "juggler.timezone.override" not in prefs
+    if hint:
+        assert repr(hint) in str(err.value), "the right spelling is not offered"
+    P._apply_timezone(prefs, "America/Phoenix")
+    assert prefs["juggler.timezone.override"] == "America/Phoenix"
+
+
 def test_the_webrtc_host_ip_is_seed_derived_and_looks_like_a_home_router(profile):
     import ipaddress
 
