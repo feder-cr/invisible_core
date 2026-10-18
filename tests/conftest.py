@@ -31,6 +31,12 @@ import pathlib
 
 import pytest
 
+# A test reaches the network, the engine or a display only when it is marked
+# e2e, and a default test that tries is refused before the call happens
+# (`invisible_core.testing.world`, [B345]). The install job, whose runner has
+# no invisible_core on purpose, blocks it with -p no:invisible_core.testing.world.
+pytest_plugins = ["invisible_core.testing.world"]
+
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 
 # ⛔ A SUBPROCESS ESCAPES EVERYTHING THIS FILE GUARDS, so this is where it is

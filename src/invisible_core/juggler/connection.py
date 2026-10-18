@@ -813,6 +813,15 @@ def _spawn_windows(executable, argv, env):
     pipe whose write end is closed at once (EOF, and a PIPE type), and stderr
     is its own duplicate of the stdout pipe.
     """
+    # ⛔ THE ENGINE IS DECLARED WHERE IT STARTS. On Windows the spawn is
+    # `CreateProcessW` through ctypes, which raises none of the audit events
+    # Python raises for `subprocess`, so a guard that watched `subprocess.Popen`
+    # let about 400 real browsers start on 2026-10-17 while it was meant to
+    # refuse every one ([B345]). Raised here and not at the top of `launch`, so
+    # a test that replaces this function starts nothing and declares nothing;
+    # `invisible_core.testing.world` refuses it outside an e2e test, and a hook
+    # that raises stops the spawn before anything is created.
+    sys.audit(LAUNCH_EVENT, executable, argv)
     import ctypes
     import msvcrt
     import _winapi
@@ -985,6 +994,15 @@ def _spawn_posix(executable, argv, env):
     in the parent and do not have to be: that list is a set of NUMBERS the
     child's sweep spares, not a set of parent handles.
     """
+    # ⛔ THE ENGINE IS DECLARED WHERE IT STARTS. On Windows the spawn is
+    # `CreateProcessW` through ctypes, which raises none of the audit events
+    # Python raises for `subprocess`, so a guard that watched `subprocess.Popen`
+    # let about 400 real browsers start on 2026-10-17 while it was meant to
+    # refuse every one ([B345]). Raised here and not at the top of `launch`, so
+    # a test that replaces this function starts nothing and declares nothing;
+    # `invisible_core.testing.world` refuses it outside an e2e test, and a hook
+    # that raises stops the spawn before anything is created.
+    sys.audit(LAUNCH_EVENT, executable, argv)
     its_read, our_write = os.pipe()
     our_read, its_write = os.pipe()
 
@@ -1022,6 +1040,12 @@ def _spawn_posix(executable, argv, env):
     os.close(its_read)
     os.close(its_write)
     return our_write, our_read, p
+
+
+#: The audit event the engine's two spawns raise before the process is
+#: created, with the executable and its arguments
+#: (`invisible_core.testing.world` reads it).
+LAUNCH_EVENT = "invisible_core.engine.launch"
 
 
 def launch(executable: str, profile_dir: str, *, headless: bool = True,

@@ -269,8 +269,11 @@ jobs:
           # No display needed and no xvfb installed: nothing here opens the UI.
           # The manager's browser-driving tests are marked `integration` and
           # live elsewhere; this job is about the install path only.
+          # The conftest loads invisible_core.testing.world, which needs the
+          # package this runner does not have on purpose: blocked, so it is
+          # never imported. Every test here is e2e, which it would allow anyway.
           python -m pytest tests/test_user_install_e2e.py -m e2e \
-            -o addopts="" -v -rs | tee e2e-report.txt
+            -o addopts="" -p no:invisible_core.testing.world -v -rs | tee e2e-report.txt
 
       # A run whose tests all SKIPPED is not a pass, and it is the failure this
       # suite is most exposed to: every test here is gated on `-m e2e` and
