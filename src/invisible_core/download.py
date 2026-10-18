@@ -17,6 +17,8 @@ import platformdirs
 import psutil
 import requests
 
+from . import environment
+
 # The four GEOIP_* names went with the geoip half on 2026-07-27 and stayed
 # imported here, unused, ever since. They are not a back-compat re-export -
 # those are spelled out at the foot of this file with an explicit noqa - and
@@ -40,7 +42,8 @@ from .seal import (
 
 
 def _github_token() -> str | None:
-    return os.environ.get("STEALTHFOX_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    return (os.environ.get(environment.GITHUB_TOKEN_OWN)
+            or os.environ.get(environment.GITHUB_TOKEN))
 
 
 def _parse_owner_repo(template: str) -> tuple[str, str]:
@@ -52,7 +55,7 @@ def _parse_owner_repo(template: str) -> tuple[str, str]:
 
 
 #: The variable that puts the engine store somewhere of its own.
-ENGINE_DIR_ENV = "INVISIBLE_PLAYWRIGHT_ENGINE_DIR"
+ENGINE_DIR_ENV = environment.ENGINE_DIR
 #: The machine's own state under cache_root(), by directory name. One list,
 #: read by state_dir() and by iter_cached_engines(): when the engine store is
 #: the cache root (the default) these must never be taken for engine trees.
@@ -69,7 +72,7 @@ def cache_root() -> Path:
     and read nowhere, so "isolated" cache tests were operating on the
     developer's real cache; honouring it makes them hermetic on every OS.
     """
-    override = os.environ.get("INVISIBLE_PLAYWRIGHT_CACHE_DIR")
+    override = os.environ.get(environment.CACHE_DIR)
     if override:
         return Path(override)
     return Path(platformdirs.user_cache_dir("invisible-playwright"))
@@ -244,7 +247,7 @@ def _missing_release_message(tag: str, asset_name: str, url: str) -> str:
 #: re-run took 4.6 minutes. This matters more off CI than on it, because
 #: ``ensure_binary`` runs on the user's machine and a hang there has no log at
 #: all. The default leaves room for the 110 MB engine at about 60 KB/s.
-DOWNLOAD_DEADLINE_ENV = "INVISIBLE_DOWNLOAD_DEADLINE"
+DOWNLOAD_DEADLINE_ENV = environment.DOWNLOAD_DEADLINE
 DOWNLOAD_DEADLINE_DEFAULT = 1800.0
 
 

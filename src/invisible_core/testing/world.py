@@ -42,6 +42,16 @@ A test that is not marked e2e and tries one of them gets `WorldRefused` from the
 hook, so the call never happens, and the test is reported failed even if it
 caught the exception: the attempt is what is wrong, not the traceback.
 
+The configuration of whoever runs the suite is outside too. Every variable the
+library reads (`invisible_core.environment.READ`) is taken out of the
+environment while the suite collects and while a test not marked e2e runs, and
+put back after: such a test runs in nobody's configuration, so an engine folder
+or a seal file set in a developer's shell cannot turn it red (13 tests were,
+with `INVISIBLE_PLAYWRIGHT_ENGINE_DIR` set). A test marked e2e keeps them: a
+run against a local engine needs its `INVISIBLE_SEAL_FILE`. What the core reads
+at import is read before any hook runs, so a seal file in the shell still
+decides the session's engine identity: one interpreter has one.
+
 `--world-report` judges the other half. An e2e test that passed without
 touching the world, by itself or through a fixture that did, is mis-marked, and
 the session fails naming it. A fixture counts because e2e modules open one
@@ -63,6 +73,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pytest
 
+from .. import environment
 from ..juggler.connection import LAUNCH_EVENT as ENGINE_EVENT
 
 #: Spawned under these names, a program is the engine or a display.
@@ -173,6 +184,8 @@ class _World:
         #: The session's temporary directory, real path: where a test's own
         #: files live, stand-ins included.
         self.scratch: Optional[str] = None
+        #: What `enter` took out of the environment, for `leave` to put back.
+        self.withheld: Optional[Dict[str, str]] = None
 
     def stand_in(self, first: str, env=None) -> bool:
         """A script the session wrote into its own temporary directory."""
@@ -196,10 +209,14 @@ class _World:
         self.allowed = item.get_closest_marker("e2e") is not None
         self.touched = []
         self.children = 0
+        self.withheld = None if self.allowed else _withhold()
 
     def leave(self) -> None:
         self.test = None
         self.allowed = False
+        if self.withheld is not None:
+            _give_back(self.withheld)
+            self.withheld = None
 
     def touch(self, what: str) -> None:
         self.touched.append(what)
@@ -244,6 +261,22 @@ class _World:
         return False
 
 
+def _withhold() -> Dict[str, str]:
+    """Take the library's variables out of the environment; return their values."""
+    return {name: os.environ.pop(name) for name in environment.READ
+            if name in os.environ}
+
+
+def _give_back(withheld: Dict[str, str]) -> None:
+    """The environment as it was: the values taken, and none of these that a
+    test set without putting back."""
+    for name in environment.READ:
+        if name in withheld:
+            os.environ[name] = withheld[name]
+        else:
+            os.environ.pop(name, None)
+
+
 _WORLD = _World()
 _INSTALLED = False
 #: Node ids of the e2e tests that passed touching nothing, gathered where the
@@ -269,6 +302,15 @@ def pytest_sessionstart(session) -> None:
     factory = getattr(session.config, "_tmp_path_factory", None)
     if factory is not None:
         _WORLD.scratch = os.path.realpath(factory.getbasetemp())
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_collection(session):
+    withheld = _withhold()
+    try:
+        yield
+    finally:
+        _give_back(withheld)
 
 
 @pytest.hookimpl(hookwrapper=True)

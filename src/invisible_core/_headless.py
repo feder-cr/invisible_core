@@ -47,6 +47,7 @@ import time
 from collections.abc import Set as AbstractSet
 from typing import Optional
 
+from . import environment
 from ._owned_dirs import owned_dir, sweep_owned_dirs
 
 
@@ -68,7 +69,7 @@ _WAYLAND_LEAK_VARS = (
 #: environment it hands the browser: the engine never reads it, so it must
 #: not travel into the process tree. Never rename: a published wrapper reads
 #: exactly this.
-DESKTOP_ENV = "INVPW_DESKTOP"
+DESKTOP_ENV = environment.DESKTOP
 
 
 #: Where Linux lists the unix sockets of this network namespace. Read, never

@@ -22,6 +22,8 @@ import sys
 import time
 from typing import Any, Iterable, List, Optional, Tuple
 
+from .. import environment
+
 try:  # the path generator is optional; the floor it declares is not
     from . import _motion as _motion_mod
 except Exception:  # noqa: BLE001 - an unimportable generator is not fatal here
@@ -48,7 +50,7 @@ MIN_EVENT_INTERVAL_MS = (
 #: it is the difference between dispatching the plan and dispatching a rounded
 #: copy of it - which matters here because per-seed differentiation is carried
 #: largely by timing. Set it to "off" to leave the system tick alone.
-TIMER_ENV = "INVPW_CURSOR_TIMER"
+TIMER_ENV = environment.CURSOR_TIMER
 
 #: What :meth:`Pacer.step` can ask for.
 SLEEP = "sleep"

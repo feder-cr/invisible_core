@@ -122,30 +122,31 @@ from importlib.metadata import (
 )
 from typing import Iterable, NamedTuple, Optional, Sequence
 
+from . import environment
 from .installer import UV, install, runnable
 
 CORE_NAME = "invisible-core"
 
 #: Env escape hatch, mirroring INVISIBLE_PLAYWRIGHT_SKEW in the wrapper. When it
 #: is "allow" a mismatch warns instead of raising, and nothing is installed.
-SKIP_ENV = "INVISIBLE_CORE_PIN"
+SKIP_ENV = environment.CORE_PIN
 
 #: Kill switch for the runtime repair. Set it to off/0/no/false and a mismatch
 #: goes back to being reported with the command to run. Needed by any test that
 #: builds a deliberately broken environment in a subprocess, and by anyone who
 #: does not want a library touching site-packages.
-AUTOFIX_ENV = "INVISIBLE_CORE_AUTOFIX"
+AUTOFIX_ENV = environment.CORE_AUTOFIX
 
 #: Set by us, to ourselves, immediately BEFORE an attempt. Children inherit it,
 #: so a repaired process that re-execs something cannot start the loop again.
-AUTOFIX_ATTEMPTED_ENV = "INVISIBLE_CORE_AUTOFIX_ATTEMPTED"
+AUTOFIX_ATTEMPTED_ENV = environment.CORE_AUTOFIX_ATTEMPTED
 
 #: How long the repair's install is allowed to take before it is stopped. The
 #: repair runs from the first line of a consumer's __init__ with output captured,
 #: so an unbounded install means an import that hangs with nothing on screen.
 #: Generous enough for a slow link (the core is pure Python but pulls a handful
 #: of deps), bounded so the failure is a message rather than a silence.
-INSTALL_TIMEOUT_ENV = "INVISIBLE_CORE_AUTOFIX_TIMEOUT"
+INSTALL_TIMEOUT_ENV = environment.CORE_AUTOFIX_TIMEOUT
 _INSTALL_TIMEOUT_DEFAULT = 300.0
 
 

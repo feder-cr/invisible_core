@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -906,6 +907,48 @@ def _index_upload_date(version: str, url: str) -> str | None:
     return min(stamps)[:10] if stamps else None
 
 
+#: How long `record` waits for the index to serve the version it has just
+#: uploaded, and how often it asks ([B348]). The bound is the one the
+#: user-install workflows give their own wait for the same thing.
+INDEX_WAIT_SECONDS = 300
+INDEX_POLL_SECONDS = 10
+#: The clock and the sleep of that wait, as seams: a test replaces them with a
+#: clock it moves itself, so a wait is checked without being waited.
+_clock = time.monotonic
+_sleep = time.sleep
+
+
+def _wait_for_upload_date(version: str, url: str) -> str | None:
+    """The upload date the index records for `version`, asking again until it
+    serves it, for at most `INDEX_WAIT_SECONDS`; None when it still does not.
+
+    ⛔ `record` RUNS SECONDS AFTER THE UPLOAD, AND THE INDEX IS NOT THERE YET
+    ([B348]). It asked once, and when the index did not serve the version it
+    left the heading as the author wrote it. invisible-puppeteer 0.9.0: uploaded
+    at 2026-10-18T02:43:57Z, asked about four seconds later, "does not serve
+    invisible-puppeteer 0.9.0 yet", and the heading kept 2026-10-17; the same
+    run had served invisible-selenium 0.8.0 in time ten minutes earlier.
+
+    An index that does not answer is asked again within the same bound, as the
+    workflows' wait asks an unreachable index again; if it never answered, the
+    last refusal is raised, and the caller says so.
+    """
+    deadline = _clock() + INDEX_WAIT_SECONDS
+    while True:
+        refusal = None
+        try:
+            recorded = _index_upload_date(version, url)
+        except GateBroken as e:
+            recorded, refusal = None, e
+        if recorded is not None:
+            return recorded
+        if _clock() >= deadline:
+            if refusal is not None:
+                raise refusal
+            return None
+        _sleep(INDEX_POLL_SECONDS)
+
+
 def _align_changelog_date(root: Path, version: str, index_url: str) -> None:
     """Give the CHANGELOG heading for `version` the date the index recorded.
 
@@ -926,15 +969,15 @@ def _align_changelog_date(root: Path, version: str, index_url: str) -> None:
     if not path.is_file():
         return  # a project without a changelog has nothing to align
     try:
-        recorded = _index_upload_date(version, index_url)
+        recorded = _wait_for_upload_date(version, index_url)
     except GateBroken as e:
-        print(f"  {CHANGELOG_NAME} NOT aligned: the index did not answer ({e}). "
-              f"The heading keeps whatever it says.")
+        print(f"  {CHANGELOG_NAME} NOT aligned: the index did not answer in "
+              f"{INDEX_WAIT_SECONDS}s ({e}). The heading keeps whatever it says.")
         return
     if recorded is None:
-        print(f"  {CHANGELOG_NAME} NOT aligned: the index does not serve "
-              f"{DIST_NAME} {version} yet, so there is no upload date to copy. "
-              f"The heading keeps whatever it says.")
+        print(f"  {CHANGELOG_NAME} NOT aligned: the index still did not serve "
+              f"{DIST_NAME} {version} after {INDEX_WAIT_SECONDS}s, so there is no "
+              f"upload date to copy. The heading keeps whatever it says.")
         return
     raw = path.read_bytes()
     text = raw.decode("utf-8")
@@ -960,6 +1003,92 @@ def _align_changelog_date(root: Path, version: str, index_url: str) -> None:
     path.write_bytes(new)
     print(f"  {CHANGELOG_NAME} heading for {version}: {found.group(2)} -> "
           f"{recorded}, from the index's upload_time_iso_8601")
+
+
+_HEADING = re.compile(r"(?m)^##\s*\[(\d+\.\d+\.\d+)\]\s*-\s*(\d{4}-\d{2}-\d{2})\s*$")
+
+
+def _version_key(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("."))
+
+
+def changelog_problems(changelog: str, published: dict, in_flight: str | None) -> list[str]:
+    """What is wrong with a changelog against what the index published:
+    `published` is version -> upload date ("YYYY-MM-DD", the earliest file's,
+    as `_index_upload_date` reduces it). THE ONE copy of this rule for every
+    package that keeps a changelog ([B347]); until it moved here only the
+    wrapper had it, in its own e2e, so a heading dated by hand in
+    invisible-selenium or invisible-puppeteer was checked by nothing.
+
+    Bounded from below by the file itself: every version the index serves at
+    or above the oldest one documented must have a heading. A heading for a
+    version the index never served is an invention, except below the first
+    published version (a package may have had releases elsewhere first) and
+    for `in_flight`, the version the tree declares, whose entry has to exist
+    before the index serves it. And a documented, published version must be
+    dated as the index dates its upload, UTC.
+    """
+    documented = {m.group(1): m.group(2) for m in _HEADING.finditer(changelog)}
+    if not documented:
+        return ["no `## [X.Y.Z] - YYYY-MM-DD` heading found at all"]
+    if not published:
+        return []
+    floor = min(documented, key=_version_key)
+    first = min(published, key=_version_key)
+    missing = sorted((v for v in published if _version_key(v) >= _version_key(floor)
+                      and v not in documented), key=_version_key)
+    invented = sorted((v for v in documented if v not in published
+                       and _version_key(v) > _version_key(first) and v != in_flight),
+                      key=_version_key)
+    misdated = sorted((v, documented[v], published[v]) for v in documented
+                      if v in published and documented[v] != published[v])
+    problems = []
+    if missing:
+        problems.append(f"published and undocumented: {missing}. The changelog starts "
+                        f"at {floor}, so everything from there up is in scope")
+    if invented:
+        problems.append(f"documented and never published: {invented}")
+    if misdated:
+        problems.append("dated differently from the upload: " + ", ".join(
+            f"{v} says {said} the index says {real}" for v, said, real in misdated))
+    return problems
+
+
+def _published_dates(url: str) -> dict:
+    """Every version the index serves, with the date `_index_upload_date`
+    gives it: one fetch, the same reduction."""
+    out = {}
+    for version, files in _index_releases(url).items():
+        stamps = [f["upload_time_iso_8601"] for f in files or []
+                  if isinstance(f, dict) and f.get("upload_time_iso_8601")]
+        if stamps:
+            out[version] = min(stamps)[:10]
+    return out
+
+
+def cmd_changelog(args) -> int:
+    """`changelog`: this project's CHANGELOG.md against the index. A project
+    without one passes, and says so."""
+    root = Path(args.project_root)
+    path = root / CHANGELOG_NAME
+    if not path.is_file():
+        print(f"{DIST_NAME}: no {CHANGELOG_NAME}, nothing to compare")
+        return EXIT_OK
+    import tomllib
+    with (root / "pyproject.toml").open("rb") as fh:
+        in_flight = tomllib.load(fh).get("project", {}).get("version")
+    try:
+        published = _published_dates(_index_url_for(args))
+    except GateBroken as e:
+        print(f"GATE BROKEN: {e}", file=sys.stderr)
+        return EXIT_BROKEN
+    problems = changelog_problems(path.read_text(encoding="utf-8"), published, in_flight)
+    for problem in problems:
+        print(f"{CHANGELOG_NAME}: {problem}", file=sys.stderr)
+    if problems:
+        return EXIT_REFUSED
+    print(f"{DIST_NAME}: {CHANGELOG_NAME} documents and dates every published version")
+    return EXIT_OK
 
 
 def _verify_index(version: str, url: str, ledger: Path | None = None) -> int:
@@ -1130,6 +1259,12 @@ def main(argv=None) -> int:
     r.set_defaults(fn=cmd_record)
     s = sub.add_parser("show", help="print the digests, no verdict")
     s.set_defaults(fn=cmd_show)
+    ch = sub.add_parser("changelog", help="the CHANGELOG headings against what the "
+                                          "index published, and when")
+    ch.add_argument("--index-json-url", default=None,
+                    help="the index JSON API to compare against (default: this "
+                         "project's own, derived from its pyproject name)")
+    ch.set_defaults(fn=cmd_changelog)
     args = p.parse_args(argv)
     if args.cmd is None:
         # `check` is the default, and the options in front of it must survive.

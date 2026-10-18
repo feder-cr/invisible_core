@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+from . import environment
+
 # 1 -> 2 (2026-07-25): BuildID moved into the per-asset record. A schema-1 seal
 # cannot be read forward, because its single BuildID matches at most one leg
 # (see SUPPORTED_LEGS below) and there is no way to recover the others from it.
@@ -62,7 +64,7 @@ SUPPORTED_PLATFORMS = tuple(dict.fromkeys(p for p, _ in SUPPORTED_LEGS))
 #: A native asset for a host, if one is ever published, wins over this.
 EMULATED_LEGS = {("win32", "arm64"): "x86_64"}
 READABLE_SEAL_SCHEMAS = (2,)
-SEAL_FILE_ENV = "INVISIBLE_SEAL_FILE"
+SEAL_FILE_ENV = environment.SEAL_FILE
 STAMP_NAME = ".invisible-seal.json"
 
 # The shape of a RELEASE tag. Anything else is a local seal's tag: `python -m

@@ -27,6 +27,7 @@ from pathlib import Path
 
 import requests
 
+from . import environment
 from .constants import (
     GEOIP_ASSET,
     GEOIP_MMDB_NAME,
@@ -207,7 +208,7 @@ def ensure_geoip_mmdb() -> Path:
       4. Couldn't resolve the tag (offline / unparseable): cached mmdb → use it;
          cold cache → raise (caller can then drop timezone="auto").
     """
-    override = os.environ.get("STEALTHFOX_GEOIP_MMDB")
+    override = os.environ.get(environment.GEOIP_MMDB)
     if override:
         p = Path(override)
         if not p.exists():
