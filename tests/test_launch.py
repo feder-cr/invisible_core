@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from invisible_core import compose_session_prefs, generate_profile
 from invisible_core.launch import write_user_js, build_launch_env, build_launch_plan
 
 
@@ -100,14 +101,45 @@ def test_write_user_js_creates_dir_and_overwrites(tmp_path):
 def test_build_launch_env_no_font_env_but_webrtc():
     # Fonts are handled entirely in the binary (always bundle-only, self-contained),
     # so build_launch_env must NOT set any STEALTHFOX_FONTLIST/SYSTEMUI env - even
-    # when legacy font prefs are passed. WebRTC egress + TZ are still wired.
+    # when legacy font prefs are passed. WebRTC egress is still wired.
     prefs = {"zoom.stealth.font.fontlist": "Arial,Calibri", "zoom.stealth.font.system_ui": "Segoe UI"}
-    env = build_launch_env(prefs, timezone="America/New_York", srflx_declared="198.51.100.4", base_env={})
+    env = build_launch_env(prefs, srflx_declared="198.51.100.4", base_env={})
     assert "STEALTHFOX_FONTLIST" not in env
     assert "STEALTHFOX_SYSTEMUI" not in env
     assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.4"
     assert env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] == "1"
-    assert env["TZ"]  # a POSIX TZ string was set
+
+
+@pytest.mark.parametrize("zone", ["America/Phoenix", "America/New_York", "Asia/Tokyo"])
+def test_the_launch_writes_no_tz(zone):
+    """B: the requirement changed with the firefox-50 engine
+    (28-valori-dell-host.md, the firefox-50 plan, point 6). Until then this
+    file asserted a POSIX TZ for a session with a zone, and that TZ was the
+    defect: on Windows no value satisfies both the C runtime and ICU, so
+    America/Phoenix gave the machine's zone in a Worker ([B334]). The engine
+    now takes the zone from juggler.timezone.override in every realm. The
+    known-bad input is a session WITH a zone, the only case that wrote one;
+    the deprecated keyword still answers, warns, and writes nothing."""
+    with pytest.warns(DeprecationWarning, match="does nothing"):
+        env = build_launch_env({"juggler.timezone.override": zone},
+                               timezone=zone, base_env={})
+    assert "TZ" not in env, "the launch wrote TZ: %r" % env.get("TZ")
+    prefs = compose_session_prefs(generate_profile(seed=7), locale="en-US",
+                                  timezone=zone).prefs
+    assert prefs["juggler.timezone.override"] == zone, (
+        "positive reality: the zone is declared, in the one place the engine reads")
+
+
+def test_tz_env_is_deprecated_and_does_nothing():
+    """B: the owner's decision for firefox-50 - `tz_env` stays one release,
+    deprecated and a no-op, then goes. The table it read is gone: Phoenix, the
+    row that existed because a wrong TZ moved a session's origin, comes back
+    unchanged."""
+    import invisible_core
+
+    with pytest.warns(DeprecationWarning, match="tz_env is deprecated"):
+        assert invisible_core.tz_env("America/Phoenix") == "America/Phoenix"
+    assert not hasattr(invisible_core, "IANA_TO_POSIX_TZ")
 
 
 def test_build_launch_env_applies_the_surface_env_over_a_cleared_slot():

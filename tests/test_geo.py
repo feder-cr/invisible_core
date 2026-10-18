@@ -779,8 +779,7 @@ def test_without_a_proxy_the_engine_gets_neither_srflx_nor_ipv6_filter(monkeypat
     geo = _geo.prepare_session_geo("auto", None)
 
     assert geo.egress_ip == "203.0.113.7", "the fact has to be in hand"
-    env = build_launch_env({}, timezone=geo.timezone or None,
-                           srflx_declared=geo.srflx_to_declare(),
+    env = build_launch_env({}, srflx_declared=geo.srflx_to_declare(),
                            base_env={})
 
     assert "STEALTHFOX_WEBRTC_PUBLIC_IP" not in env, (

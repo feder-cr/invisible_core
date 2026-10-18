@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -76,32 +77,26 @@ def write_user_js(profile_dir: "str | os.PathLike[str]", prefs: Dict[str, Any]) 
     return out
 
 
-# IANA→POSIX TZ map - copied verbatim from the wrapper's launcher.py so the
-# libc TZ env matches Date/Intl exactly (Arizona/Hawaii have no DST).
-_IANA_TO_POSIX_TZ: Dict[str, str] = {
-    "America/New_York":             "EST5EDT",
-    "America/Detroit":              "EST5EDT",
-    "America/Indiana/Indianapolis": "EST5EDT",
-    "America/Kentucky/Louisville":  "EST5EDT",
-    "America/Chicago":              "CST6CDT",
-    "America/Denver":               "MST7MDT",
-    "America/Los_Angeles":          "PST8PDT",
-    "America/Phoenix":              "MST7",
-    "America/Anchorage":            "AKST9AKDT",
-    "Pacific/Honolulu":             "HST10",
-}
-
-
 def tz_env(timezone: str) -> str:
-    """The value to put in ``TZ`` for an IANA zone.
+    """DEPRECATED, and it does nothing: returns ``timezone`` unchanged. It
+    goes in the next release.
 
-    PUBLIC since 18.5.0. It was private, so the wrapper kept its own byte-identical
-    copy of both this and the table - and the core's own comment admitted the table
-    was "copied verbatim from the wrapper". A private name is not a reason to
-    duplicate ten entries whose Phoenix row exists because getting it wrong made an
-    identification service deduce the wrong origin timezone.
+    It mapped an IANA zone to the ``TZ`` the launch put in the browser's
+    environment, so that the C runtime and ICU agreed with Date and Intl. From
+    the firefox-50 engine nothing a page can reach reads ``TZ``: every realm,
+    worker and worklet, ``document.lastModified`` and EXSLT's date take the
+    zone from ``juggler.timezone.override`` and the context's own
+    (``_apply_timezone``), and the launch no longer writes ``TZ`` at all. The
+    table was also the defect: on Windows no value of ``TZ`` satisfies both the
+    C runtime and ICU, so America/Phoenix gave the machine's zone in a Worker
+    ([B334]), and the zones outside the table were never covered.
     """
-    return _IANA_TO_POSIX_TZ.get(timezone, timezone)
+    warnings.warn(
+        "invisible_core.tz_env is deprecated and does nothing: the engine reads "
+        "the session's zone from juggler.timezone.override, not from TZ. It "
+        "will be removed in the next release.",
+        DeprecationWarning, stacklevel=2)
+    return timezone
 
 
 #: The display backend of EVERY session, hidden or headed (A9 of
@@ -115,13 +110,6 @@ def tz_env(timezone: str) -> str:
 #: `sys.platform` branch: the Windows build has no GTK and reads neither, and
 #: one environment for both builds is the thing that cannot drift.
 _DISPLAY_BACKEND = {"MOZ_ENABLE_WAYLAND": "0", "GDK_BACKEND": "x11"}
-
-
-#: The private name kept as an alias, not a second body. It was byte-identical
-#: to `tz_env` above - two definitions of a ten-entry table lookup whose Phoenix
-#: row exists because getting it wrong made an identification service deduce the
-#: wrong origin timezone. Nothing outside this module should reach for it.
-_tz_env = tz_env
 
 
 def build_launch_env(
@@ -154,8 +142,12 @@ def build_launch_env(
     and the hidden-surface half of the contract lived only in the twin, so a
     consumer on this builder could not express a removal at all.
 
-    TZ tunes the libc clock. STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy
-    egress IP; an already-set value in base_env wins.
+    STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy egress IP; an
+    already-set value in base_env wins.
+
+    No ``TZ``: the engine takes the session's zone from the prefs
+    (``juggler.timezone.override``) in every realm, and ``timezone=`` is
+    accepted for one release only to warn that it does nothing (``tz_env``).
 
     STEALTHFOX_FONT_MANIFEST points the engine at the font manifest THIS package
     declares, and it has to be an env var rather than the pref of the same name:
@@ -172,9 +164,13 @@ def build_launch_env(
     engine on its packaged copy - the floor a browser launched without this
     package still has to stand on.
     """
+    if timezone is not None:
+        warnings.warn(
+            "build_launch_env(timezone=...) is deprecated and does nothing: the "
+            "engine reads the session's zone from juggler.timezone.override, not "
+            "from TZ. It will be removed in the next release.",
+            DeprecationWarning, stacklevel=2)
     env = dict(os.environ if base_env is None else base_env)
-    if timezone:
-        env["TZ"] = _tz_env(timezone)
     if manifest_path is not None:
         # An already-set value in base_env wins, same rule as the WebRTC IP:
         # an A/B harness has to be able to point this somewhere else.
@@ -438,8 +434,7 @@ def build_launch_plan(
     ).prefs
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)
-    env = build_launch_env(prefs, timezone=geo.timezone or None,
-                           srflx_declared=geo.srflx_to_declare())
+    env = build_launch_env(prefs, srflx_declared=geo.srflx_to_declare())
     argv = [binary, "-no-remote", "-profile", str(pdir)]
     argv += list(extra_args or [])
     if url:

@@ -1662,10 +1662,13 @@ def _apply_timezone(prefs: Dict[str, Any], timezone: Optional[str]) -> None:
             "prepare_session_geo(timezone, proxy, locale).timezone decided "
             "from the exit, or an IANA name such as America/New_York"
             % (timezone,))
-    # juggler.timezone.override is the SOLE source of truth read by the C++
-    # timezone chain (BrowsingContext::Attach/DidSet, ContentChild). The old
-    # zoom.stealth.timezone pref was declared in the yaml but read by NO
-    # code - dropped here on 2026-06-10 (see 20-our-patches.md section 8).
+    # juggler.timezone.override is the SOLE source of the session's zone: from
+    # the firefox-50 engine one reader (intl/locale/StealthSessionPrefs.h)
+    # gives it to every realm, worker and worklet whose context declares no
+    # zone of its own, and to document.lastModified and EXSLT's date; the
+    # launch writes no TZ. The old zoom.stealth.timezone pref was declared in
+    # the yaml but read by NO code - dropped here on 2026-06-10 (see
+    # 20-our-patches.md section 8).
     prefs["juggler.timezone.override"] = zone
 
 

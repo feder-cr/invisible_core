@@ -122,7 +122,12 @@ CONTRACT = {
         # worktree never has, so it went unread until 2026-10-17, when a
         # worktree of each client happened to sit next to one of the core.
         "record_session_seed", "resolve_session_seed",
-        "IANA_TO_POSIX_TZ", "_geo", "_headless", "_proxy",
+        # `IANA_TO_POSIX_TZ` LEFT with the firefox-50 pin, and the table with
+        # it: the launch writes no TZ, and the engine takes the zone from the
+        # prefs in every realm. BREAKING for a consumer that still imports it:
+        # the wrapper drops its import in the release that moves its pin here.
+        # `tz_env` stays one release, deprecated and doing nothing.
+        "_geo", "_headless", "_proxy",
         "_webgl_personas", "config",
         "configure_proxy", "constants", "download", "ensure_binary",
         # ⛔ The endpoint READER, and it is here because the consumer imports it
