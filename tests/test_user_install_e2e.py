@@ -66,10 +66,14 @@ REPO = "invisible_core"
 # test_release_e2e.py strips the same variables, for the same measured reason.
 # A copy of `invisible_core.install_job.LEAKS`, which this file cannot import;
 # the gate checks that it covers it ([B349]).
-_LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "INVISIBLE_SEAL_FILE",
-          "INVISIBLE_CORE_AUTOFIX", "INVISIBLE_CORE_AUTOFIX_ATTEMPTED",
-          "INVISIBLE_CORE_PIN", "UV", "INVISIBLE_PLAYWRIGHT_ENGINE_DIR",
-          "INVISIBLE_PLAYWRIGHT_CACHE_DIR")
+_LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+          "INVISIBLE_PLAYWRIGHT_ENGINE_DIR", "INVISIBLE_PLAYWRIGHT_CACHE_DIR",
+          "INVISIBLE_DOWNLOAD_DEADLINE", "STEALTHFOX_GITHUB_TOKEN", "GITHUB_TOKEN",
+          "INVISIBLE_SEAL_FILE", "INVISIBLE_CORE_PIN", "INVISIBLE_CORE_AUTOFIX",
+          "INVISIBLE_CORE_AUTOFIX_TIMEOUT", "UV", "STEALTHFOX_GEOIP_MMDB",
+          "STEALTHFOX_FONT_MANIFEST", "STEALTHFOX_WEBRTC_PUBLIC_IP",
+          "INVPW_CURSOR_TIMER", "INVISIBLE_CORE_AUTOFIX_ATTEMPTED",
+          "INVPW_SESSION_TOKEN", "INVPW_DESKTOP", "STEALTHFOX_WEBRTC_DISABLE_IPV6")
 
 
 def _run(cmd, *, timeout: int = 600, check: bool = True, env=None, cwd=None):

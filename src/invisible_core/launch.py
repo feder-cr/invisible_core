@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import environment
 from ._headless import DESKTOP_ENV
 
 
@@ -174,16 +175,16 @@ def build_launch_env(
     if manifest_path is not None:
         # An already-set value in base_env wins, same rule as the WebRTC IP:
         # an A/B harness has to be able to point this somewhere else.
-        env.setdefault("STEALTHFOX_FONT_MANIFEST", str(manifest_path))
-    webrtc_ip = env.get("STEALTHFOX_WEBRTC_PUBLIC_IP") or srflx_declared
+        env.setdefault(environment.FONT_MANIFEST, str(manifest_path))
+    webrtc_ip = env.get(environment.WEBRTC_PUBLIC_IP) or srflx_declared
     if webrtc_ip:
-        env["STEALTHFOX_WEBRTC_PUBLIC_IP"] = webrtc_ip
+        env[environment.WEBRTC_PUBLIC_IP] = webrtc_ip
         # SOLO dietro un proxy. Un Firefox retail dual-stack emette un srflx
         # IPv6 con l'indirizzo globale VERO in chiaro (l'mDNS offusca solo gli
         # hosts): behind an IPv4 proxy that would be a leak and an inconsistency,
         # without a proxy it is simply what an ordinary browser does. Measured
         # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
-        env["STEALTHFOX_WEBRTC_DISABLE_IPV6"] = "1"
+        env[environment.WEBRTC_DISABLE_IPV6] = "1"
     env.update(_DISPLAY_BACKEND)
     env.pop(DESKTOP_ENV, None)
     for k, v in (display_env or {}).items():

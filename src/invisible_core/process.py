@@ -74,6 +74,8 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Iterable, List, Mapping, Optional
 
+from . import environment
+
 # Named in the environment of every process in the tree, read back through
 # psutil. The browser itself never looks at it.
 #
@@ -81,7 +83,7 @@ from typing import Any, Iterable, List, Mapping, Optional
 # wrapper, and the published wrapper reads exactly this name; renaming it would
 # make an already-shipped client and a newer core disagree about which processes
 # belong to a session - which is the one disagreement a reaper must not have.
-TOKEN_VAR = "INVPW_SESSION_TOKEN"
+TOKEN_VAR = environment.SESSION_TOKEN
 
 try:  # psutil is a declared dependency; guarded so that an import problem in a
     # user's environment degrades to a Null guard rather than breaking launch.

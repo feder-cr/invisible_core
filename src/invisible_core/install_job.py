@@ -48,7 +48,9 @@ import re
 import subprocess
 import sys
 
-WORKFLOW = pathlib.Path(".github") / "workflows" / "user-install.yml"
+from . import environment
+
+WORKFLOW =pathlib.Path(".github") / "workflows" / "user-install.yml"
 LEDGER = "PUBLISHED.json"
 WAIT_STEP = "wait for the index"
 
@@ -62,23 +64,20 @@ _DEADLINE = re.compile(r"deadline\s*=\s*time\.monotonic\(\)\s*\+\s*\d+")
 #: `INVISIBLE_CORE_AUTOFIX=off` in the caller's environment, the wrapper's
 #: test that measures the repair at import ran with the repair switched off
 #: and failed, while the core's own copy already stripped that variable.
-LEAKS = (
+#:
+#: The interpreter's own variables, then every variable the library reads,
+#: from its one list (`environment.READ`): an engine already in the folder
+#: INVISIBLE_PLAYWRIGHT_ENGINE_DIR names makes the README's fetch download
+#: nothing, a GITHUB_TOKEN sends the fetch through the API instead of the
+#: direct link a user without one gets. A test that wants its own value sets it
+#: AFTER the cleanup. The e2e harness's INVPW_BINARY_PATH is not here: the
+#: library never reads it (item 82).
+INTERPRETER = (
     "PYTHONPATH",                       # the venv's python imports a checkout
     "PYTHONHOME",
     "VIRTUAL_ENV",                      # another environment's
-    "INVISIBLE_SEAL_FILE",              # a local seal instead of the package's
-    "INVISIBLE_CORE_AUTOFIX",           # the pin repair switched off, or forced
-    "INVISIBLE_CORE_AUTOFIX_ATTEMPTED",
-    "INVISIBLE_CORE_PIN",               # a mismatched pair allowed to run
-    "UV",                               # another uv than the one a user runs
-    # Read by the library (engine_root, cache_root): an engine already in that
-    # folder makes the README's fetch download nothing, so the test would
-    # measure an install a user does not get. A test that wants its own cache
-    # sets it AFTER the cleanup. INVPW_BINARY_PATH is not here: the library
-    # never reads it, only the e2e harness, which sets it itself (item 82).
-    "INVISIBLE_PLAYWRIGHT_ENGINE_DIR",
-    "INVISIBLE_PLAYWRIGHT_CACHE_DIR",
 )
+LEAKS = INTERPRETER + environment.READ
 
 _TEST_FILE = re.compile(r"tests/[A-Za-z0-9_./-]+\.py")
 

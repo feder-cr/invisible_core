@@ -51,6 +51,8 @@ import sys
 from importlib.metadata import PackageNotFoundError, distribution
 from typing import List, Optional, Sequence
 
+from . import environment
+
 #: The INSTALLER record uv writes, and the executable the command starts with.
 UV = "uv"
 
@@ -85,5 +87,5 @@ def runnable(cmd: Sequence[str]) -> Optional[List[str]]:
     cmd = list(cmd)
     if not cmd or cmd[0] != UV:
         return cmd
-    found = os.environ.get("UV") or shutil.which(UV)
+    found = os.environ.get(environment.UV) or shutil.which(UV)
     return [found, *cmd[1:]] if found else None

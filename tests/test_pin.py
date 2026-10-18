@@ -23,6 +23,7 @@ labelled as such.
 """
 from __future__ import annotations
 
+import ast
 import importlib
 import json
 import os
@@ -103,6 +104,9 @@ def make_core(
     # record of the environment (49.45.0). Copied for the same reason as _env.py:
     # a stub without it raises on the first message, which is not a real install.
     shutil.copy2(REAL_PKG / "installer.py", pkg / "installer.py")
+    # environment.py names every variable the library reads (50.48.0); pin.py
+    # and installer.py take their names from it.
+    shutil.copy2(REAL_PKG / "environment.py", pkg / "environment.py")
     if with_version:
         text = (REAL_PKG / "_version.py").read_text(encoding="utf-8")
         text = re.sub(r"(?m)^CORE_REVISION\s*=\s*\d+", f"CORE_REVISION = {revision}", text)
@@ -1364,14 +1368,24 @@ def test_the_stub_carries_every_module_pin_imports(tmp_path):
     import y` in pin.py fails here until the stub carries x.
     """
     pkg = make_core(tmp_path / "site" / "site-packages")
-    source = (REAL_PKG / "pin.py").read_text(encoding="utf-8")
-    needed = set(re.findall(r"(?m)^\s*from \.(\w+) import", source))
-    assert needed, "the import scan found nothing - the regex stopped matching"
+    needed = set()
+    for module in sorted(pkg.glob("*.py")):
+        if module.name == "__init__.py":
+            continue    # the stub's own, not the shipped one
+        # Both forms, read from the module: `from .x import y` and
+        # `from . import x` (the second went unseen when pin.py started
+        # importing the environment registry).
+        tree = ast.parse((REAL_PKG / module.name).read_bytes())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 1:
+                needed |= ({node.module.split(".")[0]} if node.module
+                           else {alias.name for alias in node.names})
+    assert needed, "the import scan found nothing"
     missing = sorted(m for m in needed if not (pkg / f"{m}.py").exists())
     assert not missing, (
-        f"pin.py imports {missing} and make_core does not copy them, so those "
-        f"imports raise in every synthetic site and the code under test silently "
-        f"takes its fallback branch")
+        f"the stub's modules import {missing} and make_core does not copy them, "
+        f"so those imports raise in every synthetic site and the code under test "
+        f"silently takes its fallback branch")
 
 
 def test_a_marker_false_on_this_host_is_not_a_violated_pin():
