@@ -7,11 +7,13 @@ verdict back. A case that cannot fail is not a check, so every one of them is a
 known-bad input that has to be caught, beside the known-good one it must leave
 alone.
 
-The engine is never started: the spawn functions are replaced by ones that raise
-`SPAWNED`, so a test that gets past the guard says so instead of opening a
-browser on the machine that runs the suite ([B345]: on 2026-10-17 a guard that
-watched `subprocess.Popen` let about 400 browsers start, because on Windows the
-core spawns through `CreateProcessW` and ctypes).
+The engine is never started: every executable these cases name is a file that
+does not exist, so a spawn that got past the guard fails on the missing file
+instead of opening a browser on the machine that runs the suite ([B345]: on
+2026-10-17 a guard that watched `subprocess.Popen` let about 400 browsers
+start, because on Windows the core spawns through `CreateProcessW` and ctypes).
+The spawns themselves are NOT replaced: the event is raised inside them, so a
+replaced spawn would declare nothing and prove nothing.
 """
 from __future__ import annotations
 
@@ -29,28 +31,12 @@ _SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "invisible_core"
 CONFTEST = 'pytest_plugins = ["invisible_core.testing.world"]\n'
 INI = "[pytest]\nmarkers =\n    e2e: needs the world\naddopts = -p no:cacheprovider\n"
 
-#: Replaces both spawn functions in an inner session, at the conftest's import:
-#: before any fixture, whatever its scope (a module-scoped fixture is set up
-#: before a function-scoped autouse one, so a fixture would come too late).
-#: Getting as far as one of them means the guard did not stop the launch.
-STUB_SPAWN = textwrap.dedent('''
-    from invisible_core.juggler import connection
-
-    class Spawned(Exception):
-        pass
-
-    def _spawned(*args):
-        raise Spawned("SPAWNED")
-
-    connection._spawn_windows = _spawned
-    connection._spawn_posix = _spawned
-''')
 
 
 def _session(tmp_path: pathlib.Path, tests: str, *args: str,
              autoload: bool = False) -> subprocess.CompletedProcess:
     (tmp_path / "pytest.ini").write_bytes(INI.encode())
-    (tmp_path / "conftest.py").write_bytes((CONFTEST + STUB_SPAWN).encode())
+    (tmp_path / "conftest.py").write_bytes(CONFTEST.encode())
     (tmp_path / "test_inner.py").write_bytes(textwrap.dedent(tests).encode())
     env = dict(os.environ)
     if not autoload:
@@ -80,11 +66,12 @@ def test_a_default_test_cannot_start_the_engine(tmp_path):
         from invisible_core.juggler import connection
 
         def test_launches(tmp_path):
-            connection.launch(str(tmp_path / "firefox.exe"), str(tmp_path))
+            connection.launch(str(tmp_path / "missing" / "firefox.exe"), str(tmp_path))
     ''')
     assert r.returncode == 1, _out(r)
     assert "WorldRefused" in _out(r) and "start the engine" in _out(r), _out(r)
-    assert "SPAWNED" not in _out(r), "the launch got past the guard:\n" + _out(r)
+    for spawned in ("FileNotFoundError", "CreateProcessW failed"):
+        assert spawned not in _out(r), "the launch got past the guard:\n" + _out(r)
 
 
 def test_a_default_test_cannot_spawn_a_program_named_like_the_engine(tmp_path):
@@ -99,16 +86,33 @@ def test_a_default_test_cannot_spawn_a_program_named_like_the_engine(tmp_path):
     assert "FileNotFoundError" not in _out(r), "the spawn was attempted:\n" + _out(r)
 
 
-@pytest.mark.parametrize("cls", ["_LinuxVirtualDisplay", "_WindowsVirtualDesktop"])
-def test_a_default_test_cannot_start_a_display(tmp_path, cls):
-    r = _session(tmp_path, f'''
-        from invisible_core import _headless
+def test_a_default_test_cannot_start_a_display_server(tmp_path):
+    """Xvfb is a process: Python's own `subprocess.Popen` event names it."""
+    r = _session(tmp_path, '''
+        import subprocess
 
-        def test_display():
-            _headless.{cls}().start()
+        def test_display(tmp_path):
+            subprocess.Popen([str(tmp_path / "Xvfb"), ":99"])
     ''')
     assert r.returncode == 1, _out(r)
     assert "WorldRefused" in _out(r) and "start a display" in _out(r), _out(r)
+    assert "FileNotFoundError" not in _out(r), "the spawn was attempted:\n" + _out(r)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="a Win32 desktop")
+def test_a_hidden_desktop_is_not_the_world(tmp_path):
+    """`CreateDesktopW` starts no process and reaches no network: an object of
+    the logon session, released at stop. The tests that make one stay in the
+    default selection."""
+    r = _session(tmp_path, '''
+        from invisible_core import _headless
+
+        def test_desktop():
+            desktop = _headless._WindowsVirtualDesktop()
+            desktop.start()
+            desktop.stop()
+    ''')
+    assert r.returncode == 0, _out(r)
 
 
 def test_a_default_test_cannot_reach_the_network_but_loopback_is_open(tmp_path):
@@ -175,8 +179,8 @@ E2E = '''
         try:
             where = tmp_path_factory.mktemp("p")
             connection.launch(str(where / "missing" / "firefox.exe"), str(where))
-        except Exception as e:
-            assert "SPAWNED" in str(e), e    # allowed: it reached the spawn
+        except OSError:
+            pass    # allowed: it reached the spawn, which found no such file
         return "launched"
 
     @pytest.mark.e2e
@@ -259,26 +263,37 @@ def _core_functions() -> dict:
     return out
 
 
-#: Each way the core starts the engine or a display, and the one function
-#: allowed to reach it.
+#: Each way the core starts the engine, and the one function allowed to reach it.
 OWNERS = {
     "_spawn_windows": "juggler/connection.py::launch",
     "_spawn_posix": "juggler/connection.py::launch",
     "CreateProcessW": "juggler/connection.py::_spawn_windows",
-    "CreateDesktopW": "_headless.py::_WindowsVirtualDesktop.start",
 }
 
 
-def test_the_core_starts_the_engine_and_a_display_only_where_it_says_so():
-    """A spawn outside `launch`, or a desktop outside the class that declares
-    it, would be invisible to the plugin: `CreateProcessW` and `CreateDesktopW`
-    through ctypes raise no event of their own, so the core's own event has to
-    be on the only road to them."""
+def _audit_line(fn) -> int:
+    return min(n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
+               and isinstance(n.func, ast.Attribute) and n.func.attr == "audit"
+               and n.args and isinstance(n.args[0], ast.Name)
+               and n.args[0].id == "LAUNCH_EVENT")
+
+
+def _first_call_line(fn, name: str) -> int:
+    return min(n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
+               and ((isinstance(n.func, ast.Attribute) and n.func.attr == name)
+                    or (isinstance(n.func, ast.Name) and n.func.id == name)))
+
+
+def test_the_core_starts_the_engine_only_where_it_says_so():
+    """A spawn outside `launch`'s two would be invisible to the plugin:
+    `CreateProcessW` through ctypes raises no event of its own. So each of the
+    two raises the core's event, before the call that creates the process."""
     functions = _core_functions()
     for word, owner in OWNERS.items():
         reached_by = {name for name, fn in functions.items()
                       if name.split("::")[1] != word and _mentions(fn, word)}
         assert reached_by == {owner}, (word, sorted(reached_by))
-    assert _audits(functions["juggler/connection.py::launch"], "LAUNCH_EVENT")
-    assert _audits(functions["_headless.py::_WindowsVirtualDesktop.start"], "DISPLAY_EVENT")
-    assert _audits(functions["_headless.py::_LinuxVirtualDisplay.start"], "DISPLAY_EVENT")
+    windows = functions["juggler/connection.py::_spawn_windows"]
+    posix = functions["juggler/connection.py::_spawn_posix"]
+    assert _audit_line(windows) < _first_call_line(windows, "CreateProcessW")
+    assert _audit_line(posix) < _first_call_line(posix, "Popen")

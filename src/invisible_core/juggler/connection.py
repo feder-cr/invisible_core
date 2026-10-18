@@ -813,6 +813,15 @@ def _spawn_windows(executable, argv, env):
     pipe whose write end is closed at once (EOF, and a PIPE type), and stderr
     is its own duplicate of the stdout pipe.
     """
+    # ⛔ THE ENGINE IS DECLARED WHERE IT STARTS. On Windows the spawn is
+    # `CreateProcessW` through ctypes, which raises none of the audit events
+    # Python raises for `subprocess`, so a guard that watched `subprocess.Popen`
+    # let about 400 real browsers start on 2026-10-17 while it was meant to
+    # refuse every one ([B345]). Raised here and not at the top of `launch`, so
+    # a test that replaces this function starts nothing and declares nothing;
+    # `invisible_core.testing.world` refuses it outside an e2e test, and a hook
+    # that raises stops the spawn before anything is created.
+    sys.audit(LAUNCH_EVENT, executable, argv)
     import ctypes
     import msvcrt
     import _winapi
@@ -985,6 +994,15 @@ def _spawn_posix(executable, argv, env):
     in the parent and do not have to be: that list is a set of NUMBERS the
     child's sweep spares, not a set of parent handles.
     """
+    # ⛔ THE ENGINE IS DECLARED WHERE IT STARTS. On Windows the spawn is
+    # `CreateProcessW` through ctypes, which raises none of the audit events
+    # Python raises for `subprocess`, so a guard that watched `subprocess.Popen`
+    # let about 400 real browsers start on 2026-10-17 while it was meant to
+    # refuse every one ([B345]). Raised here and not at the top of `launch`, so
+    # a test that replaces this function starts nothing and declares nothing;
+    # `invisible_core.testing.world` refuses it outside an e2e test, and a hook
+    # that raises stops the spawn before anything is created.
+    sys.audit(LAUNCH_EVENT, executable, argv)
     its_read, our_write = os.pipe()
     our_read, its_write = os.pipe()
 
@@ -1024,8 +1042,9 @@ def _spawn_posix(executable, argv, env):
     return our_write, our_read, p
 
 
-#: The audit event `launch` raises before the engine is spawned, with the
-#: executable and its arguments (`invisible_core.testing.world` reads it).
+#: The audit event the engine's two spawns raise before the process is
+#: created, with the executable and its arguments
+#: (`invisible_core.testing.world` reads it).
 LAUNCH_EVENT = "invisible_core.engine.launch"
 
 
@@ -1062,16 +1081,6 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     argv.append("-silent")
 
     full_env = dict(os.environ if env is None else env)
-    # ⛔ THE ENGINE STARTS HERE AND NOWHERE ELSE, AND SAYS SO. Every client
-    # launches through this function, and on Windows the spawn below is
-    # `CreateProcessW` called through ctypes, which raises none of the audit
-    # events Python raises for `subprocess`. So a guard that watched
-    # `subprocess.Popen` let about 400 real browsers start on 2026-10-17 while
-    # it was meant to refuse every one of them. The event is the core's own
-    # declaration of the spawn, whatever mechanism carries it out, and
-    # `invisible_core.testing.world` refuses it in a test that is not marked e2e. A
-    # hook that raises stops the launch before anything is spawned.
-    sys.audit(LAUNCH_EVENT, executable, argv)
     spawn = _spawn_windows if sys.platform == "win32" else _spawn_posix
     to_browser, from_browser, p = spawn(executable, argv, full_env)
 

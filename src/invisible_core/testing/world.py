@@ -20,10 +20,13 @@ audit hook (PEP 578), and lets each test reach the world only if it is marked
 e2e:
 
 * the engine: the core's own `invisible_core.engine.launch` event, raised by
-  `juggler.connection.launch` before it spawns - on Windows that spawn is
-  `CreateProcessW` through ctypes, which no `subprocess` event sees - and any
-  spawn of a program named like the engine;
-* a display: `invisible_core.display.start`, and any spawn of Xvfb;
+  the two spawns `juggler.connection.launch` uses, where the process is
+  created - on Windows that is `CreateProcessW` through ctypes, which no
+  `subprocess` event sees - and any spawn of a program named like the engine;
+* a display server: a spawn of Xvfb, which Python's own `subprocess` event
+  shows. A Windows hidden desktop is not one: `CreateDesktopW` starts no
+  process and reaches no network, it is an object of the logon session
+  released at stop, so the tests that make one stay in the default selection;
 * the network: a connection, a datagram or a name lookup that is not loopback.
   A local test server is inside this process's world, so loopback stays open.
 
@@ -51,7 +54,6 @@ from typing import Dict, List, Optional
 
 import pytest
 
-from .._headless import DISPLAY_EVENT
 from ..juggler.connection import LAUNCH_EVENT as ENGINE_EVENT
 
 #: Spawned under these names, a program is the engine or a display.
@@ -62,7 +64,7 @@ _SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.spawn",
 _ADDRESS_EVENTS = frozenset({"socket.connect", "socket.sendto"})
 _NAME_EVENTS = frozenset({"socket.getaddrinfo", "socket.gethostbyname",
                           "socket.gethostbyaddr"})
-_WATCHED = (frozenset({ENGINE_EVENT, DISPLAY_EVENT}) | _SPAWN_EVENTS
+_WATCHED = (frozenset({ENGINE_EVENT}) | _SPAWN_EVENTS
             | _ADDRESS_EVENTS | _NAME_EVENTS)
 
 #: The user property a call report carries when an e2e test touched nothing.
@@ -158,8 +160,6 @@ class _World:
             return
         if event == ENGINE_EVENT:
             self.touch("start the engine (%s)" % (args[0],))
-        elif event == DISPLAY_EVENT:
-            self.touch("start a display (%s)" % (args[0],))
         elif event in _SPAWN_EVENTS:
             program = _program(event, args)
             if program in _ENGINE_PROGRAMS:

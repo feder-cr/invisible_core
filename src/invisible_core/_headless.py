@@ -204,11 +204,6 @@ def _read_ready_line(fd: int, timeout: float) -> str | None:
     return buf.decode("ascii", errors="replace").strip()
 
 
-#: The audit event a display raises when it starts, with its kind, before
-#: anything is spawned or created (`invisible_core.testing.world` reads it).
-DISPLAY_EVENT = "invisible_core.display.start"
-
-
 class _LinuxVirtualDisplay:
     """Standalone Xvfb instance owned by this InvisiblePlaywright session."""
 
@@ -220,9 +215,6 @@ class _LinuxVirtualDisplay:
         self._auth_file: Optional[str] = None
 
     def start(self) -> None:
-        # Declared before anything is looked up or spawned, like the engine's
-        # launch in `juggler.connection.launch` (`invisible_core.testing.world`).
-        sys.audit(DISPLAY_EVENT, "xvfb")
         if not _binary_on_path("Xvfb"):
             raise RuntimeError(
                 "invisible_playwright headless=True requires Xvfb. "
@@ -483,9 +475,6 @@ class _WindowsVirtualDesktop:
         return self._name
 
     def start(self) -> None:
-        # `CreateDesktopW` goes through ctypes, which no `subprocess` audit
-        # event sees: the core declares the display itself.
-        sys.audit(DISPLAY_EVENT, "desktop")
         import ctypes
         from ctypes import wintypes
 
