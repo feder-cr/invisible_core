@@ -71,6 +71,13 @@ LEAKS = (
     "INVISIBLE_CORE_AUTOFIX_ATTEMPTED",
     "INVISIBLE_CORE_PIN",               # a mismatched pair allowed to run
     "UV",                               # another uv than the one a user runs
+    # Read by the library (engine_root, cache_root): an engine already in that
+    # folder makes the README's fetch download nothing, so the test would
+    # measure an install a user does not get. A test that wants its own cache
+    # sets it AFTER the cleanup. INVPW_BINARY_PATH is not here: the library
+    # never reads it, only the e2e harness, which sets it itself (item 82).
+    "INVISIBLE_PLAYWRIGHT_ENGINE_DIR",
+    "INVISIBLE_PLAYWRIGHT_CACHE_DIR",
 )
 
 _TEST_FILE = re.compile(r"tests/[A-Za-z0-9_./-]+\.py")

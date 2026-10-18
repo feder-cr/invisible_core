@@ -68,7 +68,8 @@ REPO = "invisible_core"
 # the gate checks that it covers it ([B349]).
 _LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "INVISIBLE_SEAL_FILE",
           "INVISIBLE_CORE_AUTOFIX", "INVISIBLE_CORE_AUTOFIX_ATTEMPTED",
-          "INVISIBLE_CORE_PIN", "UV")
+          "INVISIBLE_CORE_PIN", "UV", "INVISIBLE_PLAYWRIGHT_ENGINE_DIR",
+          "INVISIBLE_PLAYWRIGHT_CACHE_DIR")
 
 
 def _run(cmd, *, timeout: int = 600, check: bool = True, env=None, cwd=None):
