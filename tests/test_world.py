@@ -1,0 +1,284 @@
+"""`invisible_core.testing.world`: a test reaches outside this process only when
+it is marked e2e, and an e2e test that never does is reported.
+
+Each case below runs a real pytest session in a temporary directory, with the
+plugin loaded the way a repository loads it (its root conftest), and reads the
+verdict back. A case that cannot fail is not a check, so every one of them is a
+known-bad input that has to be caught, beside the known-good one it must leave
+alone.
+
+The engine is never started: the spawn functions are replaced by ones that raise
+`SPAWNED`, so a test that gets past the guard says so instead of opening a
+browser on the machine that runs the suite ([B345]: on 2026-10-17 a guard that
+watched `subprocess.Popen` let about 400 browsers start, because on Windows the
+core spawns through `CreateProcessW` and ctypes).
+"""
+from __future__ import annotations
+
+import ast
+import os
+import pathlib
+import subprocess
+import sys
+import textwrap
+
+import pytest
+
+_SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "invisible_core"
+
+CONFTEST = 'pytest_plugins = ["invisible_core.testing.world"]\n'
+INI = "[pytest]\nmarkers =\n    e2e: needs the world\naddopts = -p no:cacheprovider\n"
+
+#: Replaces both spawn functions in an inner session, at the conftest's import:
+#: before any fixture, whatever its scope (a module-scoped fixture is set up
+#: before a function-scoped autouse one, so a fixture would come too late).
+#: Getting as far as one of them means the guard did not stop the launch.
+STUB_SPAWN = textwrap.dedent('''
+    from invisible_core.juggler import connection
+
+    class Spawned(Exception):
+        pass
+
+    def _spawned(*args):
+        raise Spawned("SPAWNED")
+
+    connection._spawn_windows = _spawned
+    connection._spawn_posix = _spawned
+''')
+
+
+def _session(tmp_path: pathlib.Path, tests: str, *args: str,
+             autoload: bool = False) -> subprocess.CompletedProcess:
+    (tmp_path / "pytest.ini").write_bytes(INI.encode())
+    (tmp_path / "conftest.py").write_bytes((CONFTEST + STUB_SPAWN).encode())
+    (tmp_path / "test_inner.py").write_bytes(textwrap.dedent(tests).encode())
+    env = dict(os.environ)
+    if not autoload:
+        # Only the plugin under test: an installed plugin must not decide a case.
+        env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    return subprocess.run([sys.executable, "-m", "pytest", "-q", "-rA", *args],
+                          cwd=tmp_path, env=env, capture_output=True, text=True,
+                          timeout=300)
+
+
+def _out(r: subprocess.CompletedProcess) -> str:
+    return r.stdout + r.stderr
+
+
+def _reported(out: str) -> list:
+    """The node ids in the plugin's own section, and nothing after it."""
+    section = out.split("marked e2e, touched nothing", 1)[1]
+    lines = section.splitlines()[1:]
+    return [line.strip() for line in lines[:next(
+        i for i, line in enumerate(lines) if "marked e2e passed without" in line)]]
+
+
+# --- the default selection: refused ------------------------------------------
+
+def test_a_default_test_cannot_start_the_engine(tmp_path):
+    r = _session(tmp_path, '''
+        from invisible_core.juggler import connection
+
+        def test_launches(tmp_path):
+            connection.launch(str(tmp_path / "firefox.exe"), str(tmp_path))
+    ''')
+    assert r.returncode == 1, _out(r)
+    assert "WorldRefused" in _out(r) and "start the engine" in _out(r), _out(r)
+    assert "SPAWNED" not in _out(r), "the launch got past the guard:\n" + _out(r)
+
+
+def test_a_default_test_cannot_spawn_a_program_named_like_the_engine(tmp_path):
+    r = _session(tmp_path, '''
+        import subprocess
+
+        def test_spawns(tmp_path):
+            subprocess.Popen([str(tmp_path / "firefox.exe"), "-version"])
+    ''')
+    assert r.returncode == 1, _out(r)
+    assert "WorldRefused" in _out(r), _out(r)
+    assert "FileNotFoundError" not in _out(r), "the spawn was attempted:\n" + _out(r)
+
+
+@pytest.mark.parametrize("cls", ["_LinuxVirtualDisplay", "_WindowsVirtualDesktop"])
+def test_a_default_test_cannot_start_a_display(tmp_path, cls):
+    r = _session(tmp_path, f'''
+        from invisible_core import _headless
+
+        def test_display():
+            _headless.{cls}().start()
+    ''')
+    assert r.returncode == 1, _out(r)
+    assert "WorldRefused" in _out(r) and "start a display" in _out(r), _out(r)
+
+
+def test_a_default_test_cannot_reach_the_network_but_loopback_is_open(tmp_path):
+    r = _session(tmp_path, '''
+        import socket
+
+        def test_off_loopback():
+            # TEST-NET-3: never routed, so only the guard can answer quickly.
+            socket.create_connection(("203.0.113.1", 9), timeout=5)
+
+        def test_a_name_lookup():
+            socket.getaddrinfo("example.invalid", 80)
+
+        def test_loopback():
+            server = socket.socket()
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            client = socket.create_connection(server.getsockname(), timeout=5)
+            client.close()
+            server.close()
+    ''')
+    out = _out(r)
+    assert "PASSED test_inner.py::test_loopback" in out, out
+    assert "FAILED test_inner.py::test_off_loopback" in out, out
+    assert "FAILED test_inner.py::test_a_name_lookup" in out, out
+    assert out.count("WorldRefused") >= 2 and "timed out" not in out, out
+
+
+def test_a_default_test_that_swallows_the_refusal_still_fails(tmp_path):
+    r = _session(tmp_path, '''
+        import socket
+
+        def test_swallows():
+            try:
+                socket.create_connection(("203.0.113.1", 9), timeout=5)
+            except Exception:
+                pass
+    ''')
+    assert r.returncode == 1, _out(r)
+    assert "invisible_core.testing.world refused" in _out(r), _out(r)
+
+
+def test_nothing_outside_a_test_reaches_the_world(tmp_path):
+    r = _session(tmp_path, '''
+        import socket
+        socket.getaddrinfo("example.invalid", 80)
+
+        def test_never_collected():
+            pass
+    ''')
+    assert r.returncode != 0, _out(r)
+    assert "WorldRefused" in _out(r) and "outside a test" in _out(r), _out(r)
+
+
+# --- e2e: allowed, and judged with --world-report ----------------------------
+
+E2E = '''
+    import subprocess, sys
+    import pytest
+    from invisible_core.juggler import connection
+
+    @pytest.fixture(scope="module")
+    def browser(tmp_path_factory):
+        try:
+            where = tmp_path_factory.mktemp("p")
+            connection.launch(str(where / "missing" / "firefox.exe"), str(where))
+        except Exception as e:
+            assert "SPAWNED" in str(e), e    # allowed: it reached the spawn
+        return "launched"
+
+    @pytest.mark.e2e
+    def test_touches_nothing():
+        assert 1 + 1 == 2
+
+    @pytest.mark.e2e
+    def test_first_on_the_browser(browser):
+        assert browser
+
+    @pytest.mark.e2e
+    def test_second_on_the_same_browser(browser):
+        assert browser    # the launch happened in the first test's setup
+
+    @pytest.mark.e2e
+    def test_starts_a_child():
+        subprocess.run([sys.executable, "-c", "pass"], check=True)
+'''
+
+
+def test_an_e2e_test_that_touches_nothing_is_reported(tmp_path):
+    r = _session(tmp_path, E2E, "--world-report")
+    out = _out(r)
+    assert r.returncode == 1, out
+    assert _reported(out) == ["test_inner.py::test_touches_nothing"], out
+    assert "1 test(s) marked e2e passed without" in out, out
+
+
+def test_the_report_is_asked_for(tmp_path):
+    r = _session(tmp_path, E2E)
+    assert r.returncode == 0, _out(r)
+    assert "touched nothing" not in _out(r), _out(r)
+
+
+def test_the_report_gathers_what_the_workers_saw(tmp_path):
+    pytest.importorskip("xdist")
+    r = _session(tmp_path, E2E, "--world-report", "-p", "xdist", "-n", "2")
+    out = _out(r)
+    assert r.returncode == 1, out
+    assert _reported(out) == ["test_inner.py::test_touches_nothing"], out
+
+
+# --- the core: the engine and the desktop start only where they say so ------
+
+def _functions(path: pathlib.Path):
+    """Module-level functions and methods, once each, by qualified name. A
+    nested function is part of the one it is nested in."""
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node.name, node
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield "%s.%s" % (node.name, item.name), item
+
+
+def _mentions(node, word: str) -> bool:
+    return any((isinstance(n, ast.Name) and n.id == word)
+               or (isinstance(n, ast.Attribute) and n.attr == word)
+               for n in ast.walk(node))
+
+
+def _audits(node, event: str) -> bool:
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr == "audit" and n.args
+               and isinstance(n.args[0], ast.Name) and n.args[0].id == event
+               for n in ast.walk(node))
+
+
+def _core_functions() -> dict:
+    """Every function of the core outside `testing/`, as `module::name`: two
+    modules may each have a `launch`."""
+    out = {}
+    for path in sorted(_SRC.rglob("*.py")):
+        rel = path.relative_to(_SRC)
+        if "testing" in rel.parts:
+            continue
+        for name, fn in _functions(path):
+            out["%s::%s" % (rel.as_posix(), name)] = fn
+    return out
+
+
+#: Each way the core starts the engine or a display, and the one function
+#: allowed to reach it.
+OWNERS = {
+    "_spawn_windows": "juggler/connection.py::launch",
+    "_spawn_posix": "juggler/connection.py::launch",
+    "CreateProcessW": "juggler/connection.py::_spawn_windows",
+    "CreateDesktopW": "_headless.py::_WindowsVirtualDesktop.start",
+}
+
+
+def test_the_core_starts_the_engine_and_a_display_only_where_it_says_so():
+    """A spawn outside `launch`, or a desktop outside the class that declares
+    it, would be invisible to the plugin: `CreateProcessW` and `CreateDesktopW`
+    through ctypes raise no event of their own, so the core's own event has to
+    be on the only road to them."""
+    functions = _core_functions()
+    for word, owner in OWNERS.items():
+        reached_by = {name for name, fn in functions.items()
+                      if name.split("::")[1] != word and _mentions(fn, word)}
+        assert reached_by == {owner}, (word, sorted(reached_by))
+    assert _audits(functions["juggler/connection.py::launch"], "LAUNCH_EVENT")
+    assert _audits(functions["_headless.py::_WindowsVirtualDesktop.start"], "DISPLAY_EVENT")
+    assert _audits(functions["_headless.py::_LinuxVirtualDisplay.start"], "DISPLAY_EVENT")
