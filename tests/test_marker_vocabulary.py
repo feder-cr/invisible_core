@@ -411,6 +411,105 @@ def test_no_install_e2e_file_imports_a_package_the_runner_does_not_have():
         f"helpers local in these files - the duplication is the point.")
 
 
+#: The plugin a repo's root conftest loads so that a test reaches the world
+#: only when it is marked e2e ([B345]).
+_WORLD_PLUGIN = "invisible_core.testing.world"
+
+#: The first core release that ships it: a client pinning it or later must load it.
+_WORLD_SINCE = "50.48.0"
+
+
+def _pins_the_world(root: Path) -> bool:
+    """Whether a client's exact core pin names a release that ships the plugin."""
+    import re
+
+    from packaging.version import Version
+
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return False
+    with path.open("rb") as fh:
+        deps = tomllib.load(fh).get("project", {}).get("dependencies", [])
+    for dep in deps:
+        m = re.match(r"invisible[-_]core\s*==\s*([\w.]+)$", dep.strip())
+        if m:
+            return Version(m.group(1)) >= Version(_WORLD_SINCE)
+    return False
+
+
+def _loads_world(conftest: Path) -> bool:
+    """Whether a conftest's module-level `pytest_plugins` names the plugin.
+    Read from the assignment, not the text: a comment naming the plugin is not
+    the plugin being loaded."""
+    if not conftest.is_file():
+        return False
+    for node in ast.parse(conftest.read_text(encoding="utf-8")).body:
+        if (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", None) == "pytest_plugins" for t in node.targets)
+                and isinstance(node.value, (ast.List, ast.Tuple))):
+            return any(isinstance(e, ast.Constant) and e.value == _WORLD_PLUGIN
+                       for e in node.value.elts)
+    return False
+
+
+def test_the_default_selection_excludes_e2e_and_runs_under_the_world_plugin():
+    """The pre-push runs the default selection, so these two together are what
+    makes it browser-free: e2e is excluded by the marker, and a test that is not
+    marked and still reaches the engine, a display or the network is refused by
+    the plugin before the call happens. Until [B345] only the first half was
+    true, and the wrapper checked it with a test that asserted True.
+
+    This tree, the core, is judged always, from its own pyproject (not the
+    shared checkout's); a client from the release its pin names that ships the
+    plugin (`_WORLD_SINCE`)."""
+    judged = []
+    for repo in _REPOS:
+        root = _SELF if repo == "invisible_core" else _RELEASE / repo
+        if repo != "invisible_core" and not _pins_the_world(root):
+            continue
+        judged.append(repo)
+        with (root / "pyproject.toml").open("rb") as fh:
+            addopts = tomllib.load(fh)["tool"]["pytest"]["ini_options"]["addopts"]
+        assert "not e2e" in addopts, (repo, addopts)
+        assert _loads_world(root / "tests" / "conftest.py"), (
+            "%s does not load %s from tests/conftest.py, so a default test that "
+            "starts the engine runs it on the machine of whoever pushes" % (repo, _WORLD_PLUGIN))
+    assert "invisible_core" in judged
+
+
+def test_every_install_job_blocks_the_world_plugin_its_conftest_loads():
+    """`invisible_core.testing.world` is loaded by a repo's root conftest, and
+    importing it imports invisible_core, which the user-install runner does not
+    have on purpose (the test above). Unblocked, the job would die at
+    collection having run nothing, the 2026-07-28 failure; with
+    `-p no:invisible_core.testing.world` it is never imported. Measured
+    2026-10-18: a blocked `pytest_plugins` entry naming a module that does not
+    exist collects cleanly, and the same entry unblocked is an ImportError.
+
+    Judged on THIS tree for the core, and on the sibling checkouts for the
+    clients, which load the plugin once their pin carries it."""
+    import re
+
+    judged, missing = [], []
+    for repo in _REPOS:
+        root = _SELF if repo == "invisible_core" else _RELEASE / repo
+        wf = root / _USER_INSTALL_WORKFLOW
+        if not wf.is_file() or not _loads_world(root / "tests" / "conftest.py"):
+            continue
+        commands = re.findall(r"python -m pytest(?:[^\n]*\\\n)*[^\n]*",
+                              wf.read_text(encoding="utf-8"))
+        judged.append(repo)
+        for command in commands:
+            if "-p no:" + _WORLD_PLUGIN not in command:
+                missing.append("%s: %s" % (repo, command.splitlines()[0].strip()))
+    assert judged, ("no repo both loads the plugin and runs an install job: "
+                    "this check compared nothing")
+    assert not missing, (
+        "an install job runs pytest without blocking the world plugin its "
+        "conftest loads, so it dies at collection on a runner without "
+        "invisible_core:\n  " + "\n  ".join(missing))
+
+
 def test_every_repo_runs_the_undefined_name_check():
     """F821, F811 and F601 in CI, in all three, or the class comes straight back.
 
