@@ -24,17 +24,19 @@ e2e:
   created - on Windows that is `CreateProcessW` through ctypes, which no
   `subprocess` event sees - and any spawn of a program named like the engine;
 * a display server: a spawn of Xvfb, which Python's own `subprocess` event
-  shows.
-
-A stand-in is neither: a script (`#!`) that the session wrote into its own
-temporary directory and that only borrows the name - the fake `Xvfb` that
-`tests/test_headless.py` puts first on PATH to drive the display's start
-without a display. A real engine or Xvfb is a compiled program, and one
-extracted into a temporary directory is still refused. A Windows hidden desktop is not one: `CreateDesktopW` starts no
+  shows. A Windows hidden desktop is not one: `CreateDesktopW` starts no
   process and reaches no network, it is an object of the logon session
   released at stop, so the tests that make one stay in the default selection;
 * the network: a connection, a datagram or a name lookup that is not loopback.
   A local test server is inside this process's world, so loopback stays open.
+
+A stand-in is neither the engine nor a display: a script (`#!`) that the
+session wrote into its own temporary directory and that only borrows the name,
+like the fake `Xvfb` that `tests/test_headless.py` puts first on PATH to drive
+the display's start without a display. A real engine or Xvfb is a compiled
+program, and one extracted into a temporary directory is still refused. A
+stand-in is judged by where it is and by its first line, not by what it runs:
+the guard ends at its exec, as it does for any child process.
 
 A test that is not marked e2e and tries one of them gets `WorldRefused` from the
 hook, so the call never happens, and the test is reported failed even if it
