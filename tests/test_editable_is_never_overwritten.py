@@ -56,7 +56,10 @@ def test_an_editable_install_is_refused_and_pip_is_never_run(monkeypatch):
     assert result.attempted is False
     assert calls == [], "pip ran against an editable install"
     assert "EDITABLE" in result.reason and r"C:\src\core" in result.reason
-    assert "install -e" in result.reason, (
+    # The command for the tool that installed the core (installer.py): a
+    # written `pip install -e` here is red in the venv uv makes.
+    remedy = _pin.format_command(_pin.install(_pin.CORE_NAME, "-e", r"C:\src\core"))
+    assert remedy in result.reason, (
         "the refusal has to hand back the command that fixes it; a refusal with "
         "no remedy is how a gate gets switched off")
 

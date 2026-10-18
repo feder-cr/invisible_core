@@ -635,7 +635,11 @@ def test_an_undeterminable_version_is_rendered_honestly_not_as_a_pass():
     assert msg, "an undeterminable installed version compared equal to the pin"
     assert "undeterminable" in msg, msg
     assert "None" not in msg, msg
-    assert 'pip install "invisible-core==18.0.0"' in msg
+    # The command for the tool that installed the core, as the test above reads
+    # it: a written `pip install` here is red in the venv uv makes.
+    from invisible_core.installer import install
+
+    assert _pin.format_command(install("invisible-core", "invisible-core==18.0.0")) in msg
 
 
 def test_a_matching_pair_is_silent():
