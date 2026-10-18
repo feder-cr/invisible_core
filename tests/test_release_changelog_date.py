@@ -23,6 +23,30 @@ from invisible_core import release
 pytestmark = pytest.mark.unit
 
 
+class _Clock:
+    """The wait's clock, moved by its own sleep: a bound of minutes is checked
+    in no time, and the polls it made are counted."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = 0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps += 1
+        self.now += seconds
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    c = _Clock()
+    monkeypatch.setattr(release, "_clock", c)
+    monkeypatch.setattr(release, "_sleep", c.sleep)
+    return c
+
+
 def fake_index(monkeypatch, releases):
     """Serve `releases` as the index. Patches the ONE function that fetches.
 
@@ -178,7 +202,7 @@ def test_an_index_that_does_not_know_the_version_leaves_the_file_alone(
 
     assert path.read_bytes() == before
     out = capsys.readouterr().out
-    assert "NOT aligned" in out and "does not serve" in out
+    assert "NOT aligned" in out and "did not serve" in out
 
 
 def test_an_index_that_will_not_answer_leaves_the_file_alone(tmp_path, monkeypatch, capsys):
@@ -291,3 +315,103 @@ def test_the_publish_workflow_stages_the_changelog_it_realigned():
     assert "if [ -f CHANGELOG.md ]; then" in ledger_step, (
         "the staging is unconditional; `git add` on a missing path fails the step "
         "under `bash -e`, and this project has no changelog of its own")
+
+
+# --- record waits for the index ([B348]) ------------------------------------
+
+def _index_serving_after(monkeypatch, answers):
+    """The index answers `answers` in turn: None for "not served yet", an
+    exception to raise, or a date; the last answer repeats."""
+    answers = list(answers)
+    asked = []
+
+    def upload_date(version, url):
+        asked.append(version)
+        answer = answers.pop(0) if len(answers) > 1 else answers[0]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(release, "_index_upload_date", upload_date)
+    return asked
+
+
+def test_record_waits_for_the_index_to_serve_the_upload(tmp_path, monkeypatch, clock, capsys):
+    """invisible-puppeteer 0.9.0: asked four seconds after its upload, the index
+    did not serve it yet and the heading kept the author's date. Asked again
+    until it does, the heading gets the upload's."""
+    asked = _index_serving_after(monkeypatch, [None, None, "2026-09-15"])
+    path = write_changelog(tmp_path, BODY)
+    release._align_changelog_date(tmp_path, "0.16.2", "http://index")
+    assert len(asked) == 3 and clock.sleeps == 2
+    assert b"## [0.16.2] - 2026-09-15" in path.read_bytes()
+
+
+def test_the_wait_is_bounded(monkeypatch, clock):
+    asked = _index_serving_after(monkeypatch, [None])
+    assert release._wait_for_upload_date("0.16.2", "http://index") is None
+    assert clock.now >= release.INDEX_WAIT_SECONDS
+    assert len(asked) == release.INDEX_WAIT_SECONDS // release.INDEX_POLL_SECONDS + 1
+
+
+def test_an_index_that_does_not_answer_is_asked_again_within_the_bound(monkeypatch, clock):
+    _index_serving_after(monkeypatch, [release.GateBroken("timed out"), "2026-09-15"])
+    assert release._wait_for_upload_date("0.16.2", "http://index") == "2026-09-15"
+    assert clock.sleeps == 1
+
+
+def test_an_index_that_never_answers_is_said_so_after_the_bound(monkeypatch, clock):
+    _index_serving_after(monkeypatch, [release.GateBroken("timed out")])
+    with pytest.raises(release.GateBroken, match="timed out"):
+        release._wait_for_upload_date("0.16.2", "http://index")
+    assert clock.now >= release.INDEX_WAIT_SECONDS
+
+
+# --- one changelog check for every package ([B347]) -------------------------
+
+CHANGELOG = "\n".join([
+    "## [Unreleased]", "",
+    "## [0.9.0] - 2026-10-18", "",
+    "## [0.8.0] - 2026-10-17", "",
+    "## [0.7.0] - 2026-10-16", "",
+])
+
+
+@pytest.mark.parametrize("published,in_flight,problem", [
+    ({"0.7.0": "2026-10-16", "0.8.0": "2026-10-17", "0.9.0": "2026-10-18"}, "0.9.0", None),
+    ({"0.7.0": "2026-10-16", "0.8.0": "2026-10-17"}, "0.9.0", None),
+    ({"0.7.0": "2026-10-16", "0.8.0": "2026-10-17"}, "0.8.0", "documented and never published: ['0.9.0']"),
+    ({"0.7.0": "2026-10-16", "0.8.0": "2026-10-18", "0.9.0": "2026-10-18"}, "0.9.0",
+     "0.8.0 says 2026-10-17 the index says 2026-10-18"),
+    ({"0.7.0": "2026-10-16", "0.8.0": "2026-10-17", "0.8.1": "2026-10-17",
+      "0.9.0": "2026-10-18"}, "0.9.0", "published and undocumented: ['0.8.1']"),
+    ({"0.6.0": "2026-10-01", "0.7.0": "2026-10-16", "0.8.0": "2026-10-17",
+      "0.9.0": "2026-10-18"}, "0.9.0", None),
+    ({"0.8.0": "2026-10-17", "0.9.0": "2026-10-18"}, "0.9.0", None),
+], ids=["clean", "the version in flight", "an invention", "misdated",
+        "a release with no heading", "below the floor", "before the first upload"])
+def test_the_changelog_is_judged_against_what_the_index_published(published, in_flight, problem):
+    problems = release.changelog_problems(CHANGELOG, published, in_flight)
+    if problem is None:
+        assert problems == []
+    else:
+        assert any(problem in p for p in problems), problems
+
+
+def test_a_changelog_without_a_heading_is_refused():
+    assert release.changelog_problems("# nothing here", {"1.0.0": "2026-01-01"}, None)
+
+
+def test_the_command_judges_this_project_and_passes_one_without_a_changelog(
+        tmp_path, monkeypatch, capsys):
+    (tmp_path / "pyproject.toml").write_bytes(
+        b'[project]\nname = "invisible-selenium"\nversion = "0.9.0"\n')
+    monkeypatch.setattr(release, "_index_releases", lambda url: {
+        "0.7.0": files_at("2026-10-16T01:00:00Z"),
+        "0.8.0": files_at("2026-10-18T02:33:02Z"),
+    })
+    args = ["--project-root", str(tmp_path), "changelog", "--index-json-url", "http://index"]
+    assert release.main(args) == release.EXIT_OK            # no CHANGELOG.md
+    (tmp_path / "CHANGELOG.md").write_bytes(CHANGELOG.encode())
+    assert release.main(args) == release.EXIT_REFUSED
+    assert "0.8.0 says 2026-10-17 the index says 2026-10-18" in capsys.readouterr().err
