@@ -59,8 +59,16 @@ on:
     # asset, an index mirror lags. Those break users without any commit here,
     # so a run triggered only by pushes would never see them.
     - cron: "05 6 * * *"   # first of the two (three until invisible_firefox was deleted 2026-08-18): the consumer pins this package, so if it is broken on the index its run is noise
-  release:
-    types: [published]
+  # ⛔ THE LEDGER PULL REQUEST, not `release: published` ([B347]). The Release
+  # is created by the publish workflow with GITHUB_TOKEN, and an event that
+  # token causes starts no other workflow: on `release:` this job had never run
+  # at release time. The ledger PR exists only after the upload and `record`,
+  # and merging it waits for this run, so a release does not close before what
+  # it published installs. `python -m invisible_core.install_job` checks the
+  # wiring.
+  pull_request:
+    paths:
+      - PUBLISHED.json
 
 permissions:
   contents: read
@@ -172,7 +180,8 @@ jobs:
           PY
 
       # PyPI does not serve a new version to pip the instant twine finishes, and
-      # this workflow runs on `release:` - which fires seconds after the upload.
+      # this workflow runs on the ledger pull request, which the publish job
+      # opens seconds after the upload.
       # MEASURED 2026-07-28: invisible-firefox 0.2.6 was uploaded, the release was
       # created about forty seconds later, and the pip install below still resolved
       # 0.2.5. The job reported a forgotten publish that had happened two minutes
@@ -183,10 +192,11 @@ jobs:
       # PER-VERSION endpoint is the authority; the aggregate `info.version` lags it
       # by minutes and has its own trap, so this asks for the exact URL.
       #
-      # Only on `release:`. A scheduled or dispatched run is not racing anything,
-      # and a wait there would hide a real absence behind five minutes of polling.
+      # Only on the ledger pull request. A scheduled or dispatched run is not
+      # racing anything, and a wait there would hide a real absence behind five
+      # minutes of polling.
       - name: wait for the index to serve this version
-        if: github.event_name == 'release'
+        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           python - <<'PY'
