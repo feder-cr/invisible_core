@@ -287,8 +287,58 @@ jobs:
             src/invisible_core/branding/official/branding.zip \
             "${{ steps.seal.outputs.version }}" ${{ steps.seal.outputs.platforms }}
 
+  # A DEFAULT TEST REACHES NOTHING OUTSIDE THIS PROCESS, CHILDREN INCLUDED
+  # ([B345]). invisible_core.testing.world refuses the engine, a display and the
+  # network inside the pytest interpreter, and a child process is out of its
+  # sight. This runs the default selection with nothing outside to reach: a
+  # network namespace with only loopback, an empty engine store and cache, no
+  # display. A default test whose child reaches the world fails here instead of
+  # on the machine of whoever pushes. No fallback: if the namespace cannot be
+  # made, or the network still answers inside it, the job is red and says so,
+  # because a run with the network on would be a green that checked nothing.
+  default-selection-stays-inside:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - name: the default selection, with nothing outside this process
+        shell: bash
+        run: |
+          set -o pipefail   # or tee would swallow pytest's exit code
+          empty="$(mktemp -d)"
+          sudo unshare --net -- bash -c '
+            set -e
+            ip link set lo up
+            if python3 -c "import socket; socket.create_connection((\"pypi.org\", 443), timeout=5)" 2>/dev/null; then
+              echo "the network still answers inside the namespace: this would check nothing" >&2
+              exit 3
+            fi
+            exec sudo -u "$1" env -u DISPLAY PATH="$2" HOME="$3" \
+              INVISIBLE_PLAYWRIGHT_CACHE_DIR="$4" INVISIBLE_PLAYWRIGHT_ENGINE_DIR="$4" \
+              python -m pytest -q -rs
+          ' _ "$USER" "$PATH" "$HOME" "$empty" | tee deprived-report.txt
+      - name: Refuse a run in which nothing actually ran
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path("deprived-report.txt").read_text(encoding="utf-8", errors="ignore")
+          m = re.search(r"(\d+) passed", text)
+          passed = int(m.group(1)) if m else 0
+          if passed < 600:
+              print(f"only {passed} test(s) ran (expected at least 600)", file=sys.stderr)
+              sys.exit(1)
+          print(f"{passed} tests ran with nothing outside the process")
+          PY
+
   gate:
-    needs: [tests, msix-host, arm64-host, branding-is-retail, repair-through-the-installer]
+    needs: [tests, msix-host, arm64-host, branding-is-retail, repair-through-the-installer,
+            default-selection-stays-inside]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -299,8 +349,10 @@ jobs:
           echo "arm64-host: ${{ needs.arm64-host.result }}"
           echo "branding-is-retail: ${{ needs.branding-is-retail.result }}"
           echo "repair-through-the-installer: ${{ needs.repair-through-the-installer.result }}"
+          echo "default-selection-stays-inside: ${{ needs.default-selection-stays-inside.result }}"
           test "${{ needs.tests.result }}" = "success"
           test "${{ needs.msix-host.result }}" = "success"
           test "${{ needs.arm64-host.result }}" = "success"
           test "${{ needs.branding-is-retail.result }}" = "success"
           test "${{ needs.repair-through-the-installer.result }}" = "success"
+          test "${{ needs.default-selection-stays-inside.result }}" = "success"
