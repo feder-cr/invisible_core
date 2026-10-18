@@ -25,7 +25,9 @@ WHAT IS CHECKED, in the repository you are standing in:
   * its "wait for the index" step is scoped to that pull request and bounded:
     the index serves a new version some time after the upload, a run that does
     not wait reports a missing publish that happened two minutes earlier, and a
-    wait with no deadline hangs where it should fail.
+    wait with no deadline hangs where it should fail;
+  * every test file it runs keeps the caller's environment out of the venvs it
+    builds: a module-level `_LEAKS` that covers `LEAKS` ([B349]).
 
 Each repository runs this on ITS OWN tree in its own CI, so a change to its
 workflow is judged in the pull request that makes it. The check used to be a
@@ -51,6 +53,27 @@ LEDGER = "PUBLISHED.json"
 WAIT_STEP = "wait for the index"
 
 _DEADLINE = re.compile(r"deadline\s*=\s*time\.monotonic\(\)\s*\+\s*\d+")
+
+#: What, left in the environment of a venv an install test builds, makes it
+#: measure something that is not what a user gets ([B349]). ONE definition. The
+#: install-e2e files cannot import the core (the job's runner has none, on
+#: purpose), so each keeps a copy in a module-level `_LEAKS`, and this gate
+#: checks that the copy covers this. Seven copies had drifted: with
+#: `INVISIBLE_CORE_AUTOFIX=off` in the caller's environment, the wrapper's
+#: test that measures the repair at import ran with the repair switched off
+#: and failed, while the core's own copy already stripped that variable.
+LEAKS = (
+    "PYTHONPATH",                       # the venv's python imports a checkout
+    "PYTHONHOME",
+    "VIRTUAL_ENV",                      # another environment's
+    "INVISIBLE_SEAL_FILE",              # a local seal instead of the package's
+    "INVISIBLE_CORE_AUTOFIX",           # the pin repair switched off, or forced
+    "INVISIBLE_CORE_AUTOFIX_ATTEMPTED",
+    "INVISIBLE_CORE_PIN",               # a mismatched pair allowed to run
+    "UV",                               # another uv than the one a user runs
+)
+
+_TEST_FILE = re.compile(r"tests/[A-Za-z0-9_./-]+\.py")
 
 
 def _indent(line: str) -> int:
@@ -165,6 +188,50 @@ def problems(text: str) -> list:
     return out
 
 
+def install_files(root: pathlib.Path, text: str) -> list:
+    """The test files the workflow runs, read from it rather than listed."""
+    found = []
+    for hit in _TEST_FILE.findall(text):
+        path = root / hit
+        if path.is_file() and path not in found:
+            found.append(path)
+    return found
+
+
+def leak_problems(source: str) -> list:
+    """What an install-e2e file's `_LEAKS` leaves in the environment, read from
+    the module-level assignment, not from the text."""
+    import ast
+    for node in ast.parse(source).body:
+        target = node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+            else getattr(node, "target", None) if isinstance(node, ast.AnnAssign) else None
+        if getattr(target, "id", None) != "_LEAKS":
+            continue
+        value = node.value
+        if not isinstance(value, (ast.Tuple, ast.List)) or not all(
+                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
+            return ["its `_LEAKS` is not a tuple of names"]
+        missing = [name for name in LEAKS if name not in {e.value for e in value.elts}]
+        return ["its `_LEAKS` leaves %s in the venvs it builds" % ", ".join(missing)] \
+            if missing else []
+    return ["it has no module-level `_LEAKS`, so the caller's environment reaches "
+            "the venvs it builds"]
+
+
+def judge(root: pathlib.Path) -> list:
+    """Every problem of this repository's install job, as (where, what)."""
+    path = root / WORKFLOW
+    text = path.read_text(encoding="utf-8")
+    found = [(WORKFLOW.as_posix(), problem) for problem in problems(text)]
+    files = install_files(root, text)
+    if not files:
+        found.append((WORKFLOW.as_posix(), "it runs no test file of this repository"))
+    for test in files:
+        for problem in leak_problems(test.read_text(encoding="utf-8")):
+            found.append((test.relative_to(root).as_posix(), problem))
+    return found
+
+
 def git_root(start: "pathlib.Path | None" = None) -> pathlib.Path:
     """The repository you are standing in: the subject is where the caller is,
     not where this module happens to be installed."""
@@ -217,6 +284,16 @@ KNOWN_BAD = (
     ("a wait scoped to release", _workflow(_GOOD_ON, "release")),
     ("a wait with no deadline", _workflow(_GOOD_ON, bounded=False)),
 )
+KNOWN_BAD_FILES = (
+    ("no _LEAKS", "import os\n\ndef _run(env):\n    return env\n"),
+    ("the wrapper's short list", '_LEAKS = ("PYTHONPATH", "INVISIBLE_SEAL_FILE", "PYTHONHOME")\n'),
+    ("a list built at run time", "_LEAKS = tuple(name for name in NAMES)\n"),
+    ("the names only in a comment", "# PYTHONPATH INVISIBLE_CORE_AUTOFIX\n_LEAKS = ()\n"),
+)
+MUST_NOT_FIRE_FILES = (
+    ("the canonical set, and more", "_LEAKS = %r\n" % (LEAKS + ("EXTRA",),)),
+    ("as a list", "_LEAKS = %r\n" % (list(LEAKS),)),
+)
 MUST_NOT_FIRE = (
     ("the ledger pull request, block list", _workflow(_GOOD_ON)),
     ("the ledger pull request, inline list", _workflow(
@@ -240,14 +317,25 @@ def selftest() -> int:
         print("  %s: %s%s" % ("FALSE POSITIVE" if found else "silent", name,
                               " (%s)" % found[0] if found else ""))
         bad += bool(found)
+    print("--- install-e2e files that MUST be refused ---")
+    for name, text in KNOWN_BAD_FILES:
+        hit = bool(leak_problems(text))
+        print("  %s: %s" % ("killed" if hit else "SURVIVED", name))
+        bad += not hit
+    print("--- install-e2e files that must NOT be refused ---")
+    for name, text in MUST_NOT_FIRE_FILES:
+        found = leak_problems(text)
+        print("  %s: %s" % ("FALSE POSITIVE" if found else "silent", name))
+        bad += bool(found)
     # SILENT on this repository as it stands: a gate born red on what already
     # exists teaches people to bypass it.
     print("--- the real repository ---")
     try:
-        path = git_root() / WORKFLOW
-        if path.is_file():
-            found = problems(path.read_text(encoding="utf-8"))
-            print("  %s" % ("silent" if not found else "; ".join(found)))
+        root = git_root()
+        if (root / WORKFLOW).is_file():
+            found = judge(root)
+            print("  %s" % ("silent" if not found else "; ".join(
+                "%s: %s" % item for item in found)))
             bad += bool(found)
         else:
             print("  no %s here" % WORKFLOW.as_posix())
@@ -272,14 +360,15 @@ def main(argv=None) -> int:
         print("REFUSED: %s has no %s, so there is no job installing it as a user "
               "would." % (root, WORKFLOW.as_posix()))
         return 1
-    found = problems(path.read_text(encoding="utf-8"))
+    found = judge(root)
     if found:
-        print("REFUSED: %s:" % WORKFLOW.as_posix())
-        for problem in found:
-            print("   %s" % problem)
+        print("REFUSED:")
+        for where, problem in found:
+            print("   %s: %s" % (where, problem))
         return 1
-    print("install_job: %s runs on the ledger pull request and waits for the index, "
-          "bounded (%s)" % (WORKFLOW.as_posix(), root))
+    print("install_job: %s runs on the ledger pull request, waits for the index "
+          "bounded, and its tests keep the caller's environment out (%s)"
+          % (WORKFLOW.as_posix(), root))
     return 0
 
 

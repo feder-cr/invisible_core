@@ -64,7 +64,11 @@ REPO = "invisible_core"
 # read the checkout's imports, and "the packaged seal is in the wheel" found the
 # checkout's seal.json, so a wheel without it would have passed. The wrapper's
 # test_release_e2e.py strips the same variables, for the same measured reason.
-_LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "INVISIBLE_SEAL_FILE")
+# A copy of `invisible_core.install_job.LEAKS`, which this file cannot import;
+# the gate checks that it covers it ([B349]).
+_LEAKS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "INVISIBLE_SEAL_FILE",
+          "INVISIBLE_CORE_AUTOFIX", "INVISIBLE_CORE_AUTOFIX_ATTEMPTED",
+          "INVISIBLE_CORE_PIN", "UV")
 
 
 def _run(cmd, *, timeout: int = 600, check: bool = True, env=None, cwd=None):

@@ -19,16 +19,30 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def test_the_corpus_is_judged_as_it_says():
-    """Every known-bad workflow refused, every good one silent."""
+    """Every known-bad workflow and file refused, every good one silent."""
     for name, text in install_job.KNOWN_BAD:
         assert install_job.problems(text), name
     for name, text in install_job.MUST_NOT_FIRE:
         assert install_job.problems(text) == [], (name, install_job.problems(text))
+    for name, text in install_job.KNOWN_BAD_FILES:
+        assert install_job.leak_problems(text), name
+    for name, text in install_job.MUST_NOT_FIRE_FILES:
+        assert install_job.leak_problems(text) == [], name
 
 
 def test_this_repository_runs_its_install_job_on_the_ledger_pull_request():
-    text = (_ROOT / install_job.WORKFLOW).read_text(encoding="utf-8")
-    assert install_job.problems(text) == []
+    """The trigger, the wait, and every test file it runs covering `LEAKS`."""
+    assert install_job.judge(_ROOT) == []
+    assert install_job.install_files(
+        _ROOT, (_ROOT / install_job.WORKFLOW).read_text(encoding="utf-8"))
+
+
+def test_a_file_that_leaves_one_variable_is_named_with_it():
+    """[B349]: the wrapper's repair test ran with the caller's
+    INVISIBLE_CORE_AUTOFIX=off and measured a repair that was switched off."""
+    short = [name for name in install_job.LEAKS if name != "INVISIBLE_CORE_AUTOFIX"]
+    [problem] = install_job.leak_problems("_LEAKS = %r\n" % (tuple(short),))
+    assert "INVISIBLE_CORE_AUTOFIX" in problem and "PYTHONPATH" not in problem
 
 
 def test_the_reading_of_the_triggers_agrees_with_a_yaml_parser():
@@ -51,7 +65,14 @@ def test_the_command_refuses_a_repository_without_the_job(tmp_path, capsys):
     assert "REFUSED" in capsys.readouterr().out
     workflow = tmp_path / install_job.WORKFLOW
     workflow.parent.mkdir(parents=True)
-    workflow.write_text(install_job.KNOWN_BAD[0][1], encoding="utf-8")
+    runs = "\n      - run: python -m pytest tests/test_inner_e2e.py\n"
+    (tmp_path / "tests").mkdir()
+    inner = tmp_path / "tests" / "test_inner_e2e.py"
+    inner.write_text("_LEAKS = %r\n" % (install_job.LEAKS,), encoding="utf-8")
+    workflow.write_text(install_job.KNOWN_BAD[0][1] + runs, encoding="utf-8")
     assert install_job.main(["--root", str(tmp_path)]) == 1
-    workflow.write_text(install_job.MUST_NOT_FIRE[0][1], encoding="utf-8")
+    workflow.write_text(install_job.MUST_NOT_FIRE[0][1] + runs, encoding="utf-8")
     assert install_job.main(["--root", str(tmp_path)]) == 0
+    inner.write_text('_LEAKS = ("PYTHONPATH",)\n', encoding="utf-8")
+    assert install_job.main(["--root", str(tmp_path)]) == 1
+    assert "tests/test_inner_e2e.py" in capsys.readouterr().out
