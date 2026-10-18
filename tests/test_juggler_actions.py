@@ -190,6 +190,8 @@ class _Recorder:
     def __init__(self, **answers):
         self.answers = answers
         self.sent = []
+        self.calls = []
+        self.disposed = []
 
     # the connection
     def send(self, method, params=None, session=None, timeout=None):
@@ -207,6 +209,7 @@ class _Recorder:
         return "done"
 
     def call(self, frame, declaration, *args, **kw):
+        self.calls.append((declaration, args))
         for needle, answer in self.answers.items():
             if "injected.%s(" % needle in declaration:
                 return answer
@@ -222,7 +225,7 @@ class _Recorder:
         return False
 
     def dispose(self, frame, element):
-        pass
+        self.disposed.append(element)
 
 
 def _recording_actions(**answers):
@@ -244,11 +247,41 @@ def test_select_option_hands_the_resolved_options_to_the_engine():
     known-bad input: select in the page and ask the engine for the events,
     which is the command the engine no longer has."""
     a, rec = _recording_actions(
-        selectOptions={"indices": [2], "values": ["c"]})
+        retarget="the-select", selectOptions={"indices": [2], "values": ["c"]})
     assert a.select_option("#s", ["c"], timeout=2.0) == ["c"]
     assert ("Page.selectOptions",
-            {"frameId": "main", "objectId": "element", "indices": [2]}) in rec.sent
+            {"frameId": "main", "objectId": "the-select", "indices": [2]}) in rec.sent
     assert "Page.dispatchTrustedInputEvents" not in [m for m, _ in rec.sent]
+
+
+def test_a_select_reached_through_its_label_is_the_one_both_halves_use():
+    """[B343]: `select_option` on a `<label for>` selects its control, as
+    Playwright's `follow-label` retarget does. The injected script used to
+    retarget for its own read while the engine was handed the label, which it
+    refused. Now the control is found once, the read and the engine's
+    selection both get it, and its reference is released after.
+
+    Known-bad: hand `Page.selectOptions` the element the selector matched."""
+    a, rec = _recording_actions(
+        retarget="the-select", selectOptions={"indices": [0, 1], "values": ["R", "G"]})
+    assert a.select_option("text=Pick a Color", ["R", "G"], timeout=2.0) == ["R", "G"]
+    [(_, read_args)] = [(d, args) for d, args in rec.calls if "injected.selectOptions(" in d]
+    assert read_args[0] == {"objectId": "the-select"}
+    [(_, retarget_args)] = [(d, args) for d, args in rec.calls if "injected.retarget(" in d]
+    assert retarget_args[0] == {"objectId": "element"}
+    selected = [params for method, params in rec.sent if method == "Page.selectOptions"]
+    assert selected == [{"frameId": "main", "objectId": "the-select", "indices": [0, 1]}]
+    assert "the-select" in rec.disposed
+
+
+def test_an_element_gone_from_the_page_is_retried_and_never_selected():
+    """A retarget that finds nothing is a node no longer in the document: the
+    retry cycle treats it as a detached node, as it treats the injected
+    script's own `error:notconnected`, and the engine is never asked."""
+    a, rec = _recording_actions(retarget=None)
+    with pytest.raises(Exception, match="detached"):
+        a.select_option("#gone", ["R"], timeout=0.5)
+    assert "Page.selectOptions" not in [m for m, _ in rec.sent]
 
 
 def test_a_picked_value_is_committed_by_the_engine():

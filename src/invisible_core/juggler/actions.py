@@ -840,16 +840,31 @@ class Actions:
         wanted = _normalize_options(options)
 
         def run(f, element, point):
-            r = self.inj.call(
-                f, "(injected, el, o) => injected.selectOptions(el, o)",
-                {"objectId": element}, wanted)
-            if isinstance(r, str) and r.startswith("error:"):
-                raise EvaluationError("selectOptions: %s" % r)
-            self.c.send("Page.selectOptions",
-                        {"frameId": f, "objectId": element,
-                         "indices": r["indices"]},
-                        session=self.session, timeout=None)
-            return r["values"]
+            # ⛔ THE SELECT IS FOUND ONCE, AND BOTH HALVES USE IT ([B343]). An
+            # element reached through its label (`text=Pick a color` on the
+            # `<label for>`) is retargeted to its control, as Playwright's
+            # `selectOptions` does with `follow-label`. Until [B343] the
+            # injected script retargeted for its own read and the engine was
+            # then handed the LABEL, which it refused: the options were
+            # resolved on one element and selected on another.
+            target = self.inj.call(
+                f, "(injected, el) => injected.retarget(el, 'follow-label')",
+                {"objectId": element}, by_value=False)
+            if not target:
+                raise EvaluationError("selectOptions: error:notconnected")
+            try:
+                r = self.inj.call(
+                    f, "(injected, el, o) => injected.selectOptions(el, o)",
+                    {"objectId": target}, wanted)
+                if isinstance(r, str) and r.startswith("error:"):
+                    raise EvaluationError("selectOptions: %s" % r)
+                self.c.send("Page.selectOptions",
+                            {"frameId": f, "objectId": target,
+                             "indices": r["indices"]},
+                            session=self.session, timeout=None)
+                return r["values"]
+            finally:
+                self.inj.dispose(f, target)
         return self._retry(selector, run,
                            states=["visible", "stable", "enabled"],
                            timeout=timeout, frame_id=frame_id,
