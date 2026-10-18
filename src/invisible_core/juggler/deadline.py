@@ -17,34 +17,49 @@ from typing import Optional
 class Deadline:
     """`seconds` from now, or never when `seconds` is None."""
 
-    __slots__ = ("seconds", "_at")
+    __slots__ = ("seconds", "_start")
 
     def __init__(self, seconds: Optional[float]) -> None:
         self.seconds = seconds
-        self._at = None if seconds is None else time.monotonic() + seconds
+        self._start = time.monotonic()
+
+    def _remaining(self) -> float:
+        """The budget minus the time elapsed since the deadline was made.
+
+        Counted from the START, never as `(start + seconds) - now`: that sum
+        is rounded, and with a clock that has not moved since the deadline was
+        made (on Windows it moves in steps of about 15 ms) it came back LARGER
+        than the budget - 20.00000000000003 for a `Deadline(20.0)`, which a
+        test asserting "what is left of the deadline" read as a wait longer
+        than its caller's timeout. Elapsed time is never negative, so what is
+        left can never exceed `seconds`."""
+        return self.seconds - (time.monotonic() - self._start)
 
     def passed(self) -> bool:
         """True once no time is left: the same moment `left()` reaches 0.
         On Windows the monotonic clock moves in steps of about 15 ms, and a
         strict `>` left a wait that had no time left believing it had."""
-        return self._at is not None and time.monotonic() >= self._at
+        return self.seconds is not None and self._remaining() <= 0
 
     def left(self, floor: float = 0.0) -> Optional[float]:
-        """Seconds left, never below `floor`; None when there is no limit, so
-        it can be handed to a wait that takes None as "no bound"."""
-        if self._at is None:
+        """Seconds left, never below `floor` and never above the budget; None
+        when there is no limit, so it can be handed to a wait that takes None
+        as "no bound"."""
+        if self.seconds is None:
             return None
-        return max(floor, self._at - time.monotonic())
+        return max(floor, self._remaining())
 
     def slice(self, step: float) -> float:
         """How long one turn of a polling wait may sleep: `step`, or less when
         the deadline is nearer than that."""
-        if self._at is None:
+        if self.seconds is None:
             return step
-        return max(0.0, min(step, self._at - time.monotonic()))
+        return max(0.0, min(step, self._remaining()))
 
     def until(self, moment: float) -> float:
         """Seconds from now to `moment` (a `time.monotonic()` value) or to the
         deadline, whichever is sooner."""
-        end = moment if self._at is None else min(moment, self._at)
-        return end - time.monotonic()
+        to_moment = moment - time.monotonic()
+        if self.seconds is None:
+            return to_moment
+        return min(to_moment, self._remaining())

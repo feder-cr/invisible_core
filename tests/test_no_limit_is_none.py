@@ -52,6 +52,23 @@ def test_a_deadline_of_seconds_passes_and_slices_what_is_left(jumping_clock):
     assert d.slice(0.05) == 0.0
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("now", [1005.3627981515391, 502.03759298948165])
+def test_what_is_left_never_exceeds_the_budget(monkeypatch, now):
+    """A: the code was wrong. A deadline stored `start + seconds` and answered
+    `left()` with that sum minus now; with a clock that had not moved, the
+    rounding of the sum gave MORE than the budget (20.000000000000114 at
+    1005.36...). It turned a test on the actions' deadline red on Windows
+    3.11, where the clock moves in steps of about 15 ms. The known-bad inputs
+    are those clock values; the clock does not move between the two reads."""
+    monkeypatch.setattr(deadline_module.time, "monotonic", lambda: now)
+    d = Deadline(20.0)
+    assert d.left() == 20.0, d.left()
+    assert d.slice(30.0) == 20.0
+    assert d.until(now + 60.0) == 20.0
+    assert not d.passed()
+
+
 class _Injected:
     """A selector that matches on the twentieth query."""
 
