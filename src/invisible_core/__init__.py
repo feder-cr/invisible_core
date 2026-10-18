@@ -53,7 +53,7 @@ from .constants import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
 # surface match what it actually promises - `seal` has no underscore, so it
 # reads as public, and nothing in __all__ said so.
 from .seal import EngineMismatch, active_seal, verify_engine
-from .launch import tz_env, _IANA_TO_POSIX_TZ as IANA_TO_POSIX_TZ, LaunchPlan, build_launch_env, build_launch_plan, write_user_js
+from .launch import tz_env, LaunchPlan, build_launch_env, build_launch_plan, write_user_js
 
 # One headline version, and it is the honest one.
 #
@@ -132,7 +132,6 @@ __all__ = [
     "EngineMismatch",
     "active_seal",
     "verify_engine",
-    "IANA_TO_POSIX_TZ",
     "write_user_js",
     # constants
     "BINARY_VERSION",
