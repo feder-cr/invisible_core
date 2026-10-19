@@ -122,11 +122,29 @@ def _citations():
     repo, and the workbench is the one place that knows them all, so it lives
     there and its pre-commit runs it before a doc lands. These tests call it.
     """
-    path = _RELEASE.parent / "scripts" / "check_test_citations.py"
+    return _workbench_script("check_test_citations.py")
+
+
+def _doc_rules():
+    """The workbench's `scripts/check_doc_rules.py`: the ONE definition of the
+    two rules on the workbench docs, the `Ricontrollo` line of every OPEN entry
+    and the control bytes in tracked docs.
+
+    Same story as `_citations()`, one day later: the 2026-10-17 entry whose
+    `Ricontrollo` line was split in two landed unopposed and stopped this repo's
+    tag push, because the rule ran only here, after the landing. The workbench's
+    pre-commit now judges the tree being committed; these tests call it.
+    """
+    return _workbench_script("check_doc_rules.py")
+
+
+def _workbench_script(name):
+    """A gate script of the workbench, loaded from its `scripts/` folder."""
+    path = _RELEASE.parent / "scripts" / name
     if not path.is_file():
-        pytest.skip("not the workbench - its citation check is not here")
+        pytest.skip("not the workbench - its %s is not here" % name)
     import importlib.util
-    spec = importlib.util.spec_from_file_location("check_test_citations", path)
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -699,14 +717,27 @@ def test_no_tracked_text_file_carries_an_invisible_control_character():
     # instance it was written for. Measured while writing it, and again ten minutes
     # later, when the decision-log entry DESCRIBING the bug was itself written with
     # a formfeed, a backspace and a NUL in it.
+    #
+    # The workbench docs are judged by the workbench's own definition
+    # (`scripts/check_doc_rules.py`, run by its pre-commit on the tree being
+    # committed); this test calls it for that root, and pins that the two sets of
+    # forbidden bytes and text suffixes are the SAME set, so the copy kept here for
+    # the repositories cannot drift from it.
     roots = [_RELEASE / repo for repo in _REPOS]
-    workbench_docs = _RELEASE.parent / "docs"
-    if workbench_docs.is_dir():
-        roots.append(workbench_docs)
-
     offenders = []
+    if (_RELEASE.parent / "docs").is_dir():
+        rules = _doc_rules()
+        assert set(rules.FORBIDDEN_BYTES) == _FORBIDDEN_BYTES, (
+            "the workbench and this test disagree on the forbidden bytes")
+        assert set(rules.TEXT_SUFFIXES) == _TEXT_SUFFIXES, (
+            "the workbench and this test disagree on the text suffixes")
+        for path, line, bad in rules.files_with_control_bytes(rules.tracked_docs(_RELEASE.parent)):
+            offenders.append(
+                f"workbench/{path.relative_to(_RELEASE.parent).as_posix()} line ~{line}: "
+                + ", ".join(f"0x{b:02X}" for b in bad))
+
     for root in roots:
-        repo = root.name if root.name != "docs" else "workbench/docs"
+        repo = root.name
         if not root.is_dir():
             pytest.skip("not the workbench - the sibling repos are not here")
         listing = subprocess.run(["git", "-C", str(root), "ls-files"],
@@ -1100,23 +1131,16 @@ def test_every_open_bug_says_how_to_re_check_it():
 
     TRIAGE and NOTE headings are exempt: they are not claims that something is
     still broken.
-    """
-    import re
 
+    The rule itself lives in the workbench (`scripts/check_doc_rules.py`), which
+    judges it at the commit of the docs; this test calls that definition.
+    """
     workbench = _RELEASE.parent
     doc = workbench / "docs" / "firefox-stealth-architecture" / "70-known-bugs.md"
     if not doc.is_file():
         pytest.skip("not the workbench - the architecture docs are not here")
 
-    testo = doc.read_text(encoding="utf-8")
-    voci = re.split(r"(?m)^## ", testo)
-    muti = []
-    for voce in voci:
-        if not voce.startswith("OPEN"):
-            continue
-        titolo = voce.split(chr(10))[0].strip()
-        if not re.search(r"(?m)^> \*\*Ricontrollo:\*\* \S", voce):
-            muti.append(titolo[:96])
+    muti = _doc_rules().open_entries_without_recheck(doc.read_text(encoding="utf-8"))
 
     assert not muti, (
         "these OPEN entries do not say how to decide today whether they are "
