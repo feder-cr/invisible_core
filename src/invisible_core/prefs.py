@@ -844,18 +844,23 @@ _BASELINE: Dict[str, Any] = {
 
     # The canvas noise: one function of (seed) applied to the BUFFER, wherever a
     # canvas becomes readable, instead of one rewrite per reading method ([B169],
-    # form B). The pixels it moves stay the ones an edge already has, so a drawn
-    # canvas keeps the colour count of a real one: the old substitution turned a
-    # 96x48 drawing into 4608 colours on 4608 pixels, which hCaptcha's hsw.js
-    # reads, and any page can count. The WebGL readback and the noise mask that
-    # tuned the old algorithms (`webgl.substitute_pixels`,
-    # `canvas.noise_skip_mask`) went with them: the engine reads neither.
+    # form B). A drawn canvas keeps the colour count of a real one: the old
+    # substitution turned a 96x48 drawing into 4608 colours on 4608 pixels,
+    # which hCaptcha's hsw.js reads, and any page can count. The WebGL readback
+    # and the noise mask that tuned the old algorithms
+    # (`webgl.substitute_pixels`, `canvas.noise_skip_mask`) went with them: the
+    # engine reads neither.
     "zoom.stealth.canvas.substitute_pixels":              True,
-    # How far from an edge the noise may move a pixel, in pixels. Measured on the
-    # canvas bench against retail 151: 8 fails, 4 reaches into the text, 2 passes
-    # with the seeds still distinct. The engine refuses a launch without it and a
-    # value outside 1..255.
-    "zoom.stealth.canvas.edge_step":                      2,
+    # A pixel whose 3x3 neighbourhood is a blend of two colours, to within this
+    # many levels per channel, is left alone: the edge of text, or of anything
+    # drawn in one colour over another, stays what the rasteriser made it. It
+    # replaced a band of N pixels from an edge, which could not tell low-contrast
+    # coloured text from a gradient (retail draws gradient-like steps on such
+    # text too). 4, measured: no text pixel touched at any contrast, none on a
+    # two-colour gradient, thousands on real fingerprinting canvases. 0 is a
+    # valid declaration; the engine refuses a launch without one and a value
+    # outside 0..255.
+    "zoom.stealth.canvas.edge_tolerance":                 4,
 
     # WebGPU presence consistency. Firefox enables dom.webgpu.enabled by default on
     # Windows/Mac-ARM but NOT on Linux/Mac-x64. We ALWAYS claim Windows, so force it ON

@@ -496,13 +496,15 @@ def test_msaa_on_linux_is_what_windows_emits(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("platform", ["win32", "linux"])
-def test_the_canvas_noise_band_is_two_pixels_on_both_builds(monkeypatch, platform):
-    # [B169], form B: the engine refuses a launch without edge_step and a value
-    # outside 1..255. Measured on the canvas bench against retail 151: 8 fails,
-    # 4 reaches into the text, 2 passes with the seeds still distinct.
+def test_the_canvas_noise_spares_two_colour_blends_on_both_builds(monkeypatch, platform):
+    # [B169], form B: the engine refuses a launch without edge_tolerance and a
+    # value outside 0..255. 4, measured: no text pixel touched at any contrast,
+    # none on a two-colour gradient. The step band it replaced is not emitted:
+    # the engine no longer reads it.
     monkeypatch.setattr(sys, "platform", platform)
     prefs = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
-    assert prefs["zoom.stealth.canvas.edge_step"] == 2
+    assert prefs["zoom.stealth.canvas.edge_tolerance"] == 4
+    assert "zoom.stealth.canvas.edge_step" not in prefs
 
 
 @pytest.mark.unit
