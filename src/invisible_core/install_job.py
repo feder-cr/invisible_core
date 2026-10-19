@@ -27,7 +27,12 @@ WHAT IS CHECKED, in the repository you are standing in:
     not wait reports a missing publish that happened two minutes earlier, and a
     wait with no deadline hangs where it should fail;
   * every test file it runs keeps the caller's environment out of the venvs it
-    builds: a module-level `_LEAKS` that covers `LEAKS` ([B349]).
+    builds: a module-level `_LEAKS` that covers `LEAKS` ([B349]);
+  * when the repository's conftest loads `invisible_core.testing.world`, every
+    pytest the job runs blocks it (`-p no:invisible_core.testing.world`):
+    importing the plugin imports the core, which the job's runner does not
+    have on purpose, so unblocked the job dies at collection having run
+    nothing ([B345]; `world_job` checks that the conftest loads it).
 
 Each repository runs this on ITS OWN tree in its own CI, so a change to its
 workflow is judged in the pull request that makes it. The check used to be a
@@ -49,6 +54,7 @@ import subprocess
 import sys
 
 from . import environment
+from .world_job import CONFTEST, PLUGIN, loads_world
 
 WORKFLOW =pathlib.Path(".github") / "workflows" / "user-install.yml"
 LEDGER = "PUBLISHED.json"
@@ -224,11 +230,29 @@ def leak_problems(source: str) -> list:
             "the venvs it builds"]
 
 
+#: Each `python -m pytest` command of a workflow, with its continuation lines.
+_PYTEST = re.compile(r"python -m pytest(?:[^\n]*\\\n)*[^\n]*")
+
+
+def world_problems(text: str, loads: bool) -> list:
+    """What an install job's pytest commands leave unblocked, when the
+    repository's conftest loads the world plugin."""
+    if not loads:
+        return []
+    return ["it runs `%s` without `-p no:%s`, the plugin its conftest loads, so "
+            "it dies at collection on a runner without invisible_core"
+            % (command.splitlines()[0].strip(), PLUGIN)
+            for command in _PYTEST.findall(text) if "-p no:" + PLUGIN not in command]
+
+
 def judge(root: pathlib.Path) -> list:
     """Every problem of this repository's install job, as (where, what)."""
     path = root / WORKFLOW
     text = path.read_text(encoding="utf-8")
     found = [(WORKFLOW.as_posix(), problem) for problem in problems(text)]
+    conftest = root / CONFTEST
+    loads = conftest.is_file() and loads_world(conftest.read_text(encoding="utf-8"))
+    found += [(WORKFLOW.as_posix(), problem) for problem in world_problems(text, loads)]
     files = install_files(root, text)
     if not files:
         found.append((WORKFLOW.as_posix(), "it runs no test file of this repository"))
@@ -296,6 +320,20 @@ KNOWN_BAD_FILES = (
     ("a list built at run time", "_LEAKS = tuple(name for name in NAMES)\n"),
     ("the names only in a comment", "# PYTHONPATH INVISIBLE_CORE_AUTOFIX\n_LEAKS = ()\n"),
 )
+KNOWN_BAD_WORLD = (
+    ("unblocked", "        run: python -m pytest tests/test_user_install_e2e.py -m e2e\n"),
+    ("one of two unblocked", "        run: |\n"
+     "          python -m pytest tests/a.py -p no:invisible_core.testing.world\n"
+     "          python -m pytest tests/b.py\n"),
+    ("another plugin blocked", "        run: python -m pytest tests/a.py -p no:cacheprovider\n"),
+)
+MUST_NOT_FIRE_WORLD = (
+    ("blocked", "        run: python -m pytest tests/a.py -p no:invisible_core.testing.world\n", True),
+    ("blocked on a continuation line", "        run: |\n"
+     "          python -m pytest tests/a.py \\\n"
+     "            -p no:invisible_core.testing.world -v\n", True),
+    ("a conftest that does not load it", "        run: python -m pytest tests/a.py\n", False),
+)
 MUST_NOT_FIRE_FILES = (
     ("the canonical set, and more", "_LEAKS = %r\n" % (LEAKS + ("EXTRA",),)),
     ("as a list", "_LEAKS = %r\n" % (list(LEAKS),)),
@@ -322,6 +360,16 @@ def selftest() -> int:
         found = problems(text)
         print("  %s: %s%s" % ("FALSE POSITIVE" if found else "silent", name,
                               " (%s)" % found[0] if found else ""))
+        bad += bool(found)
+    print("--- pytest commands that MUST be refused, under a conftest that loads the plugin ---")
+    for name, text in KNOWN_BAD_WORLD:
+        hit = bool(world_problems(text, True))
+        print("  %s: %s" % ("killed" if hit else "SURVIVED", name))
+        bad += not hit
+    print("--- pytest commands that must NOT be refused ---")
+    for name, text, loads in MUST_NOT_FIRE_WORLD:
+        found = world_problems(text, loads)
+        print("  %s: %s" % ("FALSE POSITIVE" if found else "silent", name))
         bad += bool(found)
     print("--- install-e2e files that MUST be refused ---")
     for name, text in KNOWN_BAD_FILES:

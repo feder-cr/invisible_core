@@ -76,3 +76,23 @@ def test_the_command_refuses_a_repository_without_the_job(tmp_path, capsys):
     inner.write_text('_LEAKS = ("PYTHONPATH",)\n', encoding="utf-8")
     assert install_job.main(["--root", str(tmp_path)]) == 1
     assert "tests/test_inner_e2e.py" in capsys.readouterr().out
+
+
+def test_an_install_job_that_leaves_the_world_plugin_its_conftest_loads_is_refused(tmp_path):
+    """The repository's own tree decides: with the plugin in the conftest, an
+    unblocked pytest is named; with it blocked, or no plugin, it is silent."""
+    for name, text in install_job.KNOWN_BAD_WORLD:
+        assert install_job.world_problems(text, True), name
+    for name, text, loads in install_job.MUST_NOT_FIRE_WORLD:
+        assert install_job.world_problems(text, loads) == [], name
+    wf = tmp_path / install_job.WORKFLOW
+    wf.parent.mkdir(parents=True)
+    wf.write_text((_ROOT / install_job.WORKFLOW).read_text(encoding="utf-8").replace(
+        " -p no:invisible_core.testing.world", ""), encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "conftest.py").write_text(
+        'pytest_plugins = ["invisible_core.testing.world"]\n', encoding="utf-8")
+    for test in install_job.install_files(_ROOT, wf.read_text(encoding="utf-8")):
+        (tmp_path / test.relative_to(_ROOT)).write_bytes(test.read_bytes())
+    found = install_job.judge(tmp_path)
+    assert any("-p no:invisible_core.testing.world" in what for _, what in found), found
