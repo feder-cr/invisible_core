@@ -97,3 +97,29 @@ def test_the_text_quality_is_declared_and_only_one_the_engine_reads():
             "zoom.stealth.text.system_quality"] == quality
     with pytest.raises(ValueError, match="system_text_quality"):
         generate_profile(42, pin={"font.system_text_quality": 3})
+
+
+#: The prefs that decide how a glyph edge is drawn. A persona's own prefs are
+#: written over the emitted ones, so one carrying any of these would replace
+#: the table's row without a word.
+_TEXT_RASTER = ("zoom.stealth.text.", "gfx.font_rendering.")
+
+
+def test_no_persona_in_the_pool_carries_a_text_raster_pref():
+    """The explicit ladder pin is a MEASURING escape and only that: in what this
+    package ships, the table is the one source of the ladder."""
+    from invisible_core._webgl_personas import _gpu_pool
+    carrying = sorted({(p["renderer"], k) for p in _gpu_pool()
+                       for k in p.get("prefs", {}) if k.startswith(_TEXT_RASTER)})
+    assert not carrying, carrying
+
+
+def test_every_seed_emits_the_row_of_the_key_it_declares():
+    """Over many identities, persona included, the ladder a page's text is
+    snapped to is the row of the gamma and contrast the same session declares."""
+    for seed in range(0, 2000, 37):
+        prefs = translate_profile_to_prefs(generate_profile(seed), timezone="America/New_York")
+        key = (prefs["gfx.font_rendering.cleartype_params.gamma"],
+               prefs["gfx.font_rendering.cleartype_params.enhanced_contrast"])
+        ladder = tuple(int(v) for v in prefs["zoom.stealth.text.coverage_ladder"].split(","))
+        assert ladder == P.COVERAGE_LADDERS[key], (seed, key)
