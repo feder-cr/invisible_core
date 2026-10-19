@@ -352,7 +352,6 @@ def test_no_profile_constant_is_shadowed_by_the_sampler_s_locked_dict():
         "font_ui_family": "FONT_UI_FAMILY",
         "font_ui_size": "FONT_UI_SIZE",
         "font_monospace_size": "FONT_MONOSPACE_SIZE",
-        "font_alpha_ladder": "FONT_ALPHA_LADDER",
         "font_cleartype_gamma": "FONT_CLEARTYPE_GAMMA",
         "font_cleartype_contrast": "FONT_CLEARTYPE_CONTRAST",
         "font_cleartype_level": "FONT_CLEARTYPE_LEVEL",
@@ -360,6 +359,7 @@ def test_no_profile_constant_is_shadowed_by_the_sampler_s_locked_dict():
         "font_cleartype_rendering_mode": "FONT_CLEARTYPE_RENDERING_MODE",
         "font_freetype_gamma": "FONT_FREETYPE_GAMMA",
         "font_freetype_contrast": "FONT_FREETYPE_CONTRAST",
+        "font_system_text_quality": "FONT_SYSTEM_TEXT_QUALITY",
         "font_dialog_family": "FONT_DIALOG_FAMILY",
         "screen_refresh_hz": "SCREEN_REFRESH_HZ",
     }

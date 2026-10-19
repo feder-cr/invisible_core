@@ -66,6 +66,17 @@ def _perturb(key, value, profile):
         # this package ships, since a made-up name is refused at birth.
         from invisible_core._fpforge.profile import BRANDING_SETS
         return next(b for b in BRANDING_SETS if b != value)
+    # Closed domains too ([B361], [B362]): a gamma or a contrast has a ladder
+    # only where one was measured, and the engine reads three text qualities.
+    from invisible_core._fpforge.profile import COVERAGE_LADDERS, SYSTEM_TEXT_QUALITIES
+    if key == "font.cleartype_gamma":
+        return next(g for g, c in sorted(COVERAGE_LADDERS)
+                    if c == profile.font.cleartype_contrast and g != value)
+    if key == "font.cleartype_contrast":
+        return next(c for g, c in sorted(COVERAGE_LADDERS)
+                    if g == profile.font.cleartype_gamma and c != value)
+    if key == "font.system_text_quality":
+        return next(q for q in SYSTEM_TEXT_QUALITIES if q != value)
     if isinstance(value, bool):
         return not value
     if isinstance(value, int):
