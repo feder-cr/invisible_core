@@ -100,6 +100,24 @@ BASELINE_REVISION = 0
 #: is the note below, one line further on, repeated one level up.
 BASELINE_TAG = "firefox-18"
 
+#: And the seal's ASSETS, for the same reason as the tag and revision above: the
+#: fixture copies the tree's seal.json, which on a release branch mid coupled
+#: rebase is a LOCAL transition seal with none. The publish gate refuses to
+#: upload a core sealed to no downloadable binary, so the publish-authorises case
+#: needs a RELEASE seal here - pinned, not inherited. The values are synthetic;
+#: this gate reads the version from the tag and only the PRESENCE of assets.
+BASELINE_ASSETS = {
+    "firefox-151.0-stealth-win-x86_64.zip": {
+        "platform": "win32", "arch": "x86_64", "sha256": "0" * 64, "size": 1,
+        "entry_rel": "firefox.exe", "omni_sha256": "0" * 64, "build_id": "20260101000001"},
+    "firefox-151.0-stealth-linux-x86_64.tar.gz": {
+        "platform": "linux", "arch": "x86_64", "sha256": "1" * 64, "size": 1,
+        "entry_rel": "firefox", "omni_sha256": "", "build_id": "20260101000002"},
+    "firefox-151.0-stealth-linux-arm64.tar.gz": {
+        "platform": "linux", "arch": "arm64", "sha256": "2" * 64, "size": 1,
+        "entry_rel": "firefox", "omni_sha256": "", "build_id": "20260101000003"},
+}
+
 #: "already published and byte-identical" - a NO-OP, not a refusal.
 #: It shared exit 1 with "the content changed under an unmoved version" until
 #: 2026-07-26, and the two must not look alike to a caller: the second has to
@@ -177,7 +195,7 @@ def _copy_repo(dest: Path) -> Path:
     # The seal's tag, for the same reason: the expectations below talk about
     # <BASELINE_TAG>.0.0 and about moves to firefox-17 and firefox-19, and none
     # of them can depend on what the repository ships today.
-    edit_seal(dest, tag=BASELINE_TAG)
+    edit_seal(dest, tag=BASELINE_TAG, assets=BASELINE_ASSETS)
     return dest
 
 

@@ -14,6 +14,8 @@ from invisible_core.seal import EMULATED_LEGS, active_seal
 def test_a_windows_arm64_host_gets_the_x86_64_asset():
     """Refused with NotImplementedError until 2026-09-25, with no remedy."""
     seal = active_seal()
+    if seal.is_local:
+        pytest.skip("packaged seal is a LOCAL seal with no assets")
     asset = seal.asset_for("win32", "ARM64")
     assert (asset.platform, asset.arch) == ("win32", "x86_64"), asset
 
@@ -22,6 +24,8 @@ def test_a_native_asset_wins_over_the_emulated_one():
     """Linux ARM64 has its own asset and must keep getting it: the declaration
     is for hosts WITHOUT one, not a preference for x86_64."""
     seal = active_seal()
+    if seal.is_local:
+        pytest.skip("packaged seal is a LOCAL seal with no assets")
     asset = seal.asset_for("linux", "aarch64")
     assert (asset.platform, asset.arch) == ("linux", "arm64"), asset
 
