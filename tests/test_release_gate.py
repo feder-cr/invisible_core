@@ -1175,3 +1175,20 @@ def test_every_ledger_entry_in_this_repo_has_the_fields_the_gate_needs():
         if missing:
             bad[entry.get("version", "?")] = missing
     assert not bad, f"ledger entries missing fields the gate reads: {bad}"
+
+
+def test_publish_refuses_a_core_sealed_to_no_downloadable_binary(core):
+    """A seal with no assets is a LOCAL seal: it names no binary to download, so
+    publishing the core ships one whose first launch fails at ensure_binary. A
+    legitimate transient on a release branch mid coupled engine+core rebase -
+    refused at publish, and nowhere the branch push runs (the pre-push publish
+    gate is `check`, on release tags only). --dry-run exercises it without an
+    upload, because the guard sits before the dry-run print."""
+    edit_seal(core, tag="firefox-51", assets={}, build_id="20261020000535",
+              source_commit="17140065a1b0477fabecf16f921120176803aa8b")
+    r = run_gate(core, "publish", "--dry-run")
+    text = out_of(r)
+    assert r.returncode == 1, text
+    assert "no assets" in text
+    assert "roll_seal" in text
+    assert "twine" not in text, "an upload command was formed for a local-sealed core"
