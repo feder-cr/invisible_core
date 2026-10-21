@@ -203,16 +203,6 @@ def _persona_named(fragment):
 
 
 
-@pytest.mark.unit
-def test_canvas_noise_mask_windows_uses_intel_path(monkeypatch):
-    # CN3: on Windows _renderer_lo is hardcoded to "intel" → mask=15.
-    monkeypatch.setattr(sys, "platform", "win32")
-    nvidia = _persona_named("NVIDIA")
-    p = generate_profile(seed=42, pin={"gpu.renderer": nvidia["renderer"]})
-    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
-    assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
-
-
 # ──────────────────────────────────────────────────────────────────────
 #  WebGL extensions (Windows clears them)
 # ──────────────────────────────────────────────────────────────────────
@@ -505,30 +495,16 @@ def test_msaa_on_linux_is_what_windows_emits(monkeypatch):
 
 
 @pytest.mark.unit
-def test_canvas_noise_mask_intel_on_linux(monkeypatch):
-    # CN1: Intel renderer → 1/16 noise (mask=15). Pinning the renderer
-    # exercises the live ``_renderer_lo`` branch on Linux (where the
-    # value is read from the profile rather than hardcoded as on Windows).
-    monkeypatch.setattr(sys, "platform", "linux")
-    intel = _persona_named("Intel")
-    p = generate_profile(seed=42, pin={"gpu.renderer": intel["renderer"],
-                                       "gpu.vendor": intel["vendor"]})
-    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
-    assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
-
-
-@pytest.mark.unit
-def test_canvas_noise_mask_nvidia_on_linux(monkeypatch):
-    # CN2: the canvas-noise mask follows the REAL HOST GPU (the canvas is drawn by real
-    # hardware, NOT the exposed persona), so it is the Intel-class 1/16 rate (mask=15) on the
-    # dev/test host even when an NVIDIA persona is exposed - the persona vendor does NOT drive
-    # the noise rate anymore (would over-noise on an Intel host).
-    monkeypatch.setattr(sys, "platform", "linux")
-    nvidia = _persona_named("NVIDIA")
-    p = generate_profile(seed=42, pin={"gpu.renderer": nvidia["renderer"],
-                                       "gpu.vendor": nvidia["vendor"]})
-    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
-    assert prefs["zoom.stealth.canvas.noise_skip_mask"] == 15
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_the_canvas_noise_spares_two_colour_blends_on_both_builds(monkeypatch, platform):
+    # [B169], form B: the engine refuses a launch without edge_tolerance and a
+    # value outside 0..255. 4, measured: no text pixel touched at any contrast,
+    # none on a two-colour gradient. The step band it replaced is not emitted:
+    # the engine no longer reads it.
+    monkeypatch.setattr(sys, "platform", platform)
+    prefs = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")
+    assert prefs["zoom.stealth.canvas.edge_tolerance"] == 4
+    assert "zoom.stealth.canvas.edge_step" not in prefs
 
 
 @pytest.mark.unit

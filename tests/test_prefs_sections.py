@@ -105,16 +105,6 @@ def test_the_pipeline_runs_the_overlay_last():
 
 # ------------------------------------------------------------ the sections
 
-def test_the_canvas_noise_mask_is_a_constant_not_a_branch(profile):
-    """It was `_renderer_lo = "intel"` then `if "intel" in _renderer_lo`, which
-    reads as a per-vendor choice and is a constant compared against itself: the
-    1/8 branch has never executed. Measured across 300 seeds before the change,
-    every profile got 15."""
-    seen = {P.translate_profile_to_prefs(generate_profile(s), timezone="America/New_York")
-            ["zoom.stealth.canvas.noise_skip_mask"] for s in range(200)}
-    assert seen == {P._CANVAS_NOISE_SKIP_MASK} == {15}
-
-
 def test_a_persona_suppresses_the_extension_clearing(profile):
     """With a persona the coherent extension lists were already applied; with
     none, they are cleared so the host-real renderer reports its native set. The

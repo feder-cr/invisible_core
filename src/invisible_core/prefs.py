@@ -842,19 +842,25 @@ _BASELINE: Dict[str, Any] = {
     # DevTools anti-detection.
     "zoom.stealth.debugger.force_detach":                 True,
 
-    # Canvas substitution (Option B for canvas) - replace pixels with hash(seed,idx),
-    # uniform-skip (red-box exact, masking-safe) + full overwrite. Makes the canvas
-    # render a pure function of (seed) = HOST-INDEPENDENT (kills the DWrite-vs-FreeType
-    # text-raster leak: Canvas Hash + Font hash were the residual Win!=Linux signals).
-    # ON by default (paired with webgl.substitute_pixels).
+    # The canvas noise: one function of (seed) applied to the BUFFER, wherever a
+    # canvas becomes readable, instead of one rewrite per reading method ([B169],
+    # form B). A drawn canvas keeps the colour count of a real one: the old
+    # substitution turned a 96x48 drawing into 4608 colours on 4608 pixels,
+    # which hCaptcha's hsw.js reads, and any page can count. The WebGL readback
+    # and the noise mask that tuned the old algorithms
+    # (`webgl.substitute_pixels`, `canvas.noise_skip_mask`) went with them: the
+    # engine reads neither.
     "zoom.stealth.canvas.substitute_pixels":              True,
-
-    # WebGL substitution (Option B) - replace readback/snapshot RGB with
-    # hash(seed,idx), endpoint-preserving. Makes the WebGL render hash a pure
-    # function of (seed, dims) = HOST-INDEPENDENT, so no per-host hw_seed
-    # calibration is needed (the gamma path was per-host: NVIDIA/Arc-on-Win clean
-    # seeds went dirty on the Linux GL backend). ON by default.
-    "zoom.stealth.webgl.substitute_pixels":              True,
+    # A pixel whose 3x3 neighbourhood is a blend of two colours, to within this
+    # many levels per channel, is left alone: the edge of text, or of anything
+    # drawn in one colour over another, stays what the rasteriser made it. It
+    # replaced a band of N pixels from an edge, which could not tell low-contrast
+    # coloured text from a gradient (retail draws gradient-like steps on such
+    # text too). 4, measured: no text pixel touched at any contrast, none on a
+    # two-colour gradient, thousands on real fingerprinting canvases. 0 is a
+    # valid declaration; the engine refuses a launch without one and a value
+    # outside 0..255.
+    "zoom.stealth.canvas.edge_tolerance":                 4,
 
     # WebGPU presence consistency. Firefox enables dom.webgpu.enabled by default on
     # Windows/Mac-ARM but NOT on Linux/Mac-x64. We ALWAYS claim Windows, so force it ON
@@ -1069,27 +1075,7 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
     return persona
 
 
-#: The canvas-noise mask, pinned to the Intel rate (1/16, ~6.25%).
-#:
-#: The mask is calibrated to the REAL host GPU's rendering variance - the canvas
-#: is drawn by real hardware, NOT the persona's claimed GPU, so it must NOT
-#: follow the persona (a non-Intel persona on an Intel host would over-noise).
-#: Intel has lower natural rendering variance than NVIDIA/AMD, so the 1/8 rate
-#: over-amplifies the FP Pro tampering_ml signal.
-#:
-#: This was written as `_renderer_lo = "intel"` followed by
-#: `if "intel" in _renderer_lo: ... else: 7`, which reads as a per-vendor choice
-#: and is not one: the condition is a constant compared against itself, so the
-#: 1/8 branch has never executed. Measured across 300 seeds, every profile gets
-#: 15. Written as the constant it is, with the reason it is constant - a dead
-#: branch that looks live is a decision the next reader thinks was made.
-#:
-#: To make it host-dependent again, sample the REAL renderer here; do not
-#: reintroduce the branch over a literal.
-_CANVAS_NOISE_SKIP_MASK = 15
-
-
-def _apply_canvas_and_msaa(prefs: Dict[str, Any], profile: Profile) -> None:
+def _apply_msaa(prefs: Dict[str, Any], profile: Profile) -> None:
     # MSAA: 4 (Firefox's default for ANGLE) on BOTH builds, so gl.SAMPLES is
     # constant across all sessions and identical on the two platforms. Different
     # MSAA values cause different CN-set parameters hashes even with the same
@@ -1117,7 +1103,6 @@ def _apply_canvas_and_msaa(prefs: Dict[str, Any], profile: Profile) -> None:
     # prefs["zoom.stealth.webgl.msaa"]        = _msaa
     prefs["webgl.msaa-samples"]             = _msaa
     prefs["webgl.msaa-force"]               = _msaa > 0
-    prefs["zoom.stealth.canvas.noise_skip_mask"] = _CANVAS_NOISE_SKIP_MASK
 
 
 def _apply_screen(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -1345,6 +1330,9 @@ def _apply_rasterisation(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["gfx.font_rendering.cleartype_params.rendering_mode"]    = f.cleartype_rendering_mode
     prefs["gfx.font_rendering.freetype.gamma"]                     = f.freetype_gamma
     prefs["gfx.font_rendering.freetype.enhanced_contrast"]         = f.freetype_contrast
+    # What decides whether the ClearType parameters apply at all: with the engine
+    # on, it is read from here instead of SystemParametersInfo ([B362]).
+    prefs["zoom.stealth.text.system_quality"]                      = f.system_text_quality
 
 
 def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
@@ -1398,6 +1386,8 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     # font FILE (it is what the rasteriser does to an edge), and putting it
     # there meant changing it required a Firefox rebuild. Empty string disables
     # the snap, which is what a caller wants when measuring the tell itself.
+    # The profile looks it up from the declared ClearType gamma and contrast
+    # ([B361]), so the two cannot describe different machines.
     prefs["zoom.stealth.text.coverage_ladder"] = ",".join(
         str(int(v)) for v in profile.font.alpha_ladder)
     # The whole font manifest - families, per-face vertical metrics, the alias
@@ -1796,7 +1786,7 @@ def translate_profile_to_prefs(
     prefs: Dict[str, Any] = dict(_BASELINE)
 
     persona = _apply_gpu_persona(prefs, profile)
-    _apply_canvas_and_msaa(prefs, profile)
+    _apply_msaa(prefs, profile)
     _apply_screen(prefs, profile)
     _apply_hardware(prefs, profile)
     _apply_audio(prefs, profile)

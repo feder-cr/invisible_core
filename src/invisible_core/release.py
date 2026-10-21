@@ -306,6 +306,24 @@ def _seal_tag_from_wheel(whl: Path) -> str:
         return ""
 
 
+def _seal_assets_from_wheel(whl: Path) -> "dict | None":
+    """The seal's assets map from the built wheel, or None if it cannot be read.
+
+    None means 'could not tell', never 'empty'. The publish guard refuses an
+    EMPTY assets map - a LOCAL seal that names no downloadable binary and so must
+    not ship - but an unreadable or absent seal is a DIFFERENT failure, the one
+    the launch-time engine guard already speaks to, and turning it into this
+    refusal would blame the wrong thing.
+    """
+    try:
+        with zipfile.ZipFile(whl) as z:
+            data = json.loads(z.read(f"{PKG_NAME}/seal.json").decode("utf-8"))
+    except Exception:
+        return None
+    assets = data.get("assets")
+    return assets if isinstance(assets, dict) else {}
+
+
 def inspect(root: Path, *, isolated: bool, self_check: bool) -> dict:
     """Build and describe the artifact. Raises GateBroken, never refuses."""
     with tempfile.TemporaryDirectory(prefix="invisible-core-gate-") as td:
@@ -842,6 +860,26 @@ def cmd_publish(args) -> int:
         cmd = [sys.executable, "-m", "twine", "upload", str(whl), str(sdist)]
         if args.repository:
             cmd[4:4] = ["--repository", args.repository]
+        # A core may not be PUBLISHED sealed to nothing downloadable. A seal with
+        # no assets is a LOCAL seal (make_seal --from-tree): it verifies a binary
+        # but names none to fetch, so a published core's first launch fails at
+        # ensure_binary with SealError. It is a legitimate TRANSIENT on a release
+        # branch during a coupled engine+core rebase - the branch pins the new
+        # engine's SOURCE before roll_seal brings the published asset hashes - and
+        # it does NOT block that branch push: the pre-push publish gate runs
+        # `check`, never `publish`, and only on a release tag. This sits on the
+        # publish path, before the dry-run too, so a dry run reports it truthfully.
+        assets = _seal_assets_from_wheel(whl)
+        if assets is not None and not assets:
+            print("\nupload NOT attempted: this core's seal carries no assets, so it is",
+                  file=sys.stderr)
+            print("  a LOCAL seal pinned to no downloadable binary. Publishing it would",
+                  file=sys.stderr)
+            print("  ship a core whose every first launch fails at ensure_binary. Roll",
+                  file=sys.stderr)
+            print("  the published release seal in first, then publish:", file=sys.stderr)
+            print("    python scripts/roll_seal.py <firefox-N>", file=sys.stderr)
+            return EXIT_REFUSED
         if args.dry_run:
             print("\n--dry-run: the gate passed, and this is the upload it authorises:")
             print("    " + " ".join(cmd))

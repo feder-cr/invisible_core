@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, fields as _dc_fields, replace as _dc_r
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ._sampler import sample as _sample_raw
+from ._sampler import _load as _load_data, sample as _sample_raw
 
 # Top level, not deferred: `_webgl_personas` imports nothing from this package at
 # module scope, so there is no cycle to work around - verified by importing the
@@ -283,6 +283,12 @@ class FontProfile:
     #: A detector does not have to compare a hash to tell those apart, it can
     #: COUNT - prod on Linux renders "A" with 149 levels against Windows' 16.
     #: Empty tuple disables the snap.
+    #:
+    #: Looked up from (cleartype_gamma, cleartype_contrast) in
+    #: `data/coverage_ladders.json`, after the pins: the ladder is what those
+    #: two do to a glyph edge, so it is not a value of its own ([B361]). A pin
+    #: of this field still wins, which is how a caller measures the unsnapped
+    #: edge (an empty tuple).
     alpha_ladder: tuple
     #: The whole font manifest the binary parses: families, per-face vertical
     #: metrics, the alias table, the coverage ladder and the per-script
@@ -301,9 +307,9 @@ class FontProfile:
     #: whenever a pref was absent. On the development machine that produces the
     #: answer we want, which is exactly why it went unnoticed.
     #:
-    #: The values are Windows canonical, not sampled: real machines vary these
-    #: with the user's ClearType Tuner, but a persona that varied them would be
-    #: varying something no two of our identities should disagree on.
+    #: The values are an untuned Windows machine's, not sampled: real machines
+    #: vary these with the user's ClearType Tuner, but a persona that varied them
+    #: would be varying something no two of our identities should disagree on.
     #:
     #: Cross-platform note that matters more than the values: Skia's glyph mask
     #: gamma defaults to LINEAR on Linux (DrawTargetSkia.cpp:1850-1856) against
@@ -312,13 +318,19 @@ class FontProfile:
     #: Measured: it moves the canvas text hash on every setting, so the lever
     #: works, but it does NOT close the gap on its own - the residual is the
     #: alpha quantisation, not the curve.
-    cleartype_gamma: int  # /1000 -> 2.2, DWrite's own default
+    cleartype_gamma: int  # /1000 -> 1.8, an untuned Windows machine's ([B361])
     cleartype_contrast: int  # /100  -> 1.0
     cleartype_level: int  # /100  -> 1.0
     cleartype_pixel_structure: int  # DWRITE_PIXEL_GEOMETRY_RGB
     cleartype_rendering_mode: int  # DWRITE_RENDERING_MODE_*, see FONT_CLEARTYPE_RENDERING_MODE
     freetype_gamma: int  # /100  -> 2.2, matching DWrite
     freetype_contrast: int  # /100  -> 1.0
+    #: The text quality the engine would otherwise ask the host for
+    #: (SystemParametersInfo): 0 none, 4 standard antialiasing, 5 ClearType. It
+    #: decides whether the ClearType parameters above apply at all, so on an
+    #: RDP session, a VM or a Server with ClearType off the same binary drew
+    #: different text from the same declaration ([B362]). Declared, never asked.
+    system_text_quality: int
 
 
 @dataclass(frozen=True)
@@ -452,7 +464,7 @@ _PIN_GROUPS = {
              "manifest",
              "cleartype_gamma", "cleartype_contrast", "cleartype_level",
              "cleartype_pixel_structure", "cleartype_rendering_mode",
-             "freetype_gamma", "freetype_contrast"},
+             "freetype_gamma", "freetype_contrast", "system_text_quality"},
 }
 _PIN_TOP = {"dark_theme", "branding"}
 
@@ -557,6 +569,7 @@ _PIN_TO_RAW = {
     "font.cleartype_rendering_mode": "font_cleartype_rendering_mode",
     "font.freetype_gamma": "font_freetype_gamma",
     "font.freetype_contrast": "font_freetype_contrast",
+    "font.system_text_quality": "font_system_text_quality",
     "screen.color_depth": "screen_color_depth",
     "screen.taskbar_px": "taskbar_px",
     "screen.refresh_hz": "screen_refresh_hz",
@@ -577,7 +590,13 @@ _PIN_TO_RAW = {
 #: Invariant, so not sampled: DirectWrite reads them from the machine's own
 #: ClearType settings, which differ per monitor and per user, and a value that
 #: varies with the host is the thing being closed here, not a knob.
-FONT_CLEARTYPE_GAMMA = 2200
+#:
+#: ⛔ 1800, not 2200 ([B361]). 2200 is DirectWrite's API default, and it was
+#: declared as "Windows' own", while the coverage ladder declared beside it was
+#: the one 1800 draws: measured on retail Firefox 151 with the machine's
+#: ClearType untuned, the 1800/100 ladder is the one the core had always
+#: shipped, byte for byte, and 2200/100 is another. One key now decides both.
+FONT_CLEARTYPE_GAMMA = 1800
 FONT_CLEARTYPE_CONTRAST = 100
 FONT_CLEARTYPE_LEVEL = 100
 FONT_CLEARTYPE_PIXEL_STRUCTURE = 1
@@ -748,13 +767,35 @@ FONT_UI_SIZE = "12"          # string: Preferences::GetFloat parses text
 FONT_DIALOG_FAMILY = "MS Shell Dlg 2"
 FONT_MONOSPACE_SIZE = 13     # Firefox ships 13 on Windows, 12 in its Unix block
 
-#: DirectWrite's grayscale coverage ladder, 17 levels. Lives here rather than in
-#: the binary's font manifest because it is not a property of any font file: it
-#: is what the Windows rasteriser does to a glyph edge, and it belongs beside
-#: the other things the core declares about "what Windows looks like".
-FONT_ALPHA_LADDER = (
-    0, 18, 35, 53, 70, 87, 104, 121, 138, 153, 169, 185, 200, 215, 230, 243, 255,
-)
+#: The text quality an untuned Windows desktop reports: ClearType.
+FONT_SYSTEM_TEXT_QUALITY = 5
+#: The values the engine accepts for it; anything else is refused at its read.
+SYSTEM_TEXT_QUALITIES = (0, 4, 5)
+
+#: DirectWrite's grayscale coverage ladder, 17 levels, per (gamma, contrast).
+#: Lives here rather than in the binary's font manifest because it is not a
+#: property of any font file: it is what the Windows rasteriser does to a glyph
+#: edge. MEASURED, not computed: no formula reproduces these bytes (the closest
+#: model misses by 1 on a quarter of the values), so the file is generated from
+#: captures of retail Firefox and never edited by hand ([B361]).
+COVERAGE_LADDERS = {
+    (int(row["gamma"]), int(row["contrast"])): tuple(int(v) for v in row["ladder"])
+    for row in _load_data("coverage_ladders.json")["ladders"]
+}
+
+
+def coverage_ladder(gamma: int, contrast: int) -> tuple:
+    """The ladder (gamma, contrast) draws, refused when it was never measured.
+
+    The domain is finite and known: a key without a measured row has no ladder
+    to send, and inventing one would be the second source this replaced.
+    """
+    key = (int(gamma), int(contrast))
+    if key not in COVERAGE_LADDERS:
+        raise ValueError(
+            "no measured coverage ladder for ClearType gamma %d, contrast %d; "
+            "the measured keys are %s" % (key[0], key[1], sorted(COVERAGE_LADDERS)))
+    return COVERAGE_LADDERS[key]
 
 
 def branding_archive(branding: str) -> Path:
@@ -928,7 +969,6 @@ def generate_profile(
     raw.setdefault("font_ui_size", FONT_UI_SIZE)
     raw.setdefault("font_dialog_family", FONT_DIALOG_FAMILY)
     raw.setdefault("font_monospace_size", FONT_MONOSPACE_SIZE)
-    raw.setdefault("font_alpha_ladder", FONT_ALPHA_LADDER)
     raw.setdefault("font_manifest", FONT_MANIFEST)
     raw.setdefault("font_cleartype_gamma", FONT_CLEARTYPE_GAMMA)
     raw.setdefault("font_cleartype_contrast", FONT_CLEARTYPE_CONTRAST)
@@ -937,6 +977,7 @@ def generate_profile(
     raw.setdefault("font_cleartype_rendering_mode", FONT_CLEARTYPE_RENDERING_MODE)
     raw.setdefault("font_freetype_gamma", FONT_FREETYPE_GAMMA)
     raw.setdefault("font_freetype_contrast", FONT_FREETYPE_CONTRAST)
+    raw.setdefault("font_system_text_quality", FONT_SYSTEM_TEXT_QUALITY)
     raw.setdefault("screen_color_depth", SCREEN_COLOR_DEPTH)
     raw.setdefault("taskbar_px", TASKBAR_PX)
     raw.setdefault("screen_refresh_hz", SCREEN_REFRESH_HZ)
@@ -973,6 +1014,14 @@ def generate_profile(
         # "screen.avail_height": 888}` changes ZERO emitted preferences.
         if "screen.taskbar_px" in pin:
             raw["screen_avail_h"] = int(raw["screen_h"]) - int(raw["taskbar_px"])
+    # After the pins, from the gamma and contrast that are actually declared:
+    # a pinned gamma takes its own ladder with it ([B361]).
+    if "font_alpha_ladder" not in raw:
+        raw["font_alpha_ladder"] = coverage_ladder(raw["font_cleartype_gamma"],
+                                                   raw["font_cleartype_contrast"])
+    if int(raw["font_system_text_quality"]) not in SYSTEM_TEXT_QUALITIES:
+        raise ValueError("font.system_text_quality must be one of %s, not %r"
+                         % (SYSTEM_TEXT_QUALITIES, raw["font_system_text_quality"]))
 
     return Profile(
         seed=int(raw["stealth_seed"]),
@@ -1031,6 +1080,7 @@ def generate_profile(
             cleartype_rendering_mode=int(raw["font_cleartype_rendering_mode"]),
             freetype_gamma=int(raw["font_freetype_gamma"]),
             freetype_contrast=int(raw["font_freetype_contrast"]),
+            system_text_quality=int(raw["font_system_text_quality"]),
         ),
         desktop=DesktopProfile(**{
             name: type(_DESKTOP_DEFAULTS[name])(raw[raw_key])
