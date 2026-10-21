@@ -186,14 +186,33 @@ class ProcessOutput:
         with self._cv:
             while not self._ready and not self._eof:
                 if process.poll() is not None:
-                    drain = time.monotonic() + 1.0
-                    while not self._eof and time.monotonic() < drain:
-                        self._cv.wait(0.05)
+                    self._drain_locked()
                     break
                 if deadline.passed():
                     break
                 self._cv.wait(deadline.slice(0.05))
             return self._ready
+
+    #: How long the browser's last lines are waited for once it has gone.
+    DRAIN = 1.0
+
+    def _drain_locked(self) -> None:
+        drain = time.monotonic() + self.DRAIN
+        while not self._eof and time.monotonic() < drain:
+            self._cv.wait(0.05)
+
+    def settle(self) -> None:
+        """Wait, up to `DRAIN`, for the browser's output to end.
+
+        ⛔ THE BROWSER'S LAST LINE TRAVELS ON ANOTHER PIPE. A browser that
+        refuses and exits prints the reason on its output and closes both
+        pipes at once, and nothing orders the two readers: the connection's
+        reader can wake a waiting command before this one has read the line
+        that says why. Reading the tail at that moment answers "the pipe
+        closed" with the reason still in flight (a5, 2026-10-21: an
+        undeclared pref refused during `Browser.newPage`)."""
+        with self._cv:
+            self._drain_locked()
 
     def tail(self, n: int = 15) -> list:
         with self._cv:
@@ -431,11 +450,13 @@ class Connection(EventListeners):
                 pending = list(self._pending.values())
                 self._pending.clear()
             for ready, box, _ in pending:
-                # Named, so `send` raises the closed-target class and the
-                # client sees the browser is GONE rather than a refusal.
-                box.append(({"error": {"name": "TargetClosedError",
-                                       "message": "the pipe closed"}},
-                            self.delivered))
+                # A mark, not a message: `send_placed` raises the closed-target
+                # class with the same `_closed_error` as a call made after the
+                # close, so the command in flight names why too. Building the
+                # sentence here, on this thread, would read the browser's
+                # output before it has arrived (`ProcessOutput.settle`), and
+                # would be a second place that knows what a closed pipe says.
+                box.append(({"closed": True}, self.delivered))
                 ready.set()
             # And the waits on an event, which no reply would ever wake.
             self.announce_closed()
@@ -503,6 +524,10 @@ class Connection(EventListeners):
         look like from here."""
         parts = []
         code = None
+        # The output first: its end is the browser's, so the exit code read
+        # after it is the one the browser had (`ProcessOutput.settle`).
+        if self.output is not None:
+            self.output.settle()
         if self._process is not None:
             try:
                 code = self._process.poll()
@@ -587,12 +612,12 @@ class Connection(EventListeners):
                 "look at the readiness signal before the pipe."
                 % (method, timeout))
         response, place = box[0]
+        if "closed" in response:
+            raise self._closed_error(method)
         if "interrupted" in response:
             raise Interrupted(*response["interrupted"])
         if "error" in response:
             e = response["error"]
-            if e.get("name") == "TargetClosedError":
-                raise TargetClosedError("%s: %s" % (method, e.get("message", e)))
             raise ProtocolError("%s: %s" % (method, e.get("message", e)))
         return response.get("result"), place
 
@@ -648,9 +673,13 @@ class Connection(EventListeners):
             msg["sessionId"] = session
         self._write(msg)
 
-    def _closed_error(self) -> TargetClosedError:
-        return TargetClosedError("the pipe is closed: %s%s"
-                                 % (self._error or "", self._why_closed()))
+    def _closed_error(self, waiting: Optional[str] = None) -> TargetClosedError:
+        """What a closed pipe says, to a call made after it closed and to the
+        one (`waiting`, its method) that was waiting for a reply when it did:
+        the same reason for both, which until 51.48.0 only the first got."""
+        head = ("%s: the pipe closed" % waiting) if waiting else "the pipe is closed"
+        return TargetClosedError("%s: %s%s"
+                                 % (head, self._error or "", self._why_closed()))
 
     def _write(self, msg: dict) -> bool:
         """Writes one message; False, writing nothing, once `close` has
