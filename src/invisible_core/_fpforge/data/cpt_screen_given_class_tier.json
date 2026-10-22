@@ -14,7 +14,8 @@
    "ah": "availHeight"
   },
   "source": "Curated Windows desktop/laptop resolutions. Restricted to width >= 1920 to avoid FP Pro's server-side screen_resolution normalization (FP Pro sorts non-standard landscape resolutions like 1536x864 into [smaller, larger] order in raw_device_attributes.screen_resolution, appearing flipped vs our spoof). All retained resolutions are common and NOT normalized by FP Pro.",
-  "note": "Auto-generated from single-parent CPT by tier-splitting. 'standard' matches original distribution; 'budget' biases towards low-magnitude values; 'premium' biases towards high-magnitude values. Regenerated after integrated_modern tuning (Windows real distribution: 1440p/1600p less common than previously modeled)."
+  "note": "Auto-generated from single-parent CPT by tier-splitting. 'standard' matches original distribution; 'budget' biases towards low-magnitude values; 'premium' biases towards high-magnitude values. Regenerated after integrated_modern tuning (Windows real distribution: 1440p/1600p less common than previously modeled).",
+  "dpr_1080p": "1920x1080 panels split 62/24/14 across dpr 1.0/1.25/1.5 in every row that has one (2026-10-22). Anchor: StatCounter desktop screen resolution, worldwide, monthly CSV, which reports CSS pixels, so a 1920x1080 panel reads 1920x1080 at 100%, 1536x864 at 125% and 1280x720 at 150%: Sep 2026 65.7/23.4/11.0, Jun 60.8/20.8/18.3, Mar 61.4/26.8/11.8 of those three sizes. The new 1.25 and 1.5 mass is carved from the tail of the row's 1080p@1.0 entry and inserted right after it, so no other cumulative boundary moves: 21.5% of seeds change, and only their dpr. Other panels keep their dpr mix: their scaled CSS sizes are not in StatCounter's top 20, so there is no anchor for them."
  },
  "table": {
   "[\"integrated_old\", \"budget\"]": [
@@ -26,7 +27,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.9836
+    "prob": 0.6098
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.2361
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.1377
    },
    {
     "value": {
@@ -48,7 +69,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.9
+    "prob": 0.558
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.216
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.126
    },
    {
     "value": {
@@ -70,7 +111,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.5745
+    "prob": 0.3562
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.1379
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0804
    },
    {
     "value": {
@@ -92,7 +153,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.7419
+    "prob": 0.5393
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0808
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.1218
    },
    {
     "value": {
@@ -144,7 +225,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.6
+    "prob": 0.4836
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0072
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.1092
    },
    {
     "value": {
@@ -196,7 +297,17 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.2637
+    "prob": 0.1843
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0794
    },
    {
     "value": {
@@ -248,7 +359,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.8889
+    "prob": 0.5512
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.2133
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.1244
    },
    {
     "value": {
@@ -280,7 +411,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.7
+    "prob": 0.434
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.168
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.098
    },
    {
     "value": {
@@ -312,7 +463,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.2897
+    "prob": 0.1796
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0695
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0406
    },
    {
     "value": {
@@ -344,7 +515,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.6172
+    "prob": 0.4352
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0837
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0983
    },
    {
     "value": {
@@ -416,7 +607,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.5
+    "prob": 0.3596
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0592
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0812
    },
    {
     "value": {
@@ -488,7 +699,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.2207
+    "prob": 0.1794
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0008
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0405
    },
    {
     "value": {
@@ -560,7 +791,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.3411
+    "prob": 0.2114
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0819
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0478
    },
    {
     "value": {
@@ -642,7 +893,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.25
+    "prob": 0.155
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.06
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.035
    },
    {
     "value": {
@@ -724,7 +995,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.0899
+    "prob": 0.0557
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0216
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0126
    },
    {
     "value": {
@@ -806,7 +1097,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.3475
+    "prob": 0.2155
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0834
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0486
    },
    {
     "value": {
@@ -868,7 +1179,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.25
+    "prob": 0.155
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.06
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.035
    },
    {
     "value": {
@@ -930,7 +1261,27 @@
      "aw": 1920,
      "ah": 1032
     },
-    "prob": 0.0871
+    "prob": 0.054
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.25,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0209
+   },
+   {
+    "value": {
+     "w": 1920,
+     "h": 1080,
+     "dpr": 1.5,
+     "aw": 1920,
+     "ah": 1032
+    },
+    "prob": 0.0122
    },
    {
     "value": {

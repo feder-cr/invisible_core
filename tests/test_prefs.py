@@ -50,8 +50,8 @@ def test_translate_includes_screen():
     ((2048, 1280), 1.0, (2048, 1280)), ((2048, 1280), 1.25, (1638, 1024)),
     ((2048, 1280), 1.5, (1365, 853)), ((2048, 1280), 2.0, (1024, 640)),
     # the panels the screen table samples at a scale above 100%
-    ((1920, 1080), 1.25, (1536, 864)), ((2560, 1440), 1.25, (2048, 1152)),
-    ((3840, 2160), 1.5, (2560, 1440)),
+    ((1920, 1080), 1.25, (1536, 864)), ((1920, 1080), 1.5, (1280, 720)),
+    ((2560, 1440), 1.25, (2048, 1152)), ((3840, 2160), 1.5, (2560, 1440)),
 ])
 def test_the_screen_a_page_reads_is_the_panel_divided_by_the_scale(panel, dpr, css):
     """Known-bad until 37.33.0: the panel went out as CSS, so a 1920x1080 panel
