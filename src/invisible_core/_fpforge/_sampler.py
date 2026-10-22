@@ -110,9 +110,10 @@ _INDEP = _load("priors_independent.json")
 # hardwareConcurrency: grounded in the REAL Windows marginal (browserforge Windows UAs).
 # cores are OS-level, ~independent of GPU given the OS (browserforge confirms), so this is a
 # root marginal - NOT conditioned on gpu_class/intra_tier. Fixes the old CPT over-representing
-# 6 cores (~28% vs real ~2%). NB: screen size + dpr are intentionally LEFT on their existing
-# nodes (owner's instruction, 2026-06-18: do not touch dpr or the screen sizes,
-# they always break).
+# 6 cores (~28% vs real ~2%). NB: screen sizes stay on their existing nodes (owner's
+# instruction, 2026-06-18: they always break). The dpr of 1920x1080 panels was re-weighted
+# on 2026-10-22 with the owner's go (cpt_screen_given_class_tier.json, _meta.dpr_1080p):
+# touch it again only with a measured anchor and the seed remap measured first.
 _CORES_MARGINAL = [
     {"value": int(e["value"]), "prob": e["prob"]}
     for e in _load("win_hw_marginals.json")["cores"]
@@ -252,8 +253,8 @@ _NETWORK = Network([
     # this, hwc/screen/storage would be independent given gpu_class (noisy).
     Node("intra_tier", parents=["gpu_class"], cpt=_cpt_from_table(_CPT_INTRA_TIER)),
     # hw_concurrency: REAL Windows marginal (root, OS-level, not GPU-conditioned). screen +
-    # storage stay jointly coherent via (gpu_class, intra_tier) - screen size deliberately
-    # unchanged (user: dpr + screen sizes break things; leave them).
+    # storage stay jointly coherent via (gpu_class, intra_tier). Screen sizes deliberately
+    # unchanged (owner, 2026-06-18); the 1080p dpr mix follows _meta.dpr_1080p.
     Node("hw_concurrency", parents=[], cpt=_CORES_MARGINAL),
     Node("screen", parents=["gpu_class", "intra_tier"],
          cpt=_cpt_from_table(_CPT_SCREEN)),
