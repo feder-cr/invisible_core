@@ -1102,7 +1102,7 @@ def generate_profile(
 #  The font manifest, verbatim.
 #
 #  GENERATED - produced by scripts/gen_bundle_font_manifest.py in the Firefox
-#  tree from the 125 bundled font files, and pasted here. Do not hand-edit: the
+#  tree from the 120 bundled font files, and pasted here. Do not hand-edit: the
 #  numbers are read out of each face's OS/2, hhea and head tables, so a value
 #  typed here would describe a font that does not exist.
 #
@@ -1433,8 +1433,6 @@ F|Ink Free
 f|inkfree2_00.ttf|0|400|400|100|100|normal|InkFree|1000|910|328|0|527|817|-75|50|325|50
 F|Javanese Text
 f|javatext1_10.ttf|0|400|400|100|100|normal|JavaneseText|2048|2560|2090|0|852|1453|-154|102|512|80
-F|Leelawadee
-f|LEELAWAD.TTF|0|400|400|100|100|normal|Leelawadee|2048|1960|489|0|1024|1434|-178|119|452|119
 F|Leelawadee UI
 f|leelauib5_06.ttf|0|700|700|100|100|normal|LeelawadeeUI-Bold|2048|2210|514|0|1024|1434|-178|119|452|119
 f|LEELAWUI.TTF|0|400|400|100|100|normal|LeelawadeeUI|2048|2210|514|0|1024|1434|-178|119|452|119
@@ -1472,9 +1470,6 @@ f|micross7_03.ttf|0|400|400|100|100|normal|MicrosoftSansSerif|2048|1888|430|0|10
 F|Microsoft Tai Le
 f|taile6_00.ttf|0|400|400|100|100|normal|MicrosoftTaiLe|2048|1899|705|0|1024|1434|-178|119|452|119
 f|taileb6_00.ttf|0|700|700|100|100|normal|MicrosoftTaiLe-Bold|2048|1899|705|0|1024|1434|-178|119|452|119
-F|Microsoft Uighur
-f|MSUIGHUB.TTF|0|700|700|100|100|normal|MicrosoftUighur-Bold|2048|1400|648|166|571|968|-154|102|512|84
-f|MSUIGHUR.TTF|0|400|400|100|100|normal|MicrosoftUighur|2048|1400|648|166|572|966|-154|102|512|84
 F|Microsoft YaHei
 f|msyh6_31.ttc|0|400|400|100|100|normal|MicrosoftYaHei|2048|2167|536|0|1106|1549|-178|129|655|102
 F|Microsoft YaHei UI
@@ -1556,10 +1551,6 @@ F|Webdings
 f|webdings5_01.ttf|0|400|400|100|100|normal|Webdings|2048|1638|410|0|0|0|-273|100|530|100
 F|Wingdings
 f|wingding5_01.ttf|0|400|400|100|100|normal|Wingdings-Regular|2048|1841|432|0|0|0|-200|100|800|100
-F|Wingdings 2
-f|wingdng2.ttf|0|400|400|100|100|normal|Wingdings2|2048|1727|432|0|0|0|-200|100|800|100
-F|Wingdings 3
-f|wingdng3.ttf|0|400|400|100|100|normal|Wingdings3|2048|1900|432|0|0|0|-200|100|800|100
 F|Yu Gothic
 f|yugothm1_95.ttc|0|500|500|100|100|normal|YuGothic-Medium|2048|2028|608|645|1117|1581|-205|104|858|94
 F|Yu Gothic UI
