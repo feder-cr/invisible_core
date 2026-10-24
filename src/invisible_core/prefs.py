@@ -314,19 +314,22 @@ _BASELINE: Dict[str, Any] = {
     "privacy.fingerprintingProtection.pbmode":                       False,
     "privacy.fingerprintingProtection.remoteOverrides.enabled":      False,
 
-    # Master toggle for Firefox's baseline fingerprinting protection. FF151
-    # graduated it from nightly-only to all channels; its 3 desktop targets are
-    # EfficientCanvasRandomization + ScreenAvailToResolution + MaxTouchPointsCollapse.
-    # EfficientCanvasRandomization re-noises the 2D canvas at the image-encoder
-    # stage, DOWNSTREAM of our seeded substitution, with a per-session key →
-    # canvas hash drifts every session (fppro_consistency FAIL on FF151).
-    # We do our own seeded canvas/screen/touch via patches, so turn Firefox's
-    # baseline off (same rationale as the two prefs above). FF150 release had
-    # these off already (nightly-only), so this RESTORES shipped-FF150 behavior.
-    # Verified A/B: canvas becomes seed-deterministic (canvas_geo host-independent;
-    # canvas_text stays host-dependent via glyph rasterization on FF150 AND FF151,
-    # a pre-existing property, not a rebase regression). e2e/screen/flags unchanged.
-    "privacy.baselineFingerprintingProtection":                      False,
+    # Firefox 151's baseline fingerprinting protection, ON as retail ships it,
+    # with only its canvas target left to it. Its three desktop targets are
+    # EfficientCanvasRandomization, ScreenAvailToResolution and
+    # MaxTouchPointsCollapse; the screen and touch values are already declared
+    # by this package as retail reports them, so the overrides hand back those
+    # two and keep the canvas one.
+    #
+    # EfficientCanvasRandomization does not touch a pixel: it appends a 16-byte
+    # `deBG` chunk, keyed per browsing session and top-level site, to every PNG
+    # that toDataURL/toBlob encode (nsPNGEncoder::MaybeAddCustomMetadata).
+    # Measured 2026-10-24 on signed retail 151.0 (BuildID 20260516144017): two
+    # launches gave the same pixels and two different deBG values. With this
+    # off, our PNGs were the only Firefox 151 PNGs without the chunk.
+    "privacy.baselineFingerprintingProtection":                      True,
+    "privacy.baselineFingerprintingProtection.overrides":
+        "-ScreenAvailToResolution,-MaxTouchPointsCollapse",
 
     # WebRTC: enabled, looks like a real Firefox behind NAT, no real-IP leak.
     # obfuscate_host_addresses=true → host candidate is `<uuid>.local` mDNS,
@@ -842,24 +845,19 @@ _BASELINE: Dict[str, Any] = {
     # DevTools anti-detection.
     "zoom.stealth.debugger.force_detach":                 True,
 
-    # The canvas noise: one function of (seed) applied to the BUFFER, wherever a
-    # canvas becomes readable, instead of one rewrite per reading method ([B169],
-    # form B). A drawn canvas keeps the colour count of a real one: the old
-    # substitution turned a 96x48 drawing into 4608 colours on 4608 pixels,
-    # which hCaptcha's hsw.js reads, and any page can count. The WebGL readback
-    # and the noise mask that tuned the old algorithms
-    # (`webgl.substitute_pixels`, `canvas.noise_skip_mask`) went with them: the
-    # engine reads neither.
+    # The WebGL readback noise: one function of (seed) applied to the buffer
+    # wherever a WebGL canvas becomes readable ([B169], form B). From
+    # firefox-52 a 2D canvas is never projected: it reads back as it was drawn,
+    # as retail does, because a public fingerprinting test draws 64 random 1x1
+    # pixels and reads them back, and the projection changed 6 of 64 (invisible
+    # 0.41, 2026-10-24) where retail 151 changed 0. Where real machines differ on a 2D canvas,
+    # they differ in how they DRAW: the display scale (the persona's dpr), the
+    # ClearType tuning (`profile.font`), the fonts. WebGL is unchanged here, on
+    # purpose: one surface at a time.
     "zoom.stealth.canvas.substitute_pixels":              True,
     # A pixel whose 3x3 neighbourhood is a blend of two colours, to within this
-    # many levels per channel, is left alone: the edge of text, or of anything
-    # drawn in one colour over another, stays what the rasteriser made it. It
-    # replaced a band of N pixels from an edge, which could not tell low-contrast
-    # coloured text from a gradient (retail draws gradient-like steps on such
-    # text too). 4, measured: no text pixel touched at any contrast, none on a
-    # two-colour gradient, thousands on real fingerprinting canvases. 0 is a
-    # valid declaration; the engine refuses a launch without one and a value
-    # outside 0..255.
+    # many levels per channel, is left alone. 4, measured; the engine refuses a
+    # launch without one and a value outside 0..255.
     "zoom.stealth.canvas.edge_tolerance":                 4,
 
     # WebGPU presence consistency. Firefox enables dom.webgpu.enabled by default on

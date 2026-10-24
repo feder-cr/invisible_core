@@ -68,12 +68,13 @@ def test_the_emitted_ladder_is_the_row_of_the_emitted_gamma_and_contrast():
 
 
 def test_a_pinned_gamma_takes_its_own_ladder():
+    drawn = generate_profile(42).font
     other = next(g for g, c in sorted(P.COVERAGE_LADDERS)
-                 if c == P.FONT_CLEARTYPE_CONTRAST and g != P.FONT_CLEARTYPE_GAMMA)
+                 if c == drawn.cleartype_contrast and g != drawn.cleartype_gamma)
     font = generate_profile(42, pin={"font.cleartype_gamma": other}).font
-    assert font.alpha_ladder == P.COVERAGE_LADDERS[(other, P.FONT_CLEARTYPE_CONTRAST)]
-    assert font.alpha_ladder != P.COVERAGE_LADDERS[(P.FONT_CLEARTYPE_GAMMA,
-                                                    P.FONT_CLEARTYPE_CONTRAST)]
+    assert font.alpha_ladder == P.COVERAGE_LADDERS[(other, drawn.cleartype_contrast)]
+    assert font.alpha_ladder != P.COVERAGE_LADDERS[(drawn.cleartype_gamma,
+                                                    drawn.cleartype_contrast)]
 
 
 @pytest.mark.parametrize("pin", [{"font.cleartype_gamma": 2000},
