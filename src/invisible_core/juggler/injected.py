@@ -188,6 +188,16 @@ class InjectedScript:
         #: an objectId minted in id-15 to a frame whose worlds were now id-20
         #: and id-21. `Cannot find object with id`, while `evaluate()` kept
         #: working because it resolves the context afresh every time.
+        #:
+        #: ⛔ THE QUESTION IS ONLY AS GOOD AS THE IDS, and they have to name
+        #: one world for the whole session. Until firefox-53 the engine counted
+        #: them per content process, so a page that moved to another process
+        #: got its worlds named as the old ones, in the same order: the cached
+        #: id-8 matched the new id-8 and the old script (id-10) was sent to it
+        #: for good (measured 2026-10-24 on a page served with
+        #: Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy). The
+        #: engine now draws them unique per session (juggler Runtime.js
+        #: `generateId`), which is what makes this comparison an answer.
         self._handle: dict = {}
         #: The caller's own init scripts, in the order they were added. Kept
         #: here because this object is the one that owns the engine's init
@@ -228,6 +238,16 @@ class InjectedScript:
             # be wrong: a handle is usable exactly while the context it was
             # minted in is still the frame's utility context. Whether an event
             # arrived stops mattering.
+        elif method == "Runtime.executionContextsCleared":
+            # Every world of the page is gone; the ones it still has are
+            # announced again right after (`_reportExecutionContexts` in
+            # PageAgent.js: "after the client drops the ones it held"). Sent
+            # when the page moves to another content process and when a
+            # document comes back from the back forward cache. Not handled
+            # until firefox-53, so the dead ids stayed here until a creation
+            # overwrote them and the worlds of frames that did not come back
+            # stayed for good.
+            self.contexts.clear()
 
     # ── the world ───────────────────────────────────────────────────────────
     def install(self) -> None:
