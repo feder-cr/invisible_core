@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "P(ClearType tuning) of a Windows machine: the (gamma x1000, enhanced",
+    "contrast x100) pair DirectWrite draws text with, drawn per seed from its",
+    "own stream (derive_cleartype_tuning). A weighted pool like every other",
+    "pool in this package: cumulative, in order, never reordered and never",
+    "shortened in place.",
+    "",
+    "This is where real machines differ on canvas. Retail Firefox 151 never",
+    "changes a pixel between drawing and reading, and a small canvas (every",
+    "fingerprinting canvas) is drawn the same on the GPU and in software:",
+    "measured 2026-10-24 on signed retail 151.0, gfx.canvas.accelerated true and",
+    "false gave the same text and the same shapes. What moves a canvas from one",
+    "Windows machine to the next, with the same fonts, is how the text edge is",
+    "drawn, and that is the user's ClearType tuning.",
+    "",
+    "Every key is a row of coverage_ladders.json, measured on retail Firefox",
+    "151; profile.coverage_ladder refuses any other. The 12 renders are real",
+    "and different (12 text hashes, random-pixel readback 0/64 on each, geometry",
+    "unchanged, 2026-10-24).",
+    "",
+    "ALL THE MASS IS ON 1800/100, THE UNTUNED MACHINE, DELIBERATELY. That is a",
+    "data statement, not a placeholder: there is no measured share of Windows",
+    "users who ran the ClearType Text Tuner, and inventing one is the guess",
+    "this codebase keeps having to undo (cpt_touch_given_class.json carries",
+    "the same note). The other measured keys are listed at 0 so that a",
+    "measured share is an edit to the numbers in this file: no Python change,",
+    "no browser rebuild, and every seed that keeps the untuned row keeps its",
+    "canvas."
+  ],
+  "source": {
+    "keys": "data/coverage_ladders.json (retail Firefox 151.0 for Windows, BuildID 20260516144017)",
+    "untuned": "retail 151.0 on a machine with HKCU\\Software\\Microsoft\\Avalon.Graphics absent draws the 1800/100 ladder (coverage_ladders.json source; re-measured 2026-10-24)",
+    "frequencies": "not measured"
+  },
+  "entries": [
+    {"value": [1800, 100], "prob": 1.0},
+    {"value": [1800, 50], "prob": 0.0},
+    {"value": [1800, 0], "prob": 0.0},
+    {"value": [2200, 100], "prob": 0.0},
+    {"value": [2200, 50], "prob": 0.0},
+    {"value": [2200, 0], "prob": 0.0},
+    {"value": [1400, 100], "prob": 0.0},
+    {"value": [1400, 50], "prob": 0.0},
+    {"value": [1400, 0], "prob": 0.0},
+    {"value": [1000, 100], "prob": 0.0},
+    {"value": [1000, 50], "prob": 0.0},
+    {"value": [1000, 0], "prob": 0.0}
+  ]
+}

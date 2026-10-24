@@ -33,7 +33,7 @@ Sampling is deterministic per stealth_seed via a private random.Random.
 import json
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ..constants import (OSCPU_OVERRIDE, PLATFORM_OVERRIDE, TASKBAR_PX,
                          USER_AGENT)
@@ -129,6 +129,7 @@ _CPT_BROWSING = _load("cpt_browsing_given_class.json")["table"]
 # file says why; the point of the table is that the value is sampled data in
 # this package rather than a literal anywhere.
 _CPT_TOUCH = _load("cpt_touch_given_class.json")["table"]
+_CLEARTYPE_TUNING = _load("cleartype_tuning.json")["entries"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -361,6 +362,26 @@ def derive_media_enumeration_ms(seed: int) -> int:
     return random.Random("media_enumeration_ms:%d" % int(seed)).randint(240, 640)
 
 
+def derive_cleartype_tuning(seed: int) -> Tuple[int, int]:
+    """The machine's ClearType tuning, (gamma x1000, enhanced contrast x100),
+    drawn from `cleartype_tuning.json`.
+
+    The one thing that makes canvas text differ between Windows machines with
+    the same fonts: the edge DirectWrite draws, which the Linux build follows
+    through the coverage ladder of the same key. Declared, never read from the
+    host. Its own stream, like `derive_max_touch_points`, so it moves no other
+    field; the table says why all its mass is on the untuned machine.
+    """
+    r = random.Random("cleartype_tuning:%d" % int(seed)).random()
+    acc = 0.0
+    for entry in _CLEARTYPE_TUNING:
+        acc += float(entry["prob"])
+        if r < acc:
+            return int(entry["value"][0]), int(entry["value"][1])
+    last = next(e for e in reversed(_CLEARTYPE_TUNING) if float(e["prob"]) > 0)
+    return int(last["value"][0]), int(last["value"][1])
+
+
 class Forge:
     """Fingerprint forge - single seed → coherent bundle."""
 
@@ -428,6 +449,10 @@ class Forge:
             # The first enumerateDevices() time, from its own stream. See
             # derive_media_enumeration_ms.
             "media_enumeration_ms": derive_media_enumeration_ms(self.seed),
+            # The ClearType tuning text is drawn with, from its own stream. See
+            # derive_cleartype_tuning.
+            **dict(zip(("font_cleartype_gamma", "font_cleartype_contrast"),
+                       derive_cleartype_tuning(self.seed))),
             # Independent marginals
             "dark_theme": int(bundle["dark_theme"]),
             # Bayesian browsing history (per-class P(visited|gpu_class)).

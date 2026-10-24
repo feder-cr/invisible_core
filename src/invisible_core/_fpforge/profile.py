@@ -307,9 +307,10 @@ class FontProfile:
     #: whenever a pref was absent. On the development machine that produces the
     #: answer we want, which is exactly why it went unnoticed.
     #:
-    #: The values are an untuned Windows machine's, not sampled: real machines
-    #: vary these with the user's ClearType Tuner, but a persona that varied them
-    #: would be varying something no two of our identities should disagree on.
+    #: Never read from the host. Gamma and contrast are drawn per seed from
+    #: `data/cleartype_tuning.json`, the user's ClearType Tuner choice and the
+    #: one thing that moves canvas text between Windows machines with the same
+    #: fonts; the other values are an untuned Windows machine's.
     #:
     #: Cross-platform note that matters more than the values: Skia's glyph mask
     #: gamma defaults to LINEAR on Linux (DrawTargetSkia.cpp:1850-1856) against
@@ -587,15 +588,20 @@ _PIN_TO_RAW = {
 
 #: The rasterisation parameters a Windows machine reports, and the FreeType
 #: equivalents that make the Linux build produce the same coverage curve.
-#: Invariant, so not sampled: DirectWrite reads them from the machine's own
-#: ClearType settings, which differ per monitor and per user, and a value that
-#: varies with the host is the thing being closed here, not a knob.
+#: DirectWrite reads them from the machine's own ClearType settings, which
+#: differ per monitor and per user; a value that varies with the HOST is the
+#: thing being closed here. Gamma and contrast vary with the PERSONA instead,
+#: drawn from data/cleartype_tuning.json; the rest are constants.
 #:
 #: ⛔ 1800, not 2200 ([B361]). 2200 is DirectWrite's API default, and it was
 #: declared as "Windows' own", while the coverage ladder declared beside it was
 #: the one 1800 draws: measured on retail Firefox 151 with the machine's
 #: ClearType untuned, the 1800/100 ladder is the one the core had always
 #: shipped, byte for byte, and 2200/100 is another. One key now decides both.
+#:
+#: Gamma and contrast are the UNTUNED machine's key, not a floor: the profile
+#: draws them from data/cleartype_tuning.json, whose untuned row must be this
+#: key (tests/test_cleartype_tuning.py).
 FONT_CLEARTYPE_GAMMA = 1800
 FONT_CLEARTYPE_CONTRAST = 100
 FONT_CLEARTYPE_LEVEL = 100
@@ -970,8 +976,8 @@ def generate_profile(
     raw.setdefault("font_dialog_family", FONT_DIALOG_FAMILY)
     raw.setdefault("font_monospace_size", FONT_MONOSPACE_SIZE)
     raw.setdefault("font_manifest", FONT_MANIFEST)
-    raw.setdefault("font_cleartype_gamma", FONT_CLEARTYPE_GAMMA)
-    raw.setdefault("font_cleartype_contrast", FONT_CLEARTYPE_CONTRAST)
+    # No setdefault for cleartype gamma and contrast: the forge samples them
+    # (derive_cleartype_tuning), and a floor here would be a second source.
     raw.setdefault("font_cleartype_level", FONT_CLEARTYPE_LEVEL)
     raw.setdefault("font_cleartype_pixel_structure", FONT_CLEARTYPE_PIXEL_STRUCTURE)
     raw.setdefault("font_cleartype_rendering_mode", FONT_CLEARTYPE_RENDERING_MODE)
