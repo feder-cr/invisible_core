@@ -205,6 +205,9 @@ class Lifecycle:
         #: which keeps the rule; `_check_alive` raises it).
         self._interruptions = 0
         self._interruption: Optional[tuple] = None
+        #: The page's planned navigations not yet started: a `Page.linkClicked`
+        #: "before" whose "after" has not arrived (`wait_for_action_signals`).
+        self._link_clicks = 0
         #: Who hears what only this object can decide: `announce(what,
         #: frame_id, url=None)`, called UNDER the lock and BEFORE any waiter
         #: is woken, so whatever it sends upward is on its way before the
@@ -346,6 +349,17 @@ class Lifecycle:
     def _apply(self, method: str, p: dict):
         if method == "Page.ready":
             self.ready = True
+            return None
+
+        if method == "Page.linkClicked":
+            # The engine pairs every "before" with one "after", sent when the
+            # planned navigation starts or is cancelled (nsDocShell's
+            # NotifyJugglerLinkClick); the floor is for an engine that does not.
+            if p.get("phase") == "before":
+                self._link_clicks += 1
+            elif self._link_clicks:
+                self._link_clicks -= 1
+            self._cv.notify_all()
             return None
 
         if method == "Page.frameAttached":
@@ -646,6 +660,43 @@ class Lifecycle:
                                   began)
                 if deadline.passed():
                     return None
+                self._cv.wait(deadline.slice(0.05))
+
+    def wait_for_action_signals(self, frame_id: str, since: "NavigationMark",
+                                timeout: Optional[float]) -> None:
+        """After an input action, wait for the navigations it set off: every
+        planned one to start (`Page.linkClicked` "before" ... "after"), and the
+        one `frame_id` started after the mark `since` to commit, abort, or stay
+        in the same document. Playwright's `waitForSignalsCreatedBy`, which its
+        click and press run unless `noWaitAfter`; only the main frame counts,
+        as there (`SignalBarrier.addFrameNavigation`).
+
+        ⛔ FROM FIREFOX 157 A FORM SUBMISSION IS A PLANNED NAVIGATION
+        (`dom.forms.submit_async_navigation`, the retail's default): it starts
+        after the click that submitted it has returned. Measured 2026-10-27:
+        the POST was announced 7 ms after `page.click()` came back, so
+        `click()` then reading the requests saw none, where 151 had it before.
+        The engine now reports the plan before the click's answer, and this
+        waits for it; the page sees the retail's timing either way.
+        """
+        deadline = Deadline(timeout)
+        with self._cv:
+            while True:
+                f = self.frames.get(frame_id)
+                if self._link_clicks == 0:
+                    if (f is None or f.navigation == since.navigation
+                            or f.same_document != since.same_document
+                            or "commit" in f.states
+                            or f.navigation in f.aborted):
+                        return
+                self._check_alive("the navigation started by an action on frame %s"
+                                  % frame_id, since.interruptions)
+                if deadline.passed():
+                    raise TimeoutError(
+                        "an action's navigation did not finish in %.0fs: %d planned "
+                        "navigation(s) not started, frame %s at %s"
+                        % (timeout, self._link_clicks, frame_id,
+                           f.navigation if f else None))
                 self._cv.wait(deadline.slice(0.05))
 
     def wait_for_main_frame(self, timeout: Optional[float] = 20.0) -> str:

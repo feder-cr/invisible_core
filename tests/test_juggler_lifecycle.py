@@ -542,3 +542,90 @@ def test_a_navigation_that_started_and_never_ended_is_named_as_ours():
     msg = str(e.value)
     assert "not our B" not in msg, msg
     assert "our navigation B started and has neither committed nor been aborted" in msg, msg
+
+
+# ── the navigations an action sets off (wait_for_action_signals) ────────────
+#
+# Firefox 157 submits a form as a PLANNED navigation (the retail's
+# dom.forms.submit_async_navigation): it starts after the click returns. The
+# engine brackets the plan with Page.linkClicked "before" / "after"; a click or
+# a press waits for the bracket and for the navigation it started to commit.
+
+def _committed_page():
+    c, v = lifecycle()
+    events(v,
+           ("Page.frameAttached", {"frameId": "F1"}),
+           ("Page.navigationStarted", {"frameId": "F1", "navigationId": "A"}),
+           ("Page.navigationCommitted", {"frameId": "F1", "navigationId": "A", "url": "http://a/"}))
+    return c, v
+
+
+def test_an_action_that_navigates_nowhere_does_not_wait():
+    c, v = _committed_page()
+    since = v.mark("F1")
+    started = time.monotonic()
+    v.wait_for_action_signals("F1", since, timeout=5)
+    assert time.monotonic() - started < 0.5
+
+
+def test_a_planned_form_navigation_is_waited_for_until_it_commits():
+    """The 157 order: the click's answer, then (7 ms later) the navigation."""
+    c, v = _committed_page()
+    since = v.mark("F1")
+    events(v, ("Page.linkClicked", {"phase": "before"}))
+    order = []
+    def plan_runs():
+        events(v, ("Page.navigationStarted", {"frameId": "F1", "navigationId": "B"}),
+               ("Page.linkClicked", {"phase": "after"}))
+        time.sleep(0.2)
+        order.append("committed")
+        events(v, ("Page.navigationCommitted", {"frameId": "F1", "navigationId": "B", "url": "http://a/post"}))
+    threading.Timer(0.1, plan_runs).start()
+    v.wait_for_action_signals("F1", since, timeout=5)
+    order.append("returned")
+    assert order == ["committed", "returned"], order
+    assert v.frames["F1"].url == "http://a/post"
+
+
+def test_a_plan_that_opens_elsewhere_ends_with_its_after():
+    """A link with target=_blank: before and after, and no navigation here."""
+    c, v = _committed_page()
+    since = v.mark("F1")
+    events(v, ("Page.linkClicked", {"phase": "before"}))
+    threading.Timer(0.1, events, (v, ("Page.linkClicked", {"phase": "after"}))).start()
+    started = time.monotonic()
+    v.wait_for_action_signals("F1", since, timeout=5)
+    assert 0.05 < time.monotonic() - started < 2
+
+
+def test_an_aborted_navigation_ends_the_wait():
+    c, v = _committed_page()
+    since = v.mark("F1")
+    events(v, ("Page.navigationStarted", {"frameId": "F1", "navigationId": "B"}))
+    threading.Timer(0.1, events, (v, ("Page.navigationAborted", {
+        "frameId": "F1", "navigationId": "B", "errorText": "NS_BINDING_ABORTED"}))).start()
+    v.wait_for_action_signals("F1", since, timeout=5)
+
+
+def test_a_same_document_navigation_ends_the_wait():
+    c, v = _committed_page()
+    since = v.mark("F1")
+    events(v, ("Page.sameDocumentNavigation", {"frameId": "F1", "url": "http://a/#x"}))
+    v.wait_for_action_signals("F1", since, timeout=5)
+
+
+def test_a_plan_that_never_starts_times_out_and_says_so():
+    c, v = _committed_page()
+    since = v.mark("F1")
+    events(v, ("Page.linkClicked", {"phase": "before"}))
+    with pytest.raises(TimeoutError) as e:
+        v.wait_for_action_signals("F1", since, timeout=0.3)
+    assert "1 planned navigation(s) not started" in str(e.value)
+
+
+def test_an_after_without_a_before_does_not_go_below_zero():
+    c, v = _committed_page()
+    events(v, ("Page.linkClicked", {"phase": "after"}))
+    since = v.mark("F1")
+    v.wait_for_action_signals("F1", since, timeout=1)
+    assert v._link_clicks == 0
