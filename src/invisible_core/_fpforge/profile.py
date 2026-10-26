@@ -706,7 +706,9 @@ ACCESSIBILITY_OVERRIDES = False
 
 #: The files a page can ask the branding for, under chrome://branding/content/
 #: and resource://usercontext-content/branding/ - every name the branding
-#: package of Firefox 151 answers. A page reads them (the about dialog's
+#: package of the Firefox the engine is built from answers (its jar.mn; the
+#: archives are written by scripts/gen_branding_archives.py from the Mozilla
+#: tag in branding/SOURCE.json). A page reads them (the about dialog's
 #: stylesheet rules, the wordmarks' boxes, the images' sizes) and they tell a
 #: build from the retail one, so by engine rule 7 they live here and nowhere
 #: else: the engine keeps no stealth copy and serves the declared archive
