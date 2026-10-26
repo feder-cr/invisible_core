@@ -214,9 +214,11 @@ class Lifecycle:
         #: answer of a wait that the same event satisfies. Set by the page
         #: once its channel exists. `what` is one of `frameAttached` (a frame
         #: id seen for the first time), `frameDetached` (a frame gone, its own
-        #: detach or its parent's new document), `networkidle` and
-        #: `sameDocument`: the frame tree is this object's, and a client that
-        #: keeps frames of its own builds and retires them from these alone.
+        #: detach or its parent's new document), `networkidle`,
+        #: `sameDocument` and `commit` (with `name=` and `navigation=`, the
+        #: commit's id or None for a document re-announced): the frame tree is
+        #: this object's, and a client that keeps frames of its own builds and
+        #: retires them from these alone.
         self.announce = None
         #: The one pending silence check, or None. See `_settle`.
         self._settle_timer: Optional[threading.Timer] = None
@@ -438,6 +440,13 @@ class Lifecycle:
                 # the lifecycle at the commit too.
                 f.states = set()
             f.states.add("commit")
+            # Announced HERE, as `sameDocument` is: the page's `navigated` goes
+            # up before a wait this commit ends is answered. ⛔ Sent from the
+            # page's own listener, which runs after this one, it raced a
+            # click's answer: from Firefox 157 click() waits for the commit
+            # of the navigation it planned, and `page.url` read right after
+            # it still named the page it had left (2026-10-27).
+            self._tell("commit", f.id, f.url, name=f.name, navigation=nav)
             return f
 
         if method == "Page.navigationAborted":
@@ -494,11 +503,12 @@ class Lifecycle:
             self._last_activity = time.monotonic()
         return None
 
-    def _tell(self, what: str, frame_id: str, url: Optional[str] = None) -> None:
+    def _tell(self, what: str, frame_id: str, url: Optional[str] = None,
+              **detail) -> None:
         """Hand `what` to whoever listens (`announce`), under the lock and
         before any waiter is woken."""
         if self.announce is not None:
-            self.announce(what, frame_id, url)
+            self.announce(what, frame_id, url, **detail)
 
     def _retire(self, frame_id: str, *, itself: bool) -> None:
         """Remove `frame_id`'s descendants, and the frame too if `itself`,

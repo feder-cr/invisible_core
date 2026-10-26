@@ -457,7 +457,7 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
     """
     c, v = lifecycle()
     heard = []
-    v.announce = lambda what, frame_id, url=None: heard.append((what, frame_id))
+    v.announce = lambda what, frame_id, url=None, **_: heard.append((what, frame_id))
     events(v, ("Page.frameAttached", {"frameId": "F1"}),
            ("Page.navigationStarted", {"frameId": "F1", "navigationId": "N0"}),
            ("Page.navigationCommitted", {"frameId": "F1", "navigationId": "N0",
@@ -476,8 +476,9 @@ def test_networkidle_is_born_once_and_announced_without_anyone_waiting():
     # pyppeteer's networkidle2 comes before networkidle0). On a loaded runner
     # the two instants are milliseconds apart: main's CI on 946d1b8 heard
     # networkidle2 first, while every other run heard them in one settle.
-    assert heard[0] == ("frameAttached", "F1"), heard
-    assert sorted(heard[1:]) == [("networkidle", "F1"), ("networkidle2", "F1")], heard
+    # The commit is announced too, since the page sends `navigated` from it.
+    assert heard[:2] == [("frameAttached", "F1"), ("commit", "F1")], heard
+    assert sorted(heard[2:]) == [("networkidle", "F1"), ("networkidle2", "F1")], heard
     announced = list(heard)
     assert "networkidle" in v.frames["F1"].states
 
@@ -510,7 +511,7 @@ def test_a_same_document_goto_answers_after_the_engine_reports_it():
            ("Page.navigationCommitted", {"frameId": "F1", "navigationId": "N0",
                                          "url": "http://a/"}))
     order = []
-    v.announce = lambda what, frame_id, url=None: order.append((what, url))
+    v.announce = lambda what, frame_id, url=None, **_: order.append((what, url))
     real_send = c.send
 
     def send(method, params=None, session=None, timeout=30):
@@ -585,6 +586,42 @@ def test_a_planned_form_navigation_is_waited_for_until_it_commits():
     order.append("returned")
     assert order == ["committed", "returned"], order
     assert v.frames["F1"].url == "http://a/post"
+
+
+def test_the_commit_is_announced_before_the_wait_it_ends_returns():
+    """The page sends `navigated` from this announcement, so the client has
+    the new URL when click() answers. Sent from the page's own listener,
+    which runs after the lifecycle's, it raced the answer: on a 157 engine
+    `page.click("#next")` returned with `page.url` still on the page it had
+    left (2026-10-27).
+
+    Known-bad: no `commit` announcement, or one made after the waiter is woken.
+    """
+    c, v = _committed_page()
+    since = v.mark("F1")
+    order = []
+    v.announce = lambda what, fid, url=None, **detail: order.append(
+        (what, url, detail))
+    events(v, ("Page.linkClicked", {"phase": "before"}))
+    threading.Timer(0.1, events, (v,
+        ("Page.navigationStarted", {"frameId": "F1", "navigationId": "B"}),
+        ("Page.linkClicked", {"phase": "after"}),
+        ("Page.navigationCommitted", {"frameId": "F1", "navigationId": "B",
+                                      "url": "http://a/next", "name": "n"}))).start()
+    v.wait_for_action_signals("F1", since, timeout=5)
+    order.append("returned")
+    assert order == [("commit", "http://a/next", {"name": "n", "navigation": "B"}),
+                     "returned"], order
+
+
+def test_a_document_re_announced_is_a_commit_without_a_navigation():
+    """A new PageAgent re-sends its committed document without an id: the
+    page must not take it for a navigation of its own."""
+    c, v = _committed_page()
+    heard = []
+    v.announce = lambda what, fid, url=None, **detail: heard.append((what, detail))
+    events(v, ("Page.navigationCommitted", {"frameId": "F1", "url": "http://a/"}))
+    assert ("commit", {"name": v.frames["F1"].name, "navigation": None}) in heard, heard
 
 
 def test_a_plan_that_opens_elsewhere_ends_with_its_after():
