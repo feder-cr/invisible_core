@@ -107,6 +107,8 @@ def make_core(
     # environment.py names every variable the library reads (50.48.0); pin.py
     # and installer.py take their names from it.
     shutil.copy2(REAL_PKG / "environment.py", pkg / "environment.py")
+    # jar.py reads omni.ja in Mozilla's optimized layout for seal.py (2026-10-27).
+    shutil.copy2(REAL_PKG / "jar.py", pkg / "jar.py")
     if with_version:
         text = (REAL_PKG / "_version.py").read_text(encoding="utf-8")
         text = re.sub(r"(?m)^CORE_REVISION\s*=\s*\d+", f"CORE_REVISION = {revision}", text)
