@@ -29,6 +29,16 @@ import subprocess
 from typing import Dict, List, Optional, Sequence, Tuple
 
 DEFAULT_REPO = "C:/ff/source"
+PORT_FILE = pathlib.Path(__file__).resolve().parents[1] / "engine_port.json"
+
+
+def port_declaration() -> Optional[dict]:
+    """The engine a port branch serves before its seal exists, or None."""
+    if not PORT_FILE.is_file():
+        return None
+    import json
+
+    return json.loads(PORT_FILE.read_text(encoding="utf-8"))
 
 
 class EngineSource:
@@ -45,11 +55,21 @@ class EngineSource:
 
     @classmethod
     def pinned(cls) -> "EngineSource":
-        """The repository named by `STEALTH_FIREFOX_SRC`, at the seal's commit."""
+        """The repository named by `STEALTH_FIREFOX_SRC`, at the commit of the
+        engine this branch is for: the seal's, unless `engine_port.json` names
+        the engine a port branch serves before its seal exists.
+
+        A port branch still bundles the previous release's seal, and its prefs
+        were checked against that engine: the 157 branch's first 157-only pref
+        (windowsLaunchOnLogin.alreadyApplied, which 151 has no reader for) was
+        refused as dead by the pre-push gate on 2026-10-28, while the engine the
+        branch ships with reads it. `test_engine_port.py` refuses the file once
+        the seal pins the same engine."""
         from invisible_core import seal
 
         repo = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", DEFAULT_REPO))
-        return cls(repo, seal.active_seal().source_commit)
+        port = port_declaration()
+        return cls(repo, port["source_commit"] if port else seal.active_seal().source_commit)
 
     def _git(self, *args: str, timeout: int = 600) -> Optional[subprocess.CompletedProcess]:
         try:
