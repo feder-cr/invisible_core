@@ -176,12 +176,21 @@ def _through_a_constant(source: EngineSource, names: Set[str]) -> Dict[str, Set[
     out: Dict[str, Set[str]] = {}
     texts: Dict[str, str] = {}
     for path, line in hits:
-        for m in re.finditer(r"""(\w+)\s*(?:\[\])?\s*=\s*["']([^"']+)["']""", line):
-            if m.group(2) not in names:
+        for name in names:
+            if name not in line:
                 continue
+            # In the whole file, not the line: a long name is wrapped onto the
+            # line after its `=` (157's DefaultLaunchOnLogin.sys.mjs declares
+            # `..._ALREADY_APPLIED_PREF =` and puts the string below it).
             body = texts.setdefault(path, source.show(path) or "")
-            for a in re.finditer(_ACCESSOR + r"\(\s*" + re.escape(m.group(1)) + r"\b", body):
-                out.setdefault(m.group(2), set()).add(_ACCESSOR_KIND[a.group(1)])
+            # `#define NAME "pref"` too: LocaleService.cpp reads
+            # intl.locale.requested through REQUESTED_LOCALES_PREF, and once 157
+            # dropped its default from all.js that read was the only one left.
+            for m in re.finditer(r"""(?:(\w+)\s*(?:\[\])?\s*=|#define\s+(\w+))\s*["']"""
+                                 + re.escape(name) + r"""["']""", body):
+                constant = m.group(1) or m.group(2)
+                for a in re.finditer(_ACCESSOR + r"\(\s*" + re.escape(constant) + r"\b", body):
+                    out.setdefault(name, set()).add(_ACCESSOR_KIND[a.group(1)])
     return out
 
 

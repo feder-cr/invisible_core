@@ -140,6 +140,17 @@ def test_translate_has_stealth_baseline_constants():
     assert "media.peerconnection.enabled" in prefs
 
 
+def test_a_launch_never_registers_its_binary_to_start_at_login():
+    """157's first run writes a Windows Run key for the binary unless the
+    first-run decision is already recorded; every launch here is a first run,
+    and on 2026-10-28 a reboot started twelve registered builds at once."""
+    p = generate_profile(seed=42)
+    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
+    assert prefs.get("browser.startup.windowsLaunchOnLogin.alreadyApplied") is True
+    # The user-facing setting stays the retail's default.
+    assert "browser.startup.windowsLaunchOnLogin.enabled" not in prefs
+
+
 # The language-table tests (AL1-AL3) moved to test_session_locale.py in 36.x,
 # with the table: they go through decide_session_locale, its one caller.
 

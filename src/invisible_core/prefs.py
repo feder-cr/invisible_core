@@ -398,6 +398,18 @@ _BASELINE: Dict[str, Any] = {
     "browser.shell.checkDefaultBrowser":                  False,
     "browser.aboutwelcome.enabled":                       False,
     "browser.startup.upgradeDialog.enabled":              False,
+    # ⛔ THE FIRST RUN'S LAUNCH-ON-LOGIN IS ALREADY DECIDED. 157 added
+    # DefaultLaunchOnLogin: on the first run of an official build it waits for
+    # Nimbus and, where the rollout sets `defaultEnabled`, writes
+    # HKCU\...\CurrentVersion\Run\Mozilla-Firefox-<path hash> with
+    # `firefox.exe -os-autostart`. Every launch here is a first run on a new
+    # profile, so every binary that ever ran registered itself: after the
+    # reboot of 2026-10-28 Windows started all twelve at sign-in: 76 Firefox
+    # processes of builds nobody had asked for. `alreadyApplied` is
+    # Mozilla's own record that the decision was taken, so nothing is waited
+    # for and nothing is written; the user-facing setting
+    # (`windowsLaunchOnLogin.enabled`) keeps its default.
+    "browser.startup.windowsLaunchOnLogin.alreadyApplied": True,
     # ⛔ `termsofuse.acceptedVersion: 999` USED TO BE HERE, AND IT WAS A DEAD
     # DECLARATION. Removed 2026-08-19 after measuring it rather than deducing it.
     #
@@ -582,7 +594,9 @@ _BASELINE: Dict[str, Any] = {
     # pinned engine (tests/test_pref_types.py): it moved nothing.
     "browser.contentblocking.report.lockwise.enabled":    False,
     "browser.contentblocking.report.monitor.enabled":     False,
-    "dom.private-attribution.submission.enabled":         False,
+    # `dom.private-attribution.submission.enabled` was here: 157 removed the
+    # private attribution service and its pref, so there is nothing left to
+    # turn off (tests/test_pref_types.py against the 157 engine).
 
     "browser.translations.enable":                        False,
 
