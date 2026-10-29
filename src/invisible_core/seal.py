@@ -209,6 +209,11 @@ class Seal:
     # true for every leg in SUPPORTED_LEGS, and a scalar that is true for one
     # platform is a refusal for all the others.
     build_id_declared: str = ""
+    # The commit of the patch series (firefox_antidetect_patch main) the engine was
+    # built from. source_commit is the engine commit that series gives on the
+    # Mozilla tag (tools/engine.py apply, the same on every machine) and lives on
+    # no remote: this is what rebuilds it. Empty on seals from before the series.
+    series_commit: str = ""
 
     @property
     def contract_n(self) -> int:
@@ -371,6 +376,7 @@ def _parse_seal_bytes(raw: bytes, origin: str) -> Seal:
         playwright_min=pw.get("min") or "", playwright_max=pw.get("max") or "",
         assets=assets, digest=seal_digest(data), origin=origin,
         build_id_declared=declared,
+        series_commit=data.get("series_commit") or "",
     )
 
 

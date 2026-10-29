@@ -263,17 +263,32 @@ jobs:
           if unknown:
               raise SystemExit(f"the seal ships {unknown}, which have no retail MAR name here")
           print(f"source={seal['source_commit']}")
+          print(f"series={seal.get('series_commit') or ''}")
           print(f"version={seal['upstream_version']}")
           print("platforms=" + " ".join(mar[p] for p in pairs))
           EOF
       - name: the engine's page-surface gate, at the sealed commit
         run: |
+          if [ -n "${{ steps.seal.outputs.series }}" ]; then
+            # A seal from the patch series: the sealed commit is the Mozilla tag with
+            # the series applied, on no remote. Rebuild it the way the engine's CI did.
+            git init -q series
+            git -C series fetch -q --depth 1 https://github.com/feder-cr/firefox_antidetect_patch "${{ steps.seal.outputs.series }}"
+            git -C series checkout -q FETCH_HEAD
+            python series/tools/engine.py materialize --into engine
+            test "$(git -C engine rev-parse HEAD)" = "${{ steps.seal.outputs.source }}" || {
+              echo "the series at ${{ steps.seal.outputs.series }} does not rebuild the sealed commit ${{ steps.seal.outputs.source }}"
+              exit 1; }
+          else
           git init -q engine
           cd engine
           git remote add origin https://github.com/feder-cr/firefox_antidetect_patch
           git sparse-checkout set --no-cone /scripts/ /python/mozbuild/
           git fetch -q --depth 1 --filter=blob:none origin "${{ steps.seal.outputs.source }}"
           git checkout -q FETCH_HEAD
+          cd ..
+          fi
+          cd engine
           grep -qs "^def judge_branding" scripts/stock_parity.py || {
             echo "the engine the seal pins (${{ steps.seal.outputs.source }}) predates the declared branding (P60): its gate cannot judge this set"
             exit 1; }

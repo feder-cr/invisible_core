@@ -46,9 +46,10 @@ class EngineSource:
     instance: a `git grep` over the engine costs seconds, and two tests ask the
     same question."""
 
-    def __init__(self, repo: pathlib.Path, commit: str):
+    def __init__(self, repo: pathlib.Path, commit: str, series: str = ""):
         self.repo = pathlib.Path(repo)
         self.commit = commit
+        self.series = series
         self._grep: Dict[Tuple[str, Tuple[str, ...]], Optional[str]] = {}
         self._why: Optional[str] = None
         self._checked = False
@@ -69,7 +70,10 @@ class EngineSource:
 
         repo = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", DEFAULT_REPO))
         port = port_declaration()
-        return cls(repo, port["source_commit"] if port else seal.active_seal().source_commit)
+        if port:
+            return cls(repo, port["source_commit"])
+        active = seal.active_seal()
+        return cls(repo, active.source_commit, series=active.series_commit)
 
     def _git(self, *args: str, timeout: int = 600) -> Optional[subprocess.CompletedProcess]:
         try:
@@ -90,7 +94,12 @@ class EngineSource:
                          f"STEALTH_FIREFOX_SRC to a clone that has {self.commit}")
         else:
             probe = self._git("cat-file", "-e", self.commit + "^{commit}", timeout=60)
-            if probe is None or probe.returncode != 0:
+            if (probe is None or probe.returncode != 0) and self.series:
+                self._why = (f"{self.repo} does not have {self.commit}, the commit the pinned "
+                             f"engine was built from. It is on no remote: rebuild it from the "
+                             f"series, in a checkout of firefox_antidetect_patch at {self.series}: "
+                             f"python tools/engine.py apply --source {self.repo} --head sealed")
+            elif probe is None or probe.returncode != 0:
                 self._why = (f"{self.repo} does not have {self.commit}, the commit "
                              f"the pinned engine was built from: git fetch it")
         return self._why
