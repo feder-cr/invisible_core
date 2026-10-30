@@ -404,6 +404,24 @@ _BASELINE: Dict[str, Any] = {
     "browser.shell.checkDefaultBrowser":                  False,
     "browser.aboutwelcome.enabled":                       False,
     "browser.startup.upgradeDialog.enabled":              False,
+
+    # ⛔ THE BRAND'S PREFS ARE THE CORE'S, NOT THE BUILD'S. The engine is built
+    # with Mozilla's unofficial branding, whose pref file differs from the
+    # official one in five prefs (the update ones aside, which the engine
+    # carries on Mozilla's lines). The core decides them, like the rest of the
+    # brand: four take the official Firefox's value, read from
+    # browser/branding/official/pref/firefox-branding.js of the engine's
+    # Firefox (tests/test_brand_prefs_are_the_cores.py ties them to it).
+    # `startup.homepage_welcome_url` is the one the core decides otherwise: ""
+    # (the unofficial build's value too). Every launch is a fresh profile, so
+    # the official "about:welcome" would open the first-run welcome tab in
+    # every session - a browser that is always on its first run, which no
+    # person's browser is.
+    "devtools.selfxss.count":                             0,
+    "app.releaseNotesURL":                                "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=whatsnew",
+    "app.releaseNotesURL.aboutDialog":                    "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=about-dialog",
+    "app.releaseNotesURL.prompt":                         "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=updateprompt",
+    "startup.homepage_welcome_url":                       "",
     # ⛔ THE FIRST RUN'S LAUNCH-ON-LOGIN IS ALREADY DECIDED. 157 added
     # DefaultLaunchOnLogin: on the first run of an official build it waits for
     # Nimbus and, where the rollout sets `defaultEnabled`, writes
