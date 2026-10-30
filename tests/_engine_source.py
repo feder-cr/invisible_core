@@ -16,6 +16,11 @@ is read AT THAT COMMIT, with `git grep <commit>` and `git show <commit>:<path>`:
 whatever the repository has checked out, or has modified, no longer matters.
 `STEALTH_FIREFOX_SRC` still names the repository, any clone that has the commit.
 
+`STEALTH_FIREFOX_COMMIT` overrides the commit: any git rev of that repository
+(`HEAD` included), resolved to a full sha. The engine's own repository sets it to
+run these tests against the tree it just built from its patch series, which is in
+no seal yet - also when it moves to a new Firefox version.
+
 When the repository is absent or does not have the commit, the tests SKIP and say
 which commit to fetch. A declared skip is not a green; a red from a tree that is
 not the pinned engine's was worse, because it is the one people learn to push
@@ -69,11 +74,27 @@ class EngineSource:
         from invisible_core import seal
 
         repo = pathlib.Path(os.environ.get("STEALTH_FIREFOX_SRC", DEFAULT_REPO))
+        rev = os.environ.get("STEALTH_FIREFOX_COMMIT")
+        if rev:
+            return cls(repo, cls._resolve(repo, rev))
         port = port_declaration()
         if port:
             return cls(repo, port["source_commit"])
         active = seal.active_seal()
         return cls(repo, active.source_commit, series=active.series_commit)
+
+    @staticmethod
+    def _resolve(repo: pathlib.Path, rev: str) -> str:
+        """`rev` as a full sha, so a message names a real commit. A rev the
+        repository cannot resolve stays as written: `unavailable` then skips
+        and names it."""
+        try:
+            out = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet",
+                                  rev + "^{commit}"], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return rev
+        sha = out.stdout.decode("utf-8", errors="replace").strip()
+        return sha if out.returncode == 0 and sha else rev
 
     def _git(self, *args: str, timeout: int = 600) -> Optional[subprocess.CompletedProcess]:
         try:
