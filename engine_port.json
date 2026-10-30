@@ -1,6 +1,0 @@
-{
-  "upstream_version": "159.0",
-  "source_commit": "879151ba9eb5ef3999dcfbd7f2358e92849d2295",
-  "series_commit": "0d81d5919aa09edfb7262e481ab596e9c6ab9d44",
-  "why": "engine/firefox-159 serves the firefox-54 engine (series port-159 @ 0d81d59, candidate run 41042430423, materialized on FIREFOX_159_0_RELEASE as source_commit) while it still bundles an older release's seal: the engine-source tests read source_commit, and CI's branding-is-retail rebuilds it from series_commit. Delete this file when the branch's seal pins the 159 release."
-}
