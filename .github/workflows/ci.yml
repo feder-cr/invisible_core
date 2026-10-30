@@ -248,7 +248,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: what the seal pins
+      - name: what the seal (or engine_port.json) pins
         id: seal
         run: |
           python - <<'EOF' >> "$GITHUB_OUTPUT"
@@ -262,9 +262,16 @@ jobs:
           unknown = [p for p in pairs if p not in mar]
           if unknown:
               raise SystemExit(f"the seal ships {unknown}, which have no retail MAR name here")
-          print(f"source={seal['source_commit']}")
-          print(f"series={seal.get('series_commit') or ''}")
-          print(f"version={seal['upstream_version']}")
+          # During a port the branch serves a newer engine than the bundled seal
+          # pins: engine_port.json names it, and the branding must be that
+          # Firefox's (the 157 and 159 ports compared it with the seal's 151).
+          import os
+          pin = seal
+          if os.path.exists("engine_port.json"):
+              pin = json.load(open("engine_port.json", encoding="utf-8"))
+          print(f"source={pin['source_commit']}")
+          print(f"series={pin.get('series_commit') or ''}")
+          print(f"version={pin['upstream_version']}")
           print("platforms=" + " ".join(mar[p] for p in pairs))
           EOF
       - name: the engine's page-surface gate, at the sealed commit

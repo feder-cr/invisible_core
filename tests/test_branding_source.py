@@ -78,3 +78,23 @@ def test_jar_mn_entries_are_read_as_the_build_reads_them():
            "  content/branding/icon16.png                    (../default16.png)\n")
     assert _generator().jar_entries(jar) == {"about.png": "about.png",
                                              "icon16.png": "../default16.png"}
+
+
+@pytest.mark.parametrize("branding_set", BRANDING_SETS)
+def test_archive_entries_are_stored_so_any_zlib_rebuilds_the_same_bytes(branding_set):
+    """CPython 3.14 on Windows ships zlib-ng, which deflates the same files to
+    other bytes: the deflated archives failed test_archive_is_the_generators_bytes
+    there and nowhere else. Stored entries carry no compressor."""
+    with zipfile.ZipFile(branding_archive(branding_set)) as z:
+        deflated = [i.filename for i in z.infolist() if i.compress_type != zipfile.ZIP_STORED]
+    assert not deflated, f"compressed entries in the {branding_set} archive: {deflated}"
+
+
+def test_ci_judges_the_branding_against_the_engine_this_branch_serves():
+    """branding-is-retail compared the archive with the seal's retail (151)
+    while the branch served 157, then 159; during a port engine_port.json
+    names the engine, and the job must read it."""
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = ci[ci.index("  branding-is-retail:"):]
+    job = job[:job.index("\n  # ")] if "\n  # " in job else job
+    assert "engine_port.json" in job, "branding-is-retail ignores engine_port.json"

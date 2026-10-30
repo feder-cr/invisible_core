@@ -80,15 +80,20 @@ def set_files(repo: Path, tag: str, branding_set: str) -> dict[str, bytes]:
 
 
 def archive_bytes(files: dict[str, bytes]) -> bytes:
-    """A zip of `files` at its root, the same bytes for the same files."""
+    """A zip of `files` at its root, the same bytes for the same files.
+
+    STORED, not deflated: deflate's bytes are the zlib build's, and CPython
+    3.14 on Windows ships zlib-ng, which compresses the same input to other
+    bytes - the archive stopped being reproducible there. What a page reads is
+    the entries' content, which stored or deflated is the same."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         for name in sorted(files):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED
             info.external_attr = 0o100644 << 16
             info.create_system = 0
-            z.writestr(info, files[name], compresslevel=9)
+            z.writestr(info, files[name])
     return buf.getvalue()
 
 
