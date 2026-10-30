@@ -654,14 +654,40 @@ class InjectedScript:
         flush against the top edge is a point that a sticky header covers on a
         great many pages, and the interceptor would then correctly report that
         the event lands elsewhere.
+
+        ⛔ ONLY IF NEEDED, as Chromium's `scrollIntoViewIfNeeded`. It centred
+        every time, and Playwright asks for it before every click (EVA before
+        every mouse move too): each click on an element already in full view
+        moved the page under it, which neither Chromium nor a person does. An
+        element whose box lies wholly inside its frame's viewport, and that
+        frame's box inside its parent's up to the top, is left where it is
+        (False). The viewport is the layout one without scrollbars (the
+        smaller of `innerWidth`/`innerHeight` and the root's client size, which
+        also covers quirks mode). A parent frame we cannot read (cross-origin)
+        cannot be judged, so that case scrolls as before: `scrollIntoView`
+        moves every ancestor frame too.
         """
         return bool(self.call(
             frame_id,
             "(injected, el) => {"
-            " const before = el.getBoundingClientRect().top;"
+            " const box = el.getBoundingClientRect();"
+            " const inside = (r, w) => {"
+            "   const d = w.document.documentElement;"
+            "   const vw = Math.min(w.innerWidth, (d && d.clientWidth) || w.innerWidth);"
+            "   const vh = Math.min(w.innerHeight, (d && d.clientHeight) || w.innerHeight);"
+            "   return r.left >= 0 && r.top >= 0 && r.right <= vw && r.bottom <= vh; };"
+            " let w = window, r = box, seen = inside(r, w);"
+            " while (seen && w !== w.top) {"
+            "   const fe = w.frameElement;"
+            "   if (!fe) { seen = false; break; }"
+            "   const f = fe.getBoundingClientRect(), dx = f.left + fe.clientLeft, dy = f.top + fe.clientTop;"
+            "   r = {left: r.left + dx, top: r.top + dy, right: r.right + dx, bottom: r.bottom + dy};"
+            "   w = w.parent; seen = inside(r, w); }"
+            " if (seen) return false;"
             " el.scrollIntoView({block: 'center', inline: 'center',"
             "                    behavior: 'instant'});"
-            " return el.getBoundingClientRect().top !== before; }",
+            " const after = el.getBoundingClientRect();"
+            " return after.top !== box.top || after.left !== box.left; }",
             {"objectId": element}))
 
     def content_origin(self, frame_id: str) -> dict:
