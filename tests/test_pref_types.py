@@ -88,6 +88,10 @@ _READ_THROUGH_A_PARAMETER: Dict[str, Tuple[str, str]] = {
         (STR, "toolkit/components/urlformatter"),
     "zoom.stealth.apikey.google_safebrowsing":
         (STR, "toolkit/components/urlformatter"),
+    # aboutDialog.js: Services.urlFormatter.formatURLPref( with the name on the
+    # next line - a call split over two lines, which the reader scan does not join.
+    "app.releaseNotesURL.aboutDialog":
+        (STR, "browser/base/content"),
 }
 
 

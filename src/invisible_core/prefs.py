@@ -416,11 +416,11 @@ _BASELINE: Dict[str, Any] = {
     # (the unofficial build's value too). Every launch is a fresh profile, so
     # the official "about:welcome" would open the first-run welcome tab in
     # every session - a browser that is always on its first run, which no
-    # person's browser is.
+    # person's browser is. `app.releaseNotesURL.prompt` is in the official file
+    # but nothing in Firefox 159 reads it, so declaring it would move nothing.
     "devtools.selfxss.count":                             0,
     "app.releaseNotesURL":                                "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=whatsnew",
     "app.releaseNotesURL.aboutDialog":                    "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=about-dialog",
-    "app.releaseNotesURL.prompt":                         "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=updateprompt",
     "startup.homepage_welcome_url":                       "",
     # ⛔ THE FIRST RUN'S LAUNCH-ON-LOGIN IS ALREADY DECIDED. 157 added
     # DefaultLaunchOnLogin: on the first run of an official build it waits for

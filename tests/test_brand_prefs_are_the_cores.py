@@ -27,6 +27,10 @@ _SOURCE = EngineSource.pinned()
 #: in prefs.py next to the pref.
 DECIDED_OTHERWISE = {"startup.homepage_welcome_url": ""}
 
+#: In the official file, read by nothing in the engine's Firefox (the pref-type
+#: gate, tests/test_pref_types.py, refuses a declared pref without a reader).
+READ_BY_NOTHING = {"app.releaseNotesURL.prompt"}
+
 
 def _release_prefs(text: str) -> dict:
     """pref("name", value) lines of a branding pref file as a release build
@@ -72,7 +76,7 @@ def test_every_pref_the_brand_moves_is_decided_by_the_core_or_carried_by_the_eng
               if re.search(r'pref\("%s",[^\n]*STEALTH-HOOK' % re.escape(n), unoff_text)}
     loose = []
     for name in sorted(set(official) | set(unofficial)):
-        if official.get(name) == unofficial.get(name) or name in hooked:
+        if official.get(name) == unofficial.get(name) or name in hooked or name in READ_BY_NOTHING:
             continue
         if name not in _BASELINE:
             loose.append(f"{name}: official {official.get(name)!r}, build {unofficial.get(name)!r}, core silent")
