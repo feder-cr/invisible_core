@@ -20,11 +20,15 @@ reading it.
 So the type is not remembered here, it is READ from the engine the seal pins,
 from the places that decide it, in the order of their authority:
 
-  1. `StaticPrefList.yaml` - libpref refuses a user value of another type;
+  1. the static pref lists - `StaticPrefList.yaml` and every other yaml the
+     libpref build feeds its generator (`gen_inputs` in
+     `modules/libpref/moz.build`; ours is `StealthPrefList.yaml`) - libpref
+     refuses a user value of another type;
   2. LookAndFeel's own tables in `widget/nsXPLookAndFeel.cpp`, the readers
      A17 was about: ints and floats both through GetInt, colours and font
      names as strings, font sizes through GetFloat;
-  3. the default in the engine's pref files (all.js, firefox.js, branding):
+  3. the default in the engine's pref files (all.js, firefox.js, branding,
+     and every file `greprefs.js` includes after them, such as ours):
      a user value of another type than the default is refused too;
   4. the accessor that reads the name, in C++ or JS, with the name written
      out or held in a constant of the same file.
@@ -70,18 +74,44 @@ _ACCESSOR_KIND = {
 _ACCESSOR = "(" + "|".join(sorted(_ACCESSOR_KIND)) + ")"
 
 #: Readers no pattern can see, because the name reaches the accessor through a
-#: function PARAMETER. Each one names the file that holds the literal and the
-#: read, and `test_every_hand_typed_reader_is_still_there` checks the literal
-#: is still in that file, so an entry cannot outlive its reader.
+#: function PARAMETER. Each one names the DIRECTORY that holds the literal and
+#: the read, and `test_every_hand_typed_reader_is_still_there` checks the literal
+#: is still in a code file of that directory, so an entry cannot outlive its
+#: reader. A directory and not a file: the engine moves logic out of Mozilla's
+#: files into ours (the key readers went from URLFormatter.sys.mjs to
+#: StealthApiKeys.sys.mjs next to it), and the same entry has to hold on both.
 _READ_THROUGH_A_PARAMETER: Dict[str, Tuple[str, str]] = {
     # leggiChiaveSilenziosa(pref) -> Services.prefs.getStringPref(pref, "")
     "zoom.stealth.apikey.mozilla":
-        (STR, "toolkit/components/urlformatter/URLFormatter.sys.mjs"),
+        (STR, "toolkit/components/urlformatter"),
     "zoom.stealth.apikey.google_location_service":
-        (STR, "toolkit/components/urlformatter/URLFormatter.sys.mjs"),
+        (STR, "toolkit/components/urlformatter"),
     "zoom.stealth.apikey.google_safebrowsing":
-        (STR, "toolkit/components/urlformatter/URLFormatter.sys.mjs"),
+        (STR, "toolkit/components/urlformatter"),
 }
+
+
+def _libpref_yaml_files(source: EngineSource) -> List[str]:
+    """The static pref lists the build merges, read from the build file that
+    names them, so a list the engine adds is read without touching this test."""
+    build = source.show("modules/libpref/moz.build") or ""
+    found = ["modules/libpref/init/StaticPrefList.yaml"]
+    for m in re.finditer(r"""gen_inputs\s*\+?=\s*\[\s*["'](init/\w+\.yaml)["']""", build):
+        path = "modules/libpref/" + m.group(1)
+        if path not in found:
+            found.append(path)
+    return found
+
+
+def _libpref_default_files(source: EngineSource) -> List[str]:
+    """`_PREF_FILES` plus the pref files greprefs.js includes (ours among them)."""
+    files = list(_PREF_FILES)
+    for m in re.finditer(r"^#include\s+(init/\w+\.js)\s*$",
+                         source.show("modules/libpref/greprefs.js") or "", re.M):
+        path = "modules/libpref/" + m.group(1)
+        if path not in files:
+            files.append(path)
+    return files
 
 
 def _static_kind(t: str) -> Optional[str]:
@@ -128,16 +158,17 @@ def reader_kinds(source: EngineSource, names) -> Dict[str, Tuple[Set[str], str]]
     """For each name, the types the engine reads it with and where that was
     learned. A name absent from the result has no reader at all."""
     found: Dict[str, Tuple[Set[str], str]] = {}
-    yaml = source.show("modules/libpref/init/StaticPrefList.yaml") or ""
-    assert yaml, "StaticPrefList.yaml is not readable at %s" % source.commit
-    for m in re.finditer(r"^-\s+name:\s*(\S+)\s*\n\s+type:\s*(\S+)", yaml, re.M):
-        kind = _static_kind(m.group(2))
-        if kind and m.group(1) in names:
-            found[m.group(1)] = ({kind}, "StaticPrefList.yaml")
+    for ypath in _libpref_yaml_files(source):
+        yaml = source.show(ypath) or ""
+        assert yaml, "%s is not readable at %s" % (ypath, source.commit)
+        for m in re.finditer(r"^-\s+name:\s*(\S+)\s*\n\s+type:\s*(\S+)", yaml, re.M):
+            kind = _static_kind(m.group(2))
+            if kind and m.group(1) in names and m.group(1) not in found:
+                found[m.group(1)] = ({kind}, ypath.rsplit("/", 1)[-1])
     for name, kind in _laf(source).items():
         if name in names and name not in found:
             found[name] = ({kind}, "nsXPLookAndFeel.cpp")
-    for path in _PREF_FILES:
+    for path in _libpref_default_files(source):
         for m in re.finditer(r'^\s*(?:pref|sticky_pref|lockPref)\(\s*"([^"]+)"\s*,\s*([^)\n]+)',
                              source.show(path) or "", re.M):
             kind = _value_kind(m.group(2).rstrip(", "))
@@ -269,7 +300,7 @@ def test_every_declared_pref_has_the_type_the_engine_reads_and_a_reader(monkeypa
     assert not dead, (
         "nothing in the engine the seal pins (%s) reads these prefs, so they "
         "move nothing: remove them, or, if the reader takes the name through a "
-        "parameter, add it to _READ_THROUGH_A_PARAMETER with its file:\n  %s"
+        "parameter, add it to _READ_THROUGH_A_PARAMETER with its directory:\n  %s"
         % (_SOURCE.commit, "\n  ".join(dead)))
 
 
@@ -282,6 +313,9 @@ def test_every_declared_pref_has_the_type_the_engine_reads_and_a_reader(monkeypa
     ("layout.frame_rate", "60"),          # a static int pref
     ("ui.font.menu.size", 12),            # GetFloat parses text
     ("zoom.stealth.apikey.mozilla", 1),   # a parameter-read string
+    ("zoom.stealth.audio.sample_rate", "48000"),  # our own static list: an int32_t
+    ("zoom.stealth.fpp.hw_seed", "7"),    # ... a RelaxedAtomicInt32
+    ("juggler.timezone.override", 1),     # ... a DataMutexString
 ])
 def test_the_gate_catches_a_known_wrong_type(name, value):
     """The known-bad inputs, one per source of the type, so a source that
@@ -299,11 +333,28 @@ def test_an_invented_pref_is_reported_as_read_by_nothing():
     assert dead == [invented] and not wrong
 
 
+def _names_in_directory(name: str, directory: str):
+    """Code lines of `directory` naming `name`, the engine's own unit tests
+    left out: a test that sets the pref is not a reader of it."""
+    return _SOURCE.lines_with([name], [directory + "/" + g for g in _CODE]
+                              + [":(exclude)*/tests/*"])
+
+
 @_needs_source
 @pytest.mark.parametrize("name", sorted(_READ_THROUGH_A_PARAMETER))
 def test_every_hand_typed_reader_is_still_there(name):
-    kind, path = _READ_THROUGH_A_PARAMETER[name]
-    text = _SOURCE.show(path)
-    assert text and name in text, (
-        "%s no longer names %s at %s: the hand-typed reader is gone, so the "
-        "entry is a type nobody reads" % (path, name, _SOURCE.commit))
+    kind, directory = _READ_THROUGH_A_PARAMETER[name]
+    assert _names_in_directory(name, directory), (
+        "no code file in %s names %s at %s: the hand-typed reader is gone, so the "
+        "entry is a type nobody reads" % (directory, name, _SOURCE.commit))
+
+
+@_needs_source
+def test_the_hand_typed_check_catches_a_reader_that_is_gone():
+    """A directory that never named the pref is refused, and the engine's unit
+    tests, which set the pref without reading it, are never counted."""
+    name = "zoom.stealth.apikey.mozilla"
+    _, directory = _READ_THROUGH_A_PARAMETER[name]
+    assert _names_in_directory(name, directory)
+    assert not _names_in_directory(name, "toolkit/components/places")
+    assert not any("/tests/" in path for path, _ in _names_in_directory(name, directory))

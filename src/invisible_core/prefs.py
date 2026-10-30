@@ -495,7 +495,7 @@ _BASELINE: Dict[str, Any] = {
     # NOW: that path no longer exists - the three AppConstants.sys.mjs entries,
     # the three DEFINES in toolkit/modules/moz.build and the three
     # --with-*-api-keyfile in the .mozconfig are gone - and the engine's only
-    # reader, `URLFormatter.sys.mjs`, reads these prefs (`stealthDeclaredApiKey`).
+    # reader, `StealthApiKeys.sys.mjs`, reads these prefs (`stealthDeclaredApiKey`).
     #
     # ⛔ AND AN ABSENCE IS REFUSED. With no declaration the engine returns the
     # empty string and logs an error to the console: `checkGoogleSafeBrowsingKey`
