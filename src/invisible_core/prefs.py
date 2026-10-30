@@ -19,6 +19,12 @@ from __future__ import annotations
 
 import functools
 import sys
+# At import, not inside _iana_zones: zoneinfo reads the stdlib's build data for
+# its search path (sysconfig TZPATH) the first time it is imported, keyed by
+# sys.platform. Imported lazily, it read it under whatever platform a caller had
+# set by then - a test persona of win32 on a Linux runner asked sysconfig for
+# win32's build data and raised ModuleNotFoundError.
+import zoneinfo
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -1646,8 +1652,6 @@ def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
 
 @functools.lru_cache(maxsize=1)
 def _iana_zones() -> frozenset:
-    import zoneinfo
-
     return frozenset(zoneinfo.available_timezones())
 
 

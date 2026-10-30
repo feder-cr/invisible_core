@@ -28,6 +28,9 @@ import re
 import time
 from typing import Any, Dict, NamedTuple, Optional
 from urllib.parse import quote
+# At import, as in prefs.py: zoneinfo resolves its search path from the real
+# platform the first time it is imported.
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -581,8 +584,6 @@ def ip_to_timezone(ip: str, mmdb_path: Any) -> str:
         raise GeoTimezoneError(
             f"no timezone for egress IP {ip} in the geoip database",
             kind="no_timezone_for_ip")
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
     try:
         ZoneInfo(tz)
     except (ZoneInfoNotFoundError, ValueError) as exc:
