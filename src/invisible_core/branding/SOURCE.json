@@ -1,5 +1,5 @@
 {
-  "mozilla_tag": "FIREFOX_157_0_1_RELEASE",
+  "mozilla_tag": "FIREFOX_159_0_RELEASE",
   "sets": {
     "official": {
       "about-logo-private.png": "7d4d3f1ab2f3e4bacd694c1f112050e78572a1c5322b78d42f5b16cee703ca03",
@@ -12,7 +12,7 @@
       "aboutDialog.css": "a1f7358c45195ed3f5025340e813461fd38217ab964ea246d11e57006a74b987",
       "document.ico": "5ce27e88a72a861d0a3a08df57ecab52e70d369f3163d11e115afcee17907e87",
       "document_pdf.svg": "66aa248167ec8575e17c2689d5d59d3e27c403af01ee0f3410a71ba8d122a84a",
-      "firefox-wordmark.svg": "0433d540a5ec46ee2b69dec9a3ee1d31e1e210ecc53c7807ebb873068333e0eb",
+      "firefox-wordmark.svg": "50bd51b9596fdf9335047d56da549b86d1ee0a5f2a51ec1f197fb3da80716761",
       "icon128.png": "9926bbb47e152c9747c8e7fbe9d7679fbcf221a4aa13400cbf1d2da3210d1b20",
       "icon16.png": "742a5ed5a88075540a018629b6c4ee7f39a6fc89f4d75c2c136e002204ac024b",
       "icon32.png": "e4e889d71d93c2a171cbd92ca2fba2fca3a04ab61e6fc8a703683cf4e3d83ba1",
@@ -30,7 +30,7 @@
       "aboutDialog.css": "6500eeeebb18855a63d0c070142c40927df7bc42242db7f06d2b26760b0dd07c",
       "document.ico": "f4e39ac3723ad9b34aefeebbd82f66add46b6de6c11e4e4117b50f8ec8fb4241",
       "document_pdf.svg": "4571f86690964bbf4516de0ac86c025973c071739d6e247596de5ad2f0aa52bb",
-      "firefox-wordmark.svg": "8f9dab589d0371636ea8280895b92cccdc9b32ceacbbba8cc2516c0e31cd737b",
+      "firefox-wordmark.svg": "4fede41832f6693e865a3eea161c6dc2922a591d8322dbdca02412756dc9d7f1",
       "icon128.png": "be2fdb8622b028a2248510793980e8b9294cee66d55ca2cb0a103610bd409ba4",
       "icon16.png": "1e8aea59ad881e31e351f7f38143293a45a8e7b916571f3eccce5e89844c1969",
       "icon32.png": "6b7170dd4e0ad2a095f11bb2d84c35bb7495e30e38218045eb85f81882f46a29",

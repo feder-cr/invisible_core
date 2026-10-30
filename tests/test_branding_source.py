@@ -35,6 +35,25 @@ def test_source_names_a_mozilla_release_tag():
     assert sorted(SOURCE["sets"]) == sorted(BRANDING_SETS)
 
 
+def _engine_version():
+    """The Firefox version this branch serves: engine_port.json's while a port
+    is under way, else the bundled seal's."""
+    port = ROOT / "engine_port.json"
+    if port.exists():
+        return json.loads(port.read_text(encoding="utf-8"))["upstream_version"]
+    return json.loads((ROOT / "src" / "invisible_core" / "seal.json").read_text(encoding="utf-8"))["upstream_version"]
+
+
+def test_source_tag_is_the_engines_firefox():
+    """The 159 port found the archives still made from FIREFOX_157_0_1_RELEASE:
+    the archive matched SOURCE.json, but SOURCE.json named the previous Firefox,
+    and 159 changed firefox-wordmark.svg."""
+    want = "FIREFOX_" + _engine_version().replace(".", "_") + "_RELEASE"
+    assert SOURCE["mozilla_tag"] == want, (
+        f"branding made from {SOURCE['mozilla_tag']}, engine is {want}: "
+        f"run scripts/gen_branding_archives.py --tag {want}")
+
+
 @pytest.mark.parametrize("branding_set", BRANDING_SETS)
 def test_archive_holds_exactly_what_source_records(branding_set):
     with zipfile.ZipFile(branding_archive(branding_set)) as z:
