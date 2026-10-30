@@ -36,7 +36,6 @@ import os
 import pathlib
 import re
 import sys
-import zipfile
 
 JAR_MEMBER = "modules/juggler/protocol/Protocol.js"
 LOOSE_TREE = "modules/juggler/protocol/Protocol.js"
@@ -61,17 +60,16 @@ def protocol_source(binary: str) -> tuple[str, str]:
         jar = base / name
         if not jar.is_file():
             continue
+        # invisible_core/jar.py reads the optimized layout a PGO build packs,
+        # which zipfile refused (it used to send the caller to 7z).
+        from invisible_core.jar import JarError, open_jar
         try:
-            with zipfile.ZipFile(jar) as z:
-                if JAR_MEMBER in z.namelist():
-                    return ("%s!%s" % (jar, JAR_MEMBER),
-                            z.read(JAR_MEMBER).decode("utf-8", "replace"))
-        except zipfile.BadZipFile:
-            # Firefox may package an optimized jar that zipfile cannot
-            # read. Not a case to swallow: say which file and why.
-            raise SystemExit(
-                "jar %s does not open with zipfile (optimized jar). "
-                "Extract it with 7z and pass --proto." % jar)
+            opened = open_jar(jar)
+        except JarError as exc:
+            raise SystemExit("jar %s does not open: %s" % (jar, exc))
+        if JAR_MEMBER in opened:
+            return ("%s!%s" % (jar, JAR_MEMBER),
+                    opened.read(JAR_MEMBER).decode("utf-8", "replace"))
     raise SystemExit(
         "Protocol.js not found in %s: neither loose tree nor omni.ja"
         % binary)

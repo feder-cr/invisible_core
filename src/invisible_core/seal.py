@@ -29,7 +29,6 @@ import os
 import platform as _platform
 import re
 import sys
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -210,6 +209,11 @@ class Seal:
     # true for every leg in SUPPORTED_LEGS, and a scalar that is true for one
     # platform is a refusal for all the others.
     build_id_declared: str = ""
+    # The commit of the patch series (firefox_antidetect_patch main) the engine was
+    # built from. source_commit is the engine commit that series gives on the
+    # Mozilla tag (tools/engine.py apply, the same on every machine) and lives on
+    # no remote: this is what rebuilds it. Empty on seals from before the series.
+    series_commit: str = ""
 
     @property
     def contract_n(self) -> int:
@@ -372,6 +376,7 @@ def _parse_seal_bytes(raw: bytes, origin: str) -> Seal:
         playwright_min=pw.get("min") or "", playwright_max=pw.get("max") or "",
         assets=assets, digest=seal_digest(data), origin=origin,
         build_id_declared=declared,
+        series_commit=data.get("series_commit") or "",
     )
 
 
@@ -501,13 +506,17 @@ def _read_juggler_provenance(root: Path) -> Tuple[str, bool, int, list]:
     omni = root / "omni.ja"
     if omni.exists():
         try:
-            with zipfile.ZipFile(omni) as zf:
-                names = set(zf.namelist())
-                present = any(n.startswith(JUGGLER_DIR_REL + "/") for n in names)
-                marked = 0
-                for e in JUGGLER_ENTRIES:
-                    if e in names and any(m in zf.read(e) for m in JUGGLER_MARKERS):
-                        marked += 1
+            # Not zipfile: a PGO build packs omni.ja in Mozilla's optimized
+            # layout, which zipfile refuses, and the Juggler of a build that
+            # had one read as absent (invisible_core/jar.py).
+            from .jar import open_jar
+            jar = open_jar(omni)
+            names = jar.names()
+            present = any(n.startswith(JUGGLER_DIR_REL + "/") for n in names)
+            marked = 0
+            for e in JUGGLER_ENTRIES:
+                if e in names and any(m in jar.read(e) for m in JUGGLER_MARKERS):
+                    marked += 1
             return ("omni.ja", present, marked, notes)
         except Exception as e:  # truncated / not a zip
             notes.append(f"omni.ja unreadable ({e})")

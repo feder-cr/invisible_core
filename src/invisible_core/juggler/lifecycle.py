@@ -205,15 +205,20 @@ class Lifecycle:
         #: which keeps the rule; `_check_alive` raises it).
         self._interruptions = 0
         self._interruption: Optional[tuple] = None
+        #: The page's planned navigations not yet started: a `Page.linkClicked`
+        #: "before" whose "after" has not arrived (`wait_for_action_signals`).
+        self._link_clicks = 0
         #: Who hears what only this object can decide: `announce(what,
         #: frame_id, url=None)`, called UNDER the lock and BEFORE any waiter
         #: is woken, so whatever it sends upward is on its way before the
         #: answer of a wait that the same event satisfies. Set by the page
         #: once its channel exists. `what` is one of `frameAttached` (a frame
         #: id seen for the first time), `frameDetached` (a frame gone, its own
-        #: detach or its parent's new document), `networkidle` and
-        #: `sameDocument`: the frame tree is this object's, and a client that
-        #: keeps frames of its own builds and retires them from these alone.
+        #: detach or its parent's new document), `networkidle`,
+        #: `sameDocument` and `commit` (with `name=` and `navigation=`, the
+        #: commit's id or None for a document re-announced): the frame tree is
+        #: this object's, and a client that keeps frames of its own builds and
+        #: retires them from these alone.
         self.announce = None
         #: The one pending silence check, or None. See `_settle`.
         self._settle_timer: Optional[threading.Timer] = None
@@ -348,6 +353,17 @@ class Lifecycle:
             self.ready = True
             return None
 
+        if method == "Page.linkClicked":
+            # The engine pairs every "before" with one "after", sent when the
+            # planned navigation starts or is cancelled (nsDocShell's
+            # NotifyJugglerLinkClick); the floor is for an engine that does not.
+            if p.get("phase") == "before":
+                self._link_clicks += 1
+            elif self._link_clicks:
+                self._link_clicks -= 1
+            self._cv.notify_all()
+            return None
+
         if method == "Page.frameAttached":
             # ⛔ A FRAME ID ALREADY KNOWN IS THE SAME FRAME, RE-ANNOUNCED, and
             # it keeps everything it knows. A navigation that moves the frame
@@ -424,6 +440,13 @@ class Lifecycle:
                 # the lifecycle at the commit too.
                 f.states = set()
             f.states.add("commit")
+            # Announced HERE, as `sameDocument` is: the page's `navigated` goes
+            # up before a wait this commit ends is answered. ⛔ Sent from the
+            # page's own listener, which runs after this one, it raced a
+            # click's answer: from Firefox 157 click() waits for the commit
+            # of the navigation it planned, and `page.url` read right after
+            # it still named the page it had left (2026-10-27).
+            self._tell("commit", f.id, f.url, name=f.name, navigation=nav)
             return f
 
         if method == "Page.navigationAborted":
@@ -480,11 +503,12 @@ class Lifecycle:
             self._last_activity = time.monotonic()
         return None
 
-    def _tell(self, what: str, frame_id: str, url: Optional[str] = None) -> None:
+    def _tell(self, what: str, frame_id: str, url: Optional[str] = None,
+              **detail) -> None:
         """Hand `what` to whoever listens (`announce`), under the lock and
         before any waiter is woken."""
         if self.announce is not None:
-            self.announce(what, frame_id, url)
+            self.announce(what, frame_id, url, **detail)
 
     def _retire(self, frame_id: str, *, itself: bool) -> None:
         """Remove `frame_id`'s descendants, and the frame too if `itself`,
@@ -646,6 +670,43 @@ class Lifecycle:
                                   began)
                 if deadline.passed():
                     return None
+                self._cv.wait(deadline.slice(0.05))
+
+    def wait_for_action_signals(self, frame_id: str, since: "NavigationMark",
+                                timeout: Optional[float]) -> None:
+        """After an input action, wait for the navigations it set off: every
+        planned one to start (`Page.linkClicked` "before" ... "after"), and the
+        one `frame_id` started after the mark `since` to commit, abort, or stay
+        in the same document. Playwright's `waitForSignalsCreatedBy`, which its
+        click and press run unless `noWaitAfter`; only the main frame counts,
+        as there (`SignalBarrier.addFrameNavigation`).
+
+        ⛔ FROM FIREFOX 157 A FORM SUBMISSION IS A PLANNED NAVIGATION
+        (`dom.forms.submit_async_navigation`, the retail's default): it starts
+        after the click that submitted it has returned. Measured 2026-10-27:
+        the POST was announced 7 ms after `page.click()` came back, so
+        `click()` then reading the requests saw none, where 151 had it before.
+        The engine now reports the plan before the click's answer, and this
+        waits for it; the page sees the retail's timing either way.
+        """
+        deadline = Deadline(timeout)
+        with self._cv:
+            while True:
+                f = self.frames.get(frame_id)
+                if self._link_clicks == 0:
+                    if (f is None or f.navigation == since.navigation
+                            or f.same_document != since.same_document
+                            or "commit" in f.states
+                            or f.navigation in f.aborted):
+                        return
+                self._check_alive("the navigation started by an action on frame %s"
+                                  % frame_id, since.interruptions)
+                if deadline.passed():
+                    raise TimeoutError(
+                        "an action's navigation did not finish in %.0fs: %d planned "
+                        "navigation(s) not started, frame %s at %s"
+                        % (timeout, self._link_clicks, frame_id,
+                           f.navigation if f else None))
                 self._cv.wait(deadline.slice(0.05))
 
     def wait_for_main_frame(self, timeout: Optional[float] = 20.0) -> str:

@@ -1,0 +1,41 @@
+{
+  "mozilla_tag": "FIREFOX_159_0_RELEASE",
+  "sets": {
+    "official": {
+      "about-logo-private.png": "7d4d3f1ab2f3e4bacd694c1f112050e78572a1c5322b78d42f5b16cee703ca03",
+      "about-logo-private@2x.png": "d9a21c0ff4bf76516cb49db99e06e17890c4f322ff43925312b840520ae13bd0",
+      "about-logo.png": "30a20609a2ecd370a4623c4e95467d074f467688bf6756f46bb21876bf32c5da",
+      "about-logo.svg": "f31b10673f2e62510a18cb79c32555d88aa806ede13b128e3e7e3072bfc05cbc",
+      "about-logo@2x.png": "310bc31d4b036d47c84fc020005b08e7b1a2a5582bd9ff54781b647cc0ff3ba3",
+      "about-wordmark.svg": "d1cebf899997e2aacb3cef4903e540e17839167b8fb5adbe960552b2c0e0b9ca",
+      "about.png": "485d5f7bdd2e35649cbdd11fd305a078f2f24fb57f237a227a4e7a98762ae8ac",
+      "aboutDialog.css": "a1f7358c45195ed3f5025340e813461fd38217ab964ea246d11e57006a74b987",
+      "document.ico": "5ce27e88a72a861d0a3a08df57ecab52e70d369f3163d11e115afcee17907e87",
+      "document_pdf.svg": "66aa248167ec8575e17c2689d5d59d3e27c403af01ee0f3410a71ba8d122a84a",
+      "firefox-wordmark.svg": "50bd51b9596fdf9335047d56da549b86d1ee0a5f2a51ec1f197fb3da80716761",
+      "icon128.png": "9926bbb47e152c9747c8e7fbe9d7679fbcf221a4aa13400cbf1d2da3210d1b20",
+      "icon16.png": "742a5ed5a88075540a018629b6c4ee7f39a6fc89f4d75c2c136e002204ac024b",
+      "icon32.png": "e4e889d71d93c2a171cbd92ca2fba2fca3a04ab61e6fc8a703683cf4e3d83ba1",
+      "icon48.png": "d9df64a49f932e5f7c8e1f5fccc0b998dafb57f9a7ed2ac9a8e4a43bed45eb1a",
+      "icon64.png": "12130ce8511f4a348c25380ba9b70b80b2ff0680e4ee801367bf0dbb5e94c00a"
+    },
+    "unofficial": {
+      "about-logo-private.png": "95fc0a29531b9b489b4c13169033fc29e211ee07e549f3b1cdd70f4be8b936b7",
+      "about-logo-private@2x.png": "62f0669109fec349eaf66bfb1707411048cb7444f5f188a954e4fbb66e225e4e",
+      "about-logo.png": "33c3794f02a697f565a12d4efa11d7c6ba4901abf3a2dc07e6ac4bd86c2628f7",
+      "about-logo.svg": "30423d5568272f1aa4ea4840b7b6a2049e4037466d4a49798d58307435fd3df1",
+      "about-logo@2x.png": "18c59cb8be0e90447e39347cbd4c3ac1042893d5c9bca1a2954f791400abb4fa",
+      "about-wordmark.svg": "0d221e483973c702938bdfe41d85d27604a163736c2c59701f9ca847147643fb",
+      "about.png": "6f33420f16263f443fa2a3fad08f54e9fde5846d3d28780e2f2245fadb1cbf14",
+      "aboutDialog.css": "6500eeeebb18855a63d0c070142c40927df7bc42242db7f06d2b26760b0dd07c",
+      "document.ico": "f4e39ac3723ad9b34aefeebbd82f66add46b6de6c11e4e4117b50f8ec8fb4241",
+      "document_pdf.svg": "4571f86690964bbf4516de0ac86c025973c071739d6e247596de5ad2f0aa52bb",
+      "firefox-wordmark.svg": "4fede41832f6693e865a3eea161c6dc2922a591d8322dbdca02412756dc9d7f1",
+      "icon128.png": "be2fdb8622b028a2248510793980e8b9294cee66d55ca2cb0a103610bd409ba4",
+      "icon16.png": "1e8aea59ad881e31e351f7f38143293a45a8e7b916571f3eccce5e89844c1969",
+      "icon32.png": "6b7170dd4e0ad2a095f11bb2d84c35bb7495e30e38218045eb85f81882f46a29",
+      "icon48.png": "9ffbdd36b545394fca032ff753d5422c8092de97acd22ede27ea0b3b0dcb2359",
+      "icon64.png": "060fd5cd86fda946ff84225f3035675e8031e25af55ef49c3bc16c779058fea9"
+    }
+  }
+}

@@ -169,7 +169,7 @@ def test_a_new_document_retires_the_old_ones_frames_and_says_so():
     engine = _Engine([])
     heard = []
     life = Lifecycle(engine, S)
-    life.announce = lambda what, fid, url=None: heard.append((what, fid))
+    life.announce = lambda what, fid, url=None, **_: heard.append((what, fid))
     engine.emit([
         ("Page.frameAttached", {"frameId": F}),
         ("Page.navigationStarted", {"frameId": F, "navigationId": "nav-1"}),
@@ -187,17 +187,20 @@ def test_a_new_document_retires_the_old_ones_frames_and_says_so():
         ("Page.frameAttached", {"frameId": "new-child", "parentFrameId": F}),
     ])
     assert sorted(life.frames) == [F, "new-child"]
-    assert heard == [("frameAttached", F), ("frameAttached", "child"),
+    # The old document's frames are retired before the commit is announced,
+    # so the client hears them go before it hears the new document.
+    assert heard == [("frameAttached", F), ("commit", F),
+                     ("frameAttached", "child"),
                      ("frameAttached", "grandchild"),
                      ("frameDetached", "grandchild"), ("frameDetached", "child"),
-                     ("frameAttached", "new-child")], heard
+                     ("commit", F), ("frameAttached", "new-child")], heard
 
 
 def test_a_detach_of_a_frame_already_retired_is_not_told_twice():
     engine = _Engine([])
     heard = []
     life = Lifecycle(engine, S)
-    life.announce = lambda what, fid, url=None: heard.append((what, fid))
+    life.announce = lambda what, fid, url=None, **_: heard.append((what, fid))
     engine.emit([
         ("Page.frameAttached", {"frameId": F}),
         ("Page.frameAttached", {"frameId": "child", "parentFrameId": F}),

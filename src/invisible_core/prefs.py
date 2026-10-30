@@ -19,6 +19,12 @@ from __future__ import annotations
 
 import functools
 import sys
+# At import, not inside _iana_zones: zoneinfo reads the stdlib's build data for
+# its search path (sysconfig TZPATH) the first time it is imported, keyed by
+# sys.platform. Imported lazily, it read it under whatever platform a caller had
+# set by then - a test persona of win32 on a Linux runner asked sysconfig for
+# win32's build data and raised ModuleNotFoundError.
+import zoneinfo
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -398,6 +404,36 @@ _BASELINE: Dict[str, Any] = {
     "browser.shell.checkDefaultBrowser":                  False,
     "browser.aboutwelcome.enabled":                       False,
     "browser.startup.upgradeDialog.enabled":              False,
+
+    # ⛔ THE BRAND'S PREFS ARE THE CORE'S, NOT THE BUILD'S. The engine is built
+    # with Mozilla's unofficial branding, whose pref file differs from the
+    # official one in five prefs (the update ones aside, which the engine
+    # carries on Mozilla's lines). The core decides them, like the rest of the
+    # brand: four take the official Firefox's value, read from
+    # browser/branding/official/pref/firefox-branding.js of the engine's
+    # Firefox (tests/test_brand_prefs_are_the_cores.py ties them to it).
+    # `startup.homepage_welcome_url` is the one the core decides otherwise: ""
+    # (the unofficial build's value too). Every launch is a fresh profile, so
+    # the official "about:welcome" would open the first-run welcome tab in
+    # every session - a browser that is always on its first run, which no
+    # person's browser is. `app.releaseNotesURL.prompt` is in the official file
+    # but nothing in Firefox 159 reads it, so declaring it would move nothing.
+    "devtools.selfxss.count":                             0,
+    "app.releaseNotesURL":                                "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=whatsnew",
+    "app.releaseNotesURL.aboutDialog":                    "https://www.firefox.com/%LOCALE%/firefox/%VERSION%/releasenotes/?utm_source=firefox-browser&utm_medium=firefox-desktop&utm_campaign=about-dialog",
+    "startup.homepage_welcome_url":                       "",
+    # ⛔ THE FIRST RUN'S LAUNCH-ON-LOGIN IS ALREADY DECIDED. 157 added
+    # DefaultLaunchOnLogin: on the first run of an official build it waits for
+    # Nimbus and, where the rollout sets `defaultEnabled`, writes
+    # HKCU\...\CurrentVersion\Run\Mozilla-Firefox-<path hash> with
+    # `firefox.exe -os-autostart`. Every launch here is a first run on a new
+    # profile, so every binary that ever ran registered itself: after the
+    # reboot of 2026-10-28 Windows started all twelve at sign-in: 76 Firefox
+    # processes of builds nobody had asked for. `alreadyApplied` is
+    # Mozilla's own record that the decision was taken, so nothing is waited
+    # for and nothing is written; the user-facing setting
+    # (`windowsLaunchOnLogin.enabled`) keeps its default.
+    "browser.startup.windowsLaunchOnLogin.alreadyApplied": True,
     # ⛔ `termsofuse.acceptedVersion: 999` USED TO BE HERE, AND IT WAS A DEAD
     # DECLARATION. Removed 2026-08-19 after measuring it rather than deducing it.
     #
@@ -483,7 +519,7 @@ _BASELINE: Dict[str, Any] = {
     # NOW: that path no longer exists - the three AppConstants.sys.mjs entries,
     # the three DEFINES in toolkit/modules/moz.build and the three
     # --with-*-api-keyfile in the .mozconfig are gone - and the engine's only
-    # reader, `URLFormatter.sys.mjs`, reads these prefs (`stealthDeclaredApiKey`).
+    # reader, `StealthApiKeys.sys.mjs`, reads these prefs (`stealthDeclaredApiKey`).
     #
     # ⛔ AND AN ABSENCE IS REFUSED. With no declaration the engine returns the
     # empty string and logs an error to the console: `checkGoogleSafeBrowsingKey`
@@ -582,7 +618,9 @@ _BASELINE: Dict[str, Any] = {
     # pinned engine (tests/test_pref_types.py): it moved nothing.
     "browser.contentblocking.report.lockwise.enabled":    False,
     "browser.contentblocking.report.monitor.enabled":     False,
-    "dom.private-attribution.submission.enabled":         False,
+    # `dom.private-attribution.submission.enabled` was here: 157 removed the
+    # private attribution service and its pref, so there is nothing left to
+    # turn off (tests/test_pref_types.py against the 157 engine).
 
     "browser.translations.enable":                        False,
 
@@ -1632,8 +1670,6 @@ def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
 
 @functools.lru_cache(maxsize=1)
 def _iana_zones() -> frozenset:
-    import zoneinfo
-
     return frozenset(zoneinfo.available_timezones())
 
 
