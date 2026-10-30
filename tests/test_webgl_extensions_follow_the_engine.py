@@ -11,13 +11,18 @@ Firefox builds with a fresh profile and no automation, the same page in both:
 
     Firefox 151.0     webgl 27, webgl2 14, no EXT_depth_clamp
     Firefox 157.0.1   webgl 28, webgl2 15, EXT_depth_clamp in both
+    Firefox 159.0     webgl 31, webgl2 19 (measured 2026-10-30, same host): +EXT_clip_control,
+                      +EXT_polygon_offset_clamp, +EXT_texture_mirror_clamp_to_edge in both,
+                      +EXT_texture_norm16 in WebGL2 only
 
 The code for EXT_depth_clamp is already in 151 (`gl->IsSupported(depth_clamp)`);
 what changed is ANGLE, which advertises depth clamp from the 157 engine on. Our
 157 engine reported the 151 lists - 27 and 14 - on every seed: a page reading the
 User-Agent saw Firefox 157 and, in the same visit, the WebGL of an older one.
 Depth clamp is a D3D11 rasterizer state (DepthClipEnable) available at every
-feature level the pool's personas declare, so it is not GPU-dependent.
+feature level the pool's personas declare, so it is not GPU-dependent. The 159
+additions are measured on one GPU family (Intel HD) and given to every persona
+the same way; a non-Intel official 159 measurement would sharpen them.
 """
 from __future__ import annotations
 
@@ -35,9 +40,35 @@ _POOL = pathlib.Path(__import__("invisible_core").__file__).parent / "_fpforge" 
 _W1, _W2 = "zoom.stealth.webgl.extensions", "zoom.stealth.webgl2.extensions"
 _SOURCE = EngineSource.pinned()
 
+#: Official Firefox 159.0, Windows 11, ANGLE (Intel, Intel(R) HD Graphics
+#: Direct3D11 vs_5_0 ps_5_0), measured 2026-10-30 (the set; ordered as the 159
+#: engine's WebGLExtensionID returns them).
+OFFICIAL_159_INTEL_WEBGL = [
+    "ANGLE_instanced_arrays", "EXT_blend_minmax", "EXT_clip_control", "EXT_color_buffer_half_float",
+    "EXT_depth_clamp", "EXT_float_blend", "EXT_frag_depth", "EXT_polygon_offset_clamp",
+    "EXT_shader_texture_lod", "EXT_sRGB", "EXT_texture_compression_bptc", "EXT_texture_compression_rgtc",
+    "EXT_texture_filter_anisotropic", "EXT_texture_mirror_clamp_to_edge", "OES_element_index_uint",
+    "OES_fbo_render_mipmap", "OES_standard_derivatives", "OES_texture_float", "OES_texture_float_linear",
+    "OES_texture_half_float", "OES_texture_half_float_linear", "OES_vertex_array_object",
+    "WEBGL_color_buffer_float", "WEBGL_compressed_texture_s3tc", "WEBGL_compressed_texture_s3tc_srgb",
+    "WEBGL_debug_renderer_info", "WEBGL_debug_shaders", "WEBGL_depth_texture", "WEBGL_draw_buffers",
+    "WEBGL_lose_context", "WEBGL_provoking_vertex",
+]
+OFFICIAL_159_INTEL_WEBGL2 = [
+    "EXT_clip_control", "EXT_color_buffer_float", "EXT_depth_clamp", "EXT_float_blend",
+    "EXT_polygon_offset_clamp", "EXT_texture_compression_bptc", "EXT_texture_compression_rgtc",
+    "EXT_texture_filter_anisotropic", "EXT_texture_mirror_clamp_to_edge", "EXT_texture_norm16",
+    "OES_draw_buffers_indexed", "OES_texture_float_linear", "OVR_multiview2", "WEBGL_compressed_texture_s3tc",
+    "WEBGL_compressed_texture_s3tc_srgb", "WEBGL_debug_renderer_info", "WEBGL_debug_shaders",
+    "WEBGL_lose_context", "WEBGL_provoking_vertex",
+]
+#: The 159 additions, every one of which a 159 identity must report.
+NEW_IN_159_WEBGL = ["EXT_clip_control", "EXT_polygon_offset_clamp", "EXT_texture_mirror_clamp_to_edge"]
+NEW_IN_159_WEBGL2 = NEW_IN_159_WEBGL + ["EXT_texture_norm16"]
+
 #: Official Firefox 157.0.1 (BuildID 20261005135250), Windows 11, ANGLE (Intel,
 #: Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0), measured 2026-10-29, in the
-#: order the engine returns them.
+#: order the engine returns them. Kept as the record of the previous port.
 OFFICIAL_157_INTEL_WEBGL = [
     "ANGLE_instanced_arrays", "EXT_blend_minmax", "EXT_color_buffer_half_float", "EXT_depth_clamp",
     "EXT_float_blend", "EXT_frag_depth", "EXT_shader_texture_lod", "EXT_sRGB", "EXT_texture_compression_bptc",
@@ -76,11 +107,21 @@ def test_every_windows_persona_reports_depth_clamp_as_the_157_engine_does():
     assert not missing, f"lists without EXT_depth_clamp, which Firefox 157's ANGLE reports: {missing}"
 
 
+def test_every_windows_persona_reports_what_the_159_engine_added():
+    missing = []
+    for e in _windows():
+        p = e["prefs"]
+        missing += [("webgl", n, p["zoom.stealth.webgl.renderer"]) for n in NEW_IN_159_WEBGL if n not in _split(p[_W1])]
+        if _split(p.get(_W2)):
+            missing += [("webgl2", n, p["zoom.stealth.webgl.renderer"]) for n in NEW_IN_159_WEBGL2 if n not in _split(p[_W2])]
+    assert not missing, f"lists without an extension Firefox 159's engine reports: {missing}"
+
+
 def test_a_persona_of_the_measured_gpu_family_matches_the_official_build_exactly():
     pairs = [(_split(e["prefs"][_W1]), _split(e["prefs"].get(_W2))) for e in _windows()
              if e["prefs"]["zoom.stealth.webgl.renderer"].startswith("ANGLE (Intel, Intel(R) HD Graphics Direct3D11")]
-    assert (OFFICIAL_157_INTEL_WEBGL, OFFICIAL_157_INTEL_WEBGL2) in pairs, (
-        "no Intel HD persona reports what official Firefox 157 reports on that GPU family")
+    assert (OFFICIAL_159_INTEL_WEBGL, OFFICIAL_159_INTEL_WEBGL2) in pairs, (
+        "no Intel HD persona reports what official Firefox 159 reports on that GPU family")
 
 
 @pytest.mark.skipif(_SOURCE.unavailable() is not None, reason=_SOURCE.unavailable() or "")

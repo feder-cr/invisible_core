@@ -1,5 +1,5 @@
 {
-  "upstream_version": "157.0.1",
-  "source_commit": "cbbd788a4315d48a4d3dd578ef4f96349d60dc1e",
-  "why": "engine/firefox-157 serves the 157 engine (stealth/157) while it still bundles the 151 release's seal: the engine-source tests read this commit. Delete this file when the branch's seal pins a 157 build."
+  "upstream_version": "159.0",
+  "source_commit": "23e932448e1a627c6f2ee161dbf2209ef91778b0",
+  "why": "engine/firefox-159 serves the 159 engine (port/159-from-d28c866, local) while it still bundles an older release's seal: the engine-source tests read this commit. Move it to the exported series commit, and delete this file when the branch's seal pins a 159 build."
 }
