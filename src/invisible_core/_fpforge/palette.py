@@ -69,7 +69,15 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
     # from that judge on this one field and no other, and 6 of the 35 do not
     # resolve from content at all. That 1-of-35 is why a wrong judge survives
     # so long - it agrees almost everywhere.
-    "ui.-moz-dialog":                  "#F0F0F0",
+    #
+    #   2026-10-31    FFFFFF   judged by retail 159.0, BuildID=20261022150525,
+    #                          Authenticode Valid, CN=Mozilla Corporation,
+    #                          ProductName Firefox, IsPrivateBuild false
+    #
+    # Same two checks, a different major. Retail moved to white between 151 and
+    # 153 - the drift row three ran into by accident - and 159 keeps it. The
+    # 151 value was right for 151; we now declare 159, so the value is 159's.
+    "ui.-moz-dialog":                  "#FFFFFF",
     "ui.-moz-dialogtext":              "#000000",
     "ui.-moz_menubarhovertext":        "#15141A",
     "ui.-moz_menuhover":               "#0000001E",
