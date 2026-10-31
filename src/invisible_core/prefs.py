@@ -253,6 +253,78 @@ _WIN_DECODING_INFO = chr(10).join([
     "video/webm|vp9|110",
 ])
 
+
+# ──────────────────────────────────────────────────────────────────────
+#  The WebGPU adapter
+#
+#  Firefox hands a page the features and limits wgpu reports for the real
+#  adapter: D3D12 on Windows, Vulkan on Linux, and on a Linux machine without a
+#  GPU a CPU adapter with isFallbackAdapter true. Measured 2026-10-31 with
+#  firefox-54 on Linux: isFallbackAdapter true, an extra "clip-distances" and 14
+#  limits away from retail (maxStorageBufferBindingSize 134217728 against
+#  2147483644, minUniformBufferOffsetAlignment 32 against 256, ...).
+#
+#  Retail Firefox 159 for Windows, headed, gave the same 13 features and 35
+#  limits for an RTX 5080, an Intel iGPU and WARP (forceFallbackAdapter) on the
+#  same machine: they are constants of Firefox's D3D12 backend, not of the GPU.
+#  So they are declared once, for every identity with a Direct3D 12 GPU; the
+#  engine adds "core-features-and-limits" itself, as Firefox does. A D3D10-class
+#  renderer (vs_4_x, GeForce 8800 GTX, Intel 945GM) has no D3D12, and retail's
+#  requestAdapter() resolves null there: "none".
+# ──────────────────────────────────────────────────────────────────────
+_WIN_WEBGPU_FEATURES = chr(10).join([
+    "bgra8unorm-storage",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "timestamp-query",
+])
+
+_WIN_WEBGPU_LIMITS = chr(10).join([
+    "maxBindGroups=8",
+    "maxBindGroupsPlusVertexBuffers=24",
+    "maxBindingsPerBindGroup=4294967295",
+    "maxBufferSize=2147483644",
+    "maxColorAttachmentBytesPerSample=128",
+    "maxColorAttachments=8",
+    "maxComputeInvocationsPerWorkgroup=1024",
+    "maxComputeWorkgroupSizeX=1024",
+    "maxComputeWorkgroupSizeY=1024",
+    "maxComputeWorkgroupSizeZ=64",
+    "maxComputeWorkgroupStorageSize=32768",
+    "maxComputeWorkgroupsPerDimension=65535",
+    "maxDynamicStorageBuffersPerPipelineLayout=4",
+    "maxDynamicUniformBuffersPerPipelineLayout=8",
+    "maxInterStageShaderVariables=31",
+    "maxSampledTexturesPerShaderStage=64",
+    "maxSamplersPerShaderStage=64",
+    "maxStorageBufferBindingSize=2147483644",
+    "maxStorageBuffersInFragmentStage=64",
+    "maxStorageBuffersInVertexStage=64",
+    "maxStorageBuffersPerShaderStage=64",
+    "maxStorageTexturesInFragmentStage=64",
+    "maxStorageTexturesInVertexStage=64",
+    "maxStorageTexturesPerShaderStage=64",
+    "maxTextureArrayLayers=2048",
+    "maxTextureDimension1D=16384",
+    "maxTextureDimension2D=16384",
+    "maxTextureDimension3D=2048",
+    "maxUniformBufferBindingSize=65536",
+    "maxUniformBuffersPerShaderStage=64",
+    "maxVertexAttributes=30",
+    "maxVertexBufferArrayStride=2048",
+    "maxVertexBuffers=16",
+    "minStorageBufferOffsetAlignment=32",
+    "minUniformBufferOffsetAlignment=256",
+])
+
 # ──────────────────────────────────────────────────────────────────────
 #  Windows system-font surface
 #
@@ -1403,6 +1475,10 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # Windows answers true. True is Windows' behaviour; on a Windows build the
     # pref does not exist and changes nothing.
     prefs["media.navigator.mediadatadecoder_vp8_hardware_enabled"] = True
+    # The WebGPU adapter (see _WIN_WEBGPU_FEATURES): none on a D3D10-class GPU.
+    prefs["zoom.stealth.webgpu.adapter"] = "none" if _D3D10_CLASS.search(renderer or "") else "d3d12"
+    prefs["zoom.stealth.webgpu.features"] = _WIN_WEBGPU_FEATURES
+    prefs["zoom.stealth.webgpu.limits"] = _WIN_WEBGPU_LIMITS
     prefs["zoom.stealth.media.decoding_info"] = _decode_hardware_follows_gpu(
         _WIN_DECODING_INFO, renderer)
 

@@ -38,8 +38,11 @@ def test_a_port_declaration_names_a_newer_engine_than_the_seal():
     assert port["source_commit"] != seal["source_commit"], (
         "%s names the engine the bundled seal already pins (%s): delete it"
         % (PORT_FILE.name, seal["source_commit"]))
-    assert _version(port["upstream_version"]) > _version(seal["upstream_version"]), (
-        "%s names %s, not newer than the seal's %s: delete it or correct it"
+    # The same Firefox is fine: an engine release on the seal's Firefox version
+    # (new hooks, same upstream) is a newer engine too; its commit differs, which
+    # the assert above already requires. Only an older Firefox points backwards.
+    assert _version(port["upstream_version"]) >= _version(seal["upstream_version"]), (
+        "%s names %s, older than the seal's %s: delete it or correct it"
         % (PORT_FILE.name, port["upstream_version"], seal["upstream_version"]))
     assert len(port["source_commit"]) == 40 and port.get("why"), (
         "a port declaration names a full commit and says why it exists")
