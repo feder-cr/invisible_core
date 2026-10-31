@@ -174,10 +174,21 @@ _WEBGL2_EXTENSIONS = ",".join([
 #  Verified at the edges: avc1.644000 (level 0) and avc1.64403F (level 6.3)
 #  answer empty on retail, exactly as that function says they must.
 #
-#  ONLY THE DIVERGENT NAMES ARE DECLARED. VP8, VP9, AV1 and the other audio
-#  codecs are bundled with the build, agree cross-OS, and so carry nothing to
-#  declare away. A pref entry that cannot move a measurement is not a safety
-#  margin, it is an untested code path.
+#  ONLY THE DIVERGENT NAMES ARE DECLARED. The other audio codecs are bundled
+#  with the build, agree cross-OS, and so carry nothing to declare away. A pref
+#  entry that cannot move a measurement is not a safety margin, it is an
+#  untested code path.
+#
+#  ⛔ VP8, VP9 AND AV1 WERE ON THAT LIST, AND FIREFOX 159 MOVED THEM OFF IT.
+#  canPlayType agrees cross-OS for them, but the HARDWARE bit does not, and
+#  from 159 a page reads it: decodingInfo({type: "webrtc"}) asks
+#  WebrtcMediaDataDecoder::Supports -> PDMFactory::SupportsAsync, which the
+#  engine hooks with this pref, and powerEfficient is that answer's
+#  HardwareDecode. Undeclared, the bit was the host GPU's. Measured 2026-10-31
+#  on retail Firefox 159 for Windows, headed, 1280x720 at 1 Mbit/s and 30 fps:
+#  VP8, VP9, AV1 and H.264 all [supported, smooth, powerEfficient] = true.
+#  AV1 is declared per identity in `_apply_codecs`, because media.av1.enabled
+#  is: with it off, retail's decoders all answer nothing.
 #
 #  ⛔ AAC IS ONE OF THEM, AND THE MEASUREMENT THAT SAID IT WAS NOT READ TOO
 #  EARLY. The build's ffvpx has no AAC decoder (CONFIG_AAC_DECODER 0), so on
@@ -204,6 +215,8 @@ _WEBGL2_EXTENSIONS = ",".join([
 _WIN_DECODE_SUPPORT = chr(10).join([
     "video/avc|swhw",
     "video/hevc|swhw",
+    "video/vp8|swhw",
+    "video/vp9|swhw",
     "audio/mp4a-latm|sw",
 ])
 
@@ -1335,7 +1348,22 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # capability on or off, which cannot make a decoder the build does not
     # carry exist - and that is exactly why H.264 stayed divergent while every
     # other codec in a 14-type probe agreed.
-    prefs["zoom.stealth.media.decode_support"] = _WIN_DECODE_SUPPORT
+    # AV1 follows the identity's media.av1.enabled. On, retail Windows answers
+    # software and hardware (2026-10-31). Off, every one of retail's decoders
+    # declines it (AgnosticDecoderModule, WMFDecoderModule), so the set is
+    # empty: "no". Declaring hardware there would contradict the canPlayType
+    # "" the same pref gives.
+    prefs["zoom.stealth.media.decode_support"] = chr(10).join([
+        _WIN_DECODE_SUPPORT,
+        "video/av1|" + ("swhw" if profile.codec.av1_enabled else "no"),
+    ])
+    # WebRTC drops the hardware bit of VP8 AFTER the declared answer, on GTK
+    # only: AdjustWebrtcDecodeSupportVP8 in MediaDataCodec.cpp, behind this pref,
+    # which exists only in GTK builds and defaults to false there. Windows has
+    # no such step, so the Linux build would answer powerEfficient false where
+    # Windows answers true. True is Windows' behaviour; on a Windows build the
+    # pref does not exist and changes nothing.
+    prefs["media.navigator.mediadatadecoder_vp8_hardware_enabled"] = True
     prefs["zoom.stealth.media.decoding_info"] = _WIN_DECODING_INFO
 
 
