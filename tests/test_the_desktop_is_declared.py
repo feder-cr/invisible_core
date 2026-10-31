@@ -128,3 +128,12 @@ def test_a_malformed_palette_record_is_refused(monkeypatch, record):
     host in silence."""
     with pytest.raises(ValueError, match="desktop.palette line 1"):
         _prefs(monkeypatch, "win32", **{"desktop.palette": record})
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_the_dialog_colour_is_retail_159_s(monkeypatch, platform):
+    """-moz-dialog is the one system colour retail changed between 151 and 159:
+    retail 159.0 on Windows answers rgb(255,255,255), 151 answered
+    rgb(240,240,240). Declaring 151's on a 159 engine was a fixed value that
+    differed from retail on every host."""
+    assert _prefs(monkeypatch, platform)["ui.-moz-dialog"] == "#FFFFFF"

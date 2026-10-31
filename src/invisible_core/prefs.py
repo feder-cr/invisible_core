@@ -18,6 +18,7 @@ The translation is split into:
 from __future__ import annotations
 
 import functools
+import re
 import sys
 # At import, not inside _iana_zones: zoneinfo reads the stdlib's build data for
 # its search path (sysconfig TZPATH) the first time it is imported, keyed by
@@ -250,6 +251,78 @@ _WIN_DECODING_INFO = chr(10).join([
     "video/webm|vp09|111",
     "video/webm|vp8|110",
     "video/webm|vp9|110",
+])
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  The WebGPU adapter
+#
+#  Firefox hands a page the features and limits wgpu reports for the real
+#  adapter: D3D12 on Windows, Vulkan on Linux, and on a Linux machine without a
+#  GPU a CPU adapter with isFallbackAdapter true. Measured 2026-10-31 with
+#  firefox-54 on Linux: isFallbackAdapter true, an extra "clip-distances" and 14
+#  limits away from retail (maxStorageBufferBindingSize 134217728 against
+#  2147483644, minUniformBufferOffsetAlignment 32 against 256, ...).
+#
+#  Retail Firefox 159 for Windows, headed, gave the same 13 features and 35
+#  limits for an RTX 5080, an Intel iGPU and WARP (forceFallbackAdapter) on the
+#  same machine: they are constants of Firefox's D3D12 backend, not of the GPU.
+#  So they are declared once, for every identity with a Direct3D 12 GPU; the
+#  engine adds "core-features-and-limits" itself, as Firefox does. A D3D10-class
+#  renderer (vs_4_x, GeForce 8800 GTX, Intel 945GM) has no D3D12, and retail's
+#  requestAdapter() resolves null there: "none".
+# ──────────────────────────────────────────────────────────────────────
+_WIN_WEBGPU_FEATURES = chr(10).join([
+    "bgra8unorm-storage",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "timestamp-query",
+])
+
+_WIN_WEBGPU_LIMITS = chr(10).join([
+    "maxBindGroups=8",
+    "maxBindGroupsPlusVertexBuffers=24",
+    "maxBindingsPerBindGroup=4294967295",
+    "maxBufferSize=2147483644",
+    "maxColorAttachmentBytesPerSample=128",
+    "maxColorAttachments=8",
+    "maxComputeInvocationsPerWorkgroup=1024",
+    "maxComputeWorkgroupSizeX=1024",
+    "maxComputeWorkgroupSizeY=1024",
+    "maxComputeWorkgroupSizeZ=64",
+    "maxComputeWorkgroupStorageSize=32768",
+    "maxComputeWorkgroupsPerDimension=65535",
+    "maxDynamicStorageBuffersPerPipelineLayout=4",
+    "maxDynamicUniformBuffersPerPipelineLayout=8",
+    "maxInterStageShaderVariables=31",
+    "maxSampledTexturesPerShaderStage=64",
+    "maxSamplersPerShaderStage=64",
+    "maxStorageBufferBindingSize=2147483644",
+    "maxStorageBuffersInFragmentStage=64",
+    "maxStorageBuffersInVertexStage=64",
+    "maxStorageBuffersPerShaderStage=64",
+    "maxStorageTexturesInFragmentStage=64",
+    "maxStorageTexturesInVertexStage=64",
+    "maxStorageTexturesPerShaderStage=64",
+    "maxTextureArrayLayers=2048",
+    "maxTextureDimension1D=16384",
+    "maxTextureDimension2D=16384",
+    "maxTextureDimension3D=2048",
+    "maxUniformBufferBindingSize=65536",
+    "maxUniformBuffersPerShaderStage=64",
+    "maxVertexAttributes=30",
+    "maxVertexBufferArrayStride=2048",
+    "maxVertexBuffers=16",
+    "minStorageBufferOffsetAlignment=32",
+    "minUniformBufferOffsetAlignment=256",
 ])
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1047,7 +1120,11 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
 #: type is what a page reads with one instanceof, no reference data and no
 #: second machine. MAX_VIEWPORT_DIMS (3386) is deliberately NOT here: the
 #: specification really does make that one an Int32Array.
-_WEBGL_FLOAT_PAIR_ENUMS = ("2928", "33901", "33902")
+#:
+#: DEPTH_RANGE left the pool on 2026-10-31 with every other piece of context
+#: state (tests/test_webgl_pool_declares_constants_only.py): Firefox answers it
+#: from the live context, which a declared value froze.
+_WEBGL_FLOAT_PAIR_ENUMS = ("33901", "33902")
 
 
 def _route_float_pairs(prefs: Dict[str, Any]) -> None:
@@ -1310,6 +1387,39 @@ def _apply_audio(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.audio.max_channel_count"] = profile.audio.max_channel_count
 
 
+#: A renderer the page reads as Direct3D 10 class hardware: shader model 4, or
+#: one of the names Firefox's SanitizeRenderer gives such a GPU (GeForce 8800
+#: GTX, Intel 945GM). None of it decodes VP8, VP9 or AV1 in hardware.
+_D3D10_CLASS = re.compile(r"\bvs_4_[01]\b|GeForce 8800 GTX|Intel 945GM")
+
+#: The codecs whose hardware decoding a D3D10 class GPU cannot have. H.264 is not
+#: one: those GPUs mostly decode it, and the population is mixed.
+_NEWER_THAN_D3D10 = ("vp8", "vp9", "av1", "vp09", "av01")
+
+
+def _decode_hardware_follows_gpu(table: str, renderer: str) -> str:
+    """The table with hardware dropped for VP8, VP9 and AV1 when the GPU the page
+    sees is D3D10 class: "swhw" -> "sw" in the decode-support table, and the
+    powerEfficient digit to 0 in the decodingInfo one.
+
+    The other GPU names Firefox reports (GeForce GTX 980, Intel(R) HD Graphics,
+    Radeon R9 200 ...) each cover generations with and without these decoders,
+    so the page cannot tell, and they keep retail Windows's answer."""
+    if not _D3D10_CLASS.search(renderer or ""):
+        return table
+    out = []
+    for line in table.split(chr(10)):
+        fields = line.split("|")
+        codec = fields[-2].rsplit("/", 1)[-1]
+        if codec in _NEWER_THAN_D3D10:
+            if fields[-1] == "swhw":
+                fields[-1] = "sw"
+            elif len(fields[-1]) == 3 and fields[-1].isdigit():
+                fields[-1] = fields[-1][:2] + "0"
+        out.append("|".join(fields))
+    return chr(10).join(out)
+
+
 def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # EME, declared TRUE on every host, and it is not cosmetic.
     #
@@ -1353,10 +1463,15 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # declines it (AgnosticDecoderModule, WMFDecoderModule), so the set is
     # empty: "no". Declaring hardware there would contradict the canPlayType
     # "" the same pref gives.
-    prefs["zoom.stealth.media.decode_support"] = chr(10).join([
+    #
+    # Both tables then follow the GPU the page sees: a D3D10 class renderer
+    # has no VP8, VP9 or AV1 decoder, and answering "hardware" next to
+    # "vs_4_0" in WEBGL_debug_renderer_info contradicts the page's own reading.
+    renderer = profile.gpu.renderer
+    prefs["zoom.stealth.media.decode_support"] = _decode_hardware_follows_gpu(chr(10).join([
         _WIN_DECODE_SUPPORT,
         "video/av1|" + ("swhw" if profile.codec.av1_enabled else "no"),
-    ])
+    ]), renderer)
     # WebRTC drops the hardware bit of VP8 AFTER the declared answer, on GTK
     # only: AdjustWebrtcDecodeSupportVP8 in MediaDataCodec.cpp, behind this pref,
     # which exists only in GTK builds and defaults to false there. Windows has
@@ -1364,7 +1479,12 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # Windows answers true. True is Windows' behaviour; on a Windows build the
     # pref does not exist and changes nothing.
     prefs["media.navigator.mediadatadecoder_vp8_hardware_enabled"] = True
-    prefs["zoom.stealth.media.decoding_info"] = _WIN_DECODING_INFO
+    # The WebGPU adapter (see _WIN_WEBGPU_FEATURES): none on a D3D10-class GPU.
+    prefs["zoom.stealth.webgpu.adapter"] = "none" if _D3D10_CLASS.search(renderer or "") else "d3d12"
+    prefs["zoom.stealth.webgpu.features"] = _WIN_WEBGPU_FEATURES
+    prefs["zoom.stealth.webgpu.limits"] = _WIN_WEBGPU_LIMITS
+    prefs["zoom.stealth.media.decoding_info"] = _decode_hardware_follows_gpu(
+        _WIN_DECODING_INFO, renderer)
 
 
 def _apply_rasterisation(prefs: Dict[str, Any], profile: Profile) -> None:
