@@ -1,6 +1,6 @@
 {
   "upstream_version": "159.0",
-  "source_commit": "f73b09f4c54163f059fe5ce94dfb9920d0bb6cb8",
-  "series_commit": "a7dfc4a2266e2223810da150fea41d3ac66c643c",
-  "why": "The core declares the WebGPU adapter (zoom.stealth.webgpu.*), which the next engine reads and its declaration gate requires (series webgpu-declaration @ a7dfc4a, materialized on FIREFOX_159_0_RELEASE as source_commit). The branch still bundles the firefox-54 seal: the engine-source tests read source_commit, and CI's branding-is-retail rebuilds it from series_commit. Delete this file when the branch's seal pins that engine's release."
+  "source_commit": "2e8d3adbe6b7219d60ae6eb90e582de5735cc13a",
+  "series_commit": "a7c30579b8b18b64a58b78aca4038b268c972045",
+  "why": "The core declares the WebGPU adapter (zoom.stealth.webgpu.*), which the next engine reads and its declaration gate requires (series webgpu-declaration @ a7c3057, materialized on FIREFOX_159_0_RELEASE as source_commit). The branch still bundles the firefox-54 seal: the engine-source tests read source_commit, and CI's branding-is-retail rebuilds it from series_commit. Delete this file when the branch's seal pins that engine's release."
 }
