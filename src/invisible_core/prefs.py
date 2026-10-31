@@ -1120,7 +1120,11 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
 #: type is what a page reads with one instanceof, no reference data and no
 #: second machine. MAX_VIEWPORT_DIMS (3386) is deliberately NOT here: the
 #: specification really does make that one an Int32Array.
-_WEBGL_FLOAT_PAIR_ENUMS = ("2928", "33901", "33902")
+#:
+#: DEPTH_RANGE left the pool on 2026-10-31 with every other piece of context
+#: state (tests/test_webgl_pool_declares_constants_only.py): Firefox answers it
+#: from the live context, which a declared value froze.
+_WEBGL_FLOAT_PAIR_ENUMS = ("33901", "33902")
 
 
 def _route_float_pairs(prefs: Dict[str, Any]) -> None:
