@@ -50,9 +50,12 @@ def d3d10(renderer):
     return any(s in renderer for s in ("vs_4_0", "vs_4_1", "GeForce 8800 GTX", "Intel 945GM"))
 
 
-def test_the_pool_has_both_kinds_so_this_test_means_something():
+def test_the_pool_has_no_d3d10_class_gpu_any_more():
+    # Since 2026-11-01 the Direct3D 10 class slots are real Windows 11 GPUs, so the
+    # pool has only the D3D11 kind; the D3D10 branch is still held by the tests
+    # below that pass a D3D10 renderer string directly.
     kinds = {d3d10(r) for r in windows_renderers()}
-    assert kinds == {True, False}
+    assert kinds == {False}
 
 
 @pytest.mark.parametrize("renderer", windows_renderers())

@@ -80,8 +80,11 @@ def test_a_persona_declares_constants_and_no_context_state(os_, i, persona):
 
 
 def test_a_gpu_without_multisampling_is_declared_to_firefox():
+    # The two personas without multisampling were Direct3D 10 class GPUs; since
+    # 2026-11-01 the pool has none (Windows 11 has no driver for them), so every
+    # Windows persona multisamples. The check below still holds any newcomer to it.
     no_msaa = [p["prefs"] for p in pool()["win"] if p["prefs"].get("webgl.msaa-samples") == 0]
-    assert len(no_msaa) == 2
+    assert len(no_msaa) == 0
     for p in pool()["win"]:
         assert p["prefs"].get("webgl.msaa-samples", 4) in (0, 4)
 

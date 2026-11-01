@@ -125,6 +125,9 @@ def _gpu_pool() -> List[Dict]:
             "gpu_class": cls,
             "prefs": prefs,
             "weight": float(e["prob"]),
+            # set on the slots that replaced the Direct3D 10 class personas: the
+            # real GPU the entry stands for (a label of win_gfx_devices.json)
+            "device": e.get("device"),
         })
     _GPU_POOL_CACHE = pool
     return pool
@@ -280,6 +283,53 @@ def persona_for(renderer: str, vendor: str) -> Optional[Dict]:
     for p in _gpu_pool():
         if p["renderer"] == renderer and p["vendor"] == vendor:
             return p
+    return None
+
+
+# ── The real device behind the persona (2026-11-01) ──────────────────────────
+# A pool renderer is a SanitizeRenderer bucket ("GeForce GTX 980" stands for every
+# GeForce from the 900 series up), but the gfx blocklist decides per real device and
+# driver, and inside three buckets the outcomes differ (video decoder reuse, zero-copy
+# decode, hardware encode, native GL WebGL). So a persona also declares one real
+# device of its bucket, and the blocklist outcomes official Firefox 159 gives that
+# device: `_fpforge/data/win_gfx_devices.json`, measured on the retail build with
+# Mozilla's MOZ_GFX_SPOOF_* variables (coord/gfxinfo). The engine answers
+# GetFeatureStatus from them on every host, so the host adapter decides nothing.
+_DEVICES_PATH = _POOL_PATH.with_name("win_gfx_devices.json")
+_DEVICES_CACHE: Optional[Dict[str, List[Dict]]] = None
+
+
+def _gfx_devices() -> Dict[str, List[Dict]]:
+    global _DEVICES_CACHE
+    if _DEVICES_CACHE is None:
+        import json
+        _DEVICES_CACHE = json.loads(_DEVICES_PATH.read_text(encoding="utf-8"))["by_renderer"]
+    return _DEVICES_CACHE
+
+
+def choose_gfx_device(persona: Optional[Dict], seed: int) -> Optional[Dict]:
+    """The real device this seed's persona declares, or None when its bucket has none.
+
+    Drawn from its own stream (a hash of the seed, not `_IDENTITY_MULTIPLIER`), so
+    adding it moved no seed's persona: the bucket is still `_draw`'s answer and only
+    the device inside it is new. Equal weights: there is no measured split of real
+    devices inside a bucket yet. A pool entry that names its own device declares
+    that one."""
+    devs = _gfx_devices().get(persona["renderer"]) if persona else None
+    if not devs:
+        return None
+    if persona.get("device"):
+        return next(d for d in devs if d["label"] == persona["device"])
+    import hashlib
+    h = int.from_bytes(hashlib.sha256(b"gfx-device:%d" % int(seed)).digest()[:8], "big")
+    return devs[h % len(devs)]
+
+
+def gfx_device_for(renderer: str, label: str) -> Optional[Dict]:
+    """The device a Profile declares - a READ of `Profile.gpu.device`, like `persona_for`."""
+    for d in _gfx_devices().get(renderer, []):
+        if d["label"] == label:
+            return d
     return None
 
 

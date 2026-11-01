@@ -33,7 +33,7 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
-from ._webgl_personas import persona_for, render_noise_seed
+from ._webgl_personas import gfx_device_for, persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
 
@@ -1224,6 +1224,13 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
             else:
                 prefs[_k] = _v
         _route_float_pairs(prefs)
+        # The blocklist outcome of every gfx feature, as official Firefox 159 gives
+        # it for the real device behind the persona's bucket (NAME|STATUS[|failureId]):
+        # the engine answers GetFeatureStatus from it on every host, before the
+        # gfx.blacklist.* prefs and both blocklists, so the host adapter decides nothing.
+        _device = gfx_device_for(profile.gpu.renderer, profile.gpu.device)
+        if _device:
+            prefs["zoom.stealth.gfx.feature_status"] = _device["feature_status"]
     else:
         prefs["zoom.stealth.webgl.renderer"] = ""
         prefs["zoom.stealth.webgl.vendor"]   = ""

@@ -62,9 +62,12 @@ _DATA = pathlib.Path(_sampler.__file__).with_name("data")
 #: visible rather than plausible noise.
 _SWEEP = 1500
 
-#: sha256 over "seed:renderer\n" for seeds 0.._SWEEP. Pinned 2026-07-27, after
-#: the software rasterizer was replaced in slot 5 (invisible-core 18.3.0).
-_PERSONA_MAP_DIGEST = "2ee88103fef767ca06ee1ed56ecbab80b8e3eb7af4ed0c024f0a4f0398a893cb"
+#: sha256 over "seed:renderer\n" for seeds 0.._SWEEP. Re-pinned 2026-11-01, after
+#: the five Direct3D 10 class slots (7, 9-12) were replaced in place by real
+#: Windows 11 GPUs: 17 of the 1500 seeds moved (1.1%, against the 0.97% those
+#: slots weighed), every one of them a seed that drew a replaced slot. Before:
+#: 2ee88103..., pinned 2026-07-27 after the software rasterizer left slot 5.
+_PERSONA_MAP_DIGEST = "ff4c386c0dd19914cfb360ebf44bd85f0b49869ce0a767d4acd77c1d602dad8e"
 
 #: Same shape over `render_noise_seed`, which indexes CLEAN_RENDER_SEEDS mod len.
 _RENDER_SEED_DIGEST = "04b3fabf65a60a434ae7a1ddd03cfd876b47681c917b2888891dbfdf01346d2c"
@@ -74,7 +77,8 @@ _RENDER_SEED_DIGEST = "04b3fabf65a60a434ae7a1ddd03cfd876b47681c917b2888891dbfdf0
 _ANCHORS = {
     0: "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0, D3D11)",
     1: "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-    7: "ANGLE (NVIDIA, NVIDIA GeForce 8800 GTX Direct3D11 vs_4_0 ps_4_0, D3D11)",
+    # drew the GeForce 8800 GTX slot until 2026-11-01; that slot is now an RTX 5060 Ti
+    7: "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0, D3D11)",
     42: "ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
     123: "ANGLE (Intel, Intel(R) HD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
     1234: "ANGLE (AMD, Radeon HD 3200 Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",

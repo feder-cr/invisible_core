@@ -11,6 +11,7 @@ from ._sampler import _load as _load_data, sample as _sample_raw
 # Top level, not deferred: `_webgl_personas` imports nothing from this package at
 # module scope, so there is no cycle to work around - verified by importing the
 # package, this module and `_webgl_personas` each first in a fresh interpreter.
+from .._webgl_personas import choose_gfx_device as _choose_gfx_device
 from .._webgl_personas import choose_persona as _choose_persona
 from .palette import PALETTE
 
@@ -20,6 +21,9 @@ class GPUProfile:
     vendor: str
     renderer: str
     class_tier: str        # "low_end" | "mid_range" | "high_end" | "integrated_old" | "integrated_modern"
+    #: The real device behind the renderer bucket (a label of win_gfx_devices.json),
+    #: whose blocklist outcomes the browser declares; "" when the bucket has none.
+    device: str = ""
 
 
 @dataclass(frozen=True)
@@ -970,6 +974,9 @@ def generate_profile(
     if persona:
         raw["webgl_renderer"] = persona["renderer"]
         raw["webgl_vendor"] = persona["vendor"]
+    # The real device inside the persona's bucket, chosen here once like the persona.
+    _device = _choose_gfx_device(persona, int(seed))
+    raw["gfx_device"] = _device["label"] if _device else ""
     # Seed the invariant font fields BEFORE pins, so a `font.*` pin overwrites
     # them through _apply_pins_to_raw like any sampled field, and so
     # `to_prefs_dict()` reports them alongside everything else.
@@ -1037,6 +1044,7 @@ def generate_profile(
             vendor=raw["webgl_vendor"],
             renderer=raw["webgl_renderer"],
             class_tier=raw["gpu_class"],
+            device=raw.get("gfx_device", ""),
         ),
         screen=ScreenProfile(
             width=int(raw["screen_w"]),
