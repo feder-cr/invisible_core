@@ -221,6 +221,19 @@ _WIN_DECODE_SUPPORT = chr(10).join([
     "audio/mp4a-latm|sw",
 ])
 
+# What retail Windows 159 ENCODES for WebRTC, in decode_support's lines: software
+# only for all four WebRTC video codecs. Before this the engine asked the OpenH264
+# plugin (present or not, depending on whether the profile had downloaded it) and
+# the host's platform encoders. With video/avc declared in both tables the engine
+# also answers the H.264 software gate from them, not from the plugin or the GPU.
+# The engine refuses to start when this is empty (declaration gate).
+_WIN_ENCODE_SUPPORT = chr(10).join([
+    "video/avc|sw",
+    "video/vp8|sw",
+    "video/vp9|sw",
+    "video/av1|sw",
+])
+
 # ──────────────────────────────────────────────────────────────────────
 #  Declared mediaCapabilities.decodingInfo
 #
@@ -1472,6 +1485,8 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
         _WIN_DECODE_SUPPORT,
         "video/av1|" + ("swhw" if profile.codec.av1_enabled else "no"),
     ]), renderer)
+    # Encode has no hardware bit to drop on a D3D10 class GPU: retail is software only.
+    prefs["zoom.stealth.media.encode_support"] = _WIN_ENCODE_SUPPORT
     # WebRTC drops the hardware bit of VP8 AFTER the declared answer, on GTK
     # only: AdjustWebrtcDecodeSupportVP8 in MediaDataCodec.cpp, behind this pref,
     # which exists only in GTK builds and defaults to false there. Windows has
