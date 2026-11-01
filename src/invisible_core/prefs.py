@@ -531,28 +531,39 @@ _BASELINE: Dict[str, Any] = {
     # for and nothing is written; the user-facing setting
     # (`windowsLaunchOnLogin.enabled`) keeps its default.
     "browser.startup.windowsLaunchOnLogin.alreadyApplied": True,
-    # ⛔ `termsofuse.acceptedVersion: 999` USED TO BE HERE, AND IT WAS A DEAD
-    # DECLARATION. Removed 2026-08-19 after measuring it rather than deducing it.
+    # ⛔ THE FIRST RUN'S TERMS OF USE ARE THE CORE'S DECISION: ALREADY ACCEPTED.
+    # Federico, 2026-11-02: the core decides it, and by default nothing appears.
+    # Every launch is a new profile, and on a new profile official Firefox opens
+    # the pre-onboarding modal (the terms of use) over the page: the page has no
+    # focus and gets no mouse event until someone accepts. A person's browser
+    # accepted once, long ago; that is the state declared here, on every host.
     #
-    # It did nothing for two independent reasons, and either one is enough:
-    #  1. it duplicated the upstream default: browser/app/profile/firefox.js
-    #     already declares termsofuse.acceptedVersion as 999 on its own.
-    #  2. on its own it would not have been enough anyway. hasUserAcceptedCurrentTOU
-    #     (TelemetryReportingPolicy.sys.mjs:536) ALSO wants
-    #     termsofuse.acceptedDate to be non-null, and upstream sets it to "0".
-    #     Measured: with the version alone the modal comes up regardless.
+    # Measured on official 159.0, new profile, these lines in user.js
+    # (coord/firstrun/first_run_probe.py, read at 5 s and 70 s):
+    #  - none of them: the modal, page document.hasFocus() false;
+    #  - `browser.preonboarding.enabled` false alone: no modal, but the legacy
+    #    data-reporting flow takes over - a background tab on Mozilla's privacy
+    #    page, or with no first-run URL the data-reporting bar at 60 s, which
+    #    takes 40 px off innerHeight;
+    #  - the two `termsofuse.accepted*`: nothing at all, at 5 s or at 70 s,
+    #    page focused, mouse moves delivered. hasUserAcceptedCurrentTOU
+    #    (TelemetryReportingPolicy.sys.mjs) wants both: a date and a version
+    #    not below termsofuse.minimumVersion (4 in 159, the current one;
+    #    tests/test_first_run_is_declared.py ties the value to the engine's).
+    #    The legacy flow asks the same question first, so it stays quiet too.
+    # `browser.preonboarding.enabled` false is declared as well: the modal is
+    # off by its own switch, not only by an acceptance a newer minimumVersion
+    # could invalidate.
     #
-    # And it is not repairable from here in any case: the prefs in this dict
-    # travel over the protocol and Browser.enable applies them AFTER startup,
-    # while the modal is born with the window. Measured: the same prefs passed as
-    # firefox_user_prefs do not repair it, written into a user.js before launch
-    # they do. The remedy lives in the compiled default of our Firefox:
-    # browser/app/profile/firefox.js, termsofuse.acceptedDate.
-    #
-    # What keeping it cost: on a MOZILLA_OFFICIAL build the terms-of-use modal
-    # covers the viewport and eats EVERY mouse event - focus on BODY, zero
-    # mousedown, zero mousemove - while the keyboard keeps working. This line
-    # looked like it protected us and protected nothing.
+    # They must be in the profile before the window exists, since the modal is
+    # born with it: every launch writes them into user.js (`write_user_js`).
+    # The engine carried the acceptance as a compiled default until now
+    # (STEALTH-HOOK on termsofuse.acceptedVersion/acceptedDate in firefox.js):
+    # with the core declaring it, that is the engine's default no longer
+    # deciding anything.
+    "browser.preonboarding.enabled":                      False,
+    "termsofuse.acceptedVersion":                         4,
+    "termsofuse.acceptedDate":                            "1785573000000",
 
     # ⛔ THE FIVE NEWTAB PREFS WERE REMOVED (2026-08-20), AND IT IS AN OWNER
     # DECISION: "I want the original code back, of the 34mb, put this process
