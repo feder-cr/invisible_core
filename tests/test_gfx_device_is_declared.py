@@ -238,3 +238,35 @@ def test_a_profile_without_a_device_label_still_declares_one():
     a = translate_profile_to_prefs(prof, timezone="America/New_York")["zoom.stealth.gfx.feature_status"]
     b = translate_profile_to_prefs(old, timezone="America/New_York")["zoom.stealth.gfx.feature_status"]
     assert a == b
+
+
+# ── weights inside a bucket (2026-11-01) ─────────────────────────────────────
+# Intel and AMD integrated buckets: the GPU family's share among Firefox desktop users;
+# NVIDIA and AMD discrete: equal (no family above the report's threshold).
+_UNSUPPORTED_BY_WINDOWS_11 = ("hd4000", "hd520")   # Ivy Bridge, Skylake
+
+
+def test_no_device_of_a_cpu_windows_11_does_not_support():
+    labels = [d["label"] for devs in _DATA["by_renderer"].values() for d in devs]
+    assert not [l for l in labels if l.startswith(_UNSUPPORTED_BY_WINDOWS_11)]
+
+
+def test_a_bucket_is_weighed_by_family_or_not_at_all():
+    for renderer, devs in _DATA["by_renderer"].items():
+        families = {d["family"] is None for d in devs}
+        assert len(families) == 1, renderer
+        if None in {d["family"] for d in devs}:
+            assert {d["weight"] for d in devs} == {1.0}, renderer
+        else:
+            assert all(d["weight"] > 0 for d in devs), renderer
+
+
+def test_the_draw_follows_the_weights():
+    import collections
+    for renderer, devs in _DATA["by_renderer"].items():
+        persona = {"renderer": renderer, "device": None}
+        n = 20000
+        got = collections.Counter(W.choose_gfx_device(persona, s)["label"] for s in range(n))
+        total = sum(d["weight"] for d in devs)
+        for d in devs:
+            assert abs(got[d["label"]] / n - d["weight"] / total) < 0.015, (renderer, d["label"])

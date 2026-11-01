@@ -312,9 +312,10 @@ def choose_gfx_device(persona: Optional[Dict], seed: int) -> Optional[Dict]:
 
     Drawn from its own stream (a hash of the seed, not `_IDENTITY_MULTIPLIER`), so
     adding it moved no seed's persona: the bucket is still `_draw`'s answer and only
-    the device inside it is new. Equal weights: there is no measured split of real
-    devices inside a bucket yet. A pool entry that names its own device declares
-    that one."""
+    the device inside it is new. Weighted by each device's `weight`: its GPU family's
+    share among Firefox desktop users in the Intel and AMD integrated buckets, equal
+    elsewhere (win_gfx_devices.json `_meta.weights`). A pool entry that names its own
+    device declares that one."""
     devs = _gfx_devices().get(persona["renderer"]) if persona else None
     if not devs:
         return None
@@ -322,7 +323,14 @@ def choose_gfx_device(persona: Optional[Dict], seed: int) -> Optional[Dict]:
         return next(d for d in devs if d["label"] == persona["device"])
     import hashlib
     h = int.from_bytes(hashlib.sha256(b"gfx-device:%d" % int(seed)).digest()[:8], "big")
-    return devs[h % len(devs)]
+    total = sum(d["weight"] for d in devs)
+    x = h / float(1 << 64) * total
+    cum = 0.0
+    for d in devs:
+        cum += d["weight"]
+        if x < cum:
+            return d
+    return devs[-1]
 
 
 def gfx_device_for(renderer: str, label: str) -> Optional[Dict]:
