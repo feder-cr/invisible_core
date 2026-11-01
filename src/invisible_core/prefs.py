@@ -942,6 +942,13 @@ _BASELINE: Dict[str, Any] = {
     # the page cannot read it. Every host, Linux Xvfb included (it was a Linux-only
     # workaround until 54.50).
     "webgl.force-enabled":                                True,
+    # The same blocklist also refuses FEATURE_WEBGL_ANGLE, and force-enabled does not
+    # reach that one: AllowWebglAccelAngle goes false, GLLibraryEGL skips the
+    # accelerated ANGLE display, and on the display left antialias is false with
+    # SAMPLES 0 on webgl1 and webgl2, while the declared GPU has 4. A blocklist pref
+    # outranks the static blocklist (GfxInfoBase::GetFeatureStatus); 1 is
+    # nsIGfxInfo::FEATURE_STATUS_OK. No ANGLE on Linux: the pref is read and moves nothing.
+    "gfx.blacklist.webgl.angle":                          1,
 
     # ⛔ `zoom.stealth.text.*` and not `zoom.stealth.font.*`, and the distinction
     # is not cosmetic: `test_fonts_are_not_configured_via_prefs` in the wrapper

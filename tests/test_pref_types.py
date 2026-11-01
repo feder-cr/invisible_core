@@ -94,6 +94,17 @@ _READ_THROUGH_A_PARAMETER: Dict[str, Tuple[str, str]] = {
         (STR, "browser/base/content"),
 }
 
+#: Readers that build the name from a branch and a suffix, so the full name is
+#: written nowhere: GfxInfoBase reads BLOCKLIST_PREF_BRANCH "gfx.blacklist." plus
+#: the feature's pref from GfxInfoFeatureDefs.inc, with Preferences::GetInt.
+#: Each entry names the branch literal, the suffix literal (as the .inc writes
+#: it) and the directory holding both; `test_every_branch_reader_is_still_there`
+#: keeps an entry from outliving its reader or its feature.
+_READ_UNDER_A_BRANCH: Dict[str, Tuple[str, str, str, str]] = {
+    "gfx.blacklist.webgl.angle":
+        (INT, "widget", '"gfx.blacklist."', 'GFXINFO_FEATURE(WEBGL_ANGLE, "webgl.angle")'),
+}
+
 
 def _libpref_yaml_files(source: EngineSource) -> List[str]:
     """The static pref lists the build merges, read from the build file that
@@ -191,6 +202,9 @@ def reader_kinds(source: EngineSource, names) -> Dict[str, Tuple[Set[str], str]]
             found[name] = (by_accessor[name], "an accessor with the literal")
         elif name in _READ_THROUGH_A_PARAMETER:
             kind, path = _READ_THROUGH_A_PARAMETER[name]
+            found[name] = ({kind}, path)
+        elif name in _READ_UNDER_A_BRANCH:
+            kind, path, _, _ = _READ_UNDER_A_BRANCH[name]
             found[name] = ({kind}, path)
         else:
             rest.add(name)
@@ -351,6 +365,19 @@ def test_every_hand_typed_reader_is_still_there(name):
     assert _names_in_directory(name, directory), (
         "no code file in %s names %s at %s: the hand-typed reader is gone, so the "
         "entry is a type nobody reads" % (directory, name, _SOURCE.commit))
+
+
+@_needs_source
+@pytest.mark.parametrize("name", sorted(_READ_UNDER_A_BRANCH))
+def test_every_branch_reader_is_still_there(name):
+    _, directory, branch, suffix = _READ_UNDER_A_BRANCH[name]
+    # the name is the branch plus the suffix's quoted pref, nothing else
+    assert name == branch.strip('"') + suffix.rsplit('"', 2)[1]
+    assert _names_in_directory(branch, directory), (
+        "no code file in %s holds the branch %s at %s" % (directory, branch, _SOURCE.commit))
+    # the feature line, not GFXINFO_FEATURE_RETIRED: a retired feature is never read
+    hits = _SOURCE.lines_with([suffix], [directory + "/*.inc"])
+    assert hits, "%s is no longer a live feature in %s at %s" % (suffix, directory, _SOURCE.commit)
 
 
 @_needs_source
