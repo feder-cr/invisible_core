@@ -100,9 +100,9 @@ _READ_THROUGH_A_PARAMETER: Dict[str, Tuple[str, str]] = {
 #: Each entry names the branch literal, the suffix literal (as the .inc writes
 #: it) and the directory holding both; `test_every_branch_reader_is_still_there`
 #: keeps an entry from outliving its reader or its feature.
+#: Empty since 2026-11-01: its one entry, gfx.blacklist.webgl.angle, left the core
+#: when the engine began answering the blocklist from zoom.stealth.gfx.feature_status.
 _READ_UNDER_A_BRANCH: Dict[str, Tuple[str, str, str, str]] = {
-    "gfx.blacklist.webgl.angle":
-        (INT, "widget", '"gfx.blacklist."', 'GFXINFO_FEATURE(WEBGL_ANGLE, "webgl.angle")'),
 }
 
 

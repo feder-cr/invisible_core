@@ -149,3 +149,92 @@ def test_every_device_of_a_bucket_is_reachable():
         by_label.setdefault(p["renderer"], set()).add(d["label"])
     for renderer, labels in by_label.items():
         assert labels == {d["label"] for d in _DATA["by_renderer"][renderer]}, renderer
+
+
+# ── the engine's contract for zoom.stealth.gfx.feature_status (2026-11-01) ───
+# The engine stops at its first graphics decision when the pref is missing or breaks
+# one of these, so every value the core can emit is held to them here.
+_ALLOWLIST = {"HW_DECODED_VIDEO_ZERO_COPY"}   # GFXINFO_FEATURE_ALLOWLIST
+_FAILURE = re.compile(r"[A-Za-z0-9_]{1,96}")
+
+
+def contract_violations(value):
+    out = []
+    entries = value.split(",")
+    if not value or any(e == "" or " " in e for e in entries):
+        return ["empty entry or a space"]
+    names = []
+    for e in entries:
+        f = e.split("|")
+        if len(f) not in (2, 3) or any(x == "" for x in f):
+            out.append("malformed %r" % e)
+            continue
+        name, st = f[0], f[1]
+        names.append(name)
+        if not st.isdigit() or int(st) not in (1, 3, 4, 5, 6, 7, 8, 9, 10, 11):
+            out.append("%s: status %s" % (name, st))
+            continue
+        st = int(st)
+        if name in _ALLOWLIST and st == 1:
+            out.append("%s: an allowlist feature is never 1" % name)
+        if name not in _ALLOWLIST and st in (8, 9, 10):
+            out.append("%s: status %d is for the allowlist only" % (name, st))
+        fail = f[2] if len(f) == 3 else None
+        if st == 1 and fail is not None:
+            out.append("%s: a failure with status 1" % name)
+        if st not in (1, 8) and fail is None:
+            out.append("%s: status %d needs a failure" % (name, st))
+        if fail is not None and not _FAILURE.fullmatch(fail):
+            out.append("%s: failure %r" % (name, fail))
+    if sorted(names) != sorted(_FEATURES) or len(set(names)) != len(names):
+        out.append("not each of the 63 live features exactly once")
+    return out
+
+
+def test_the_contract_check_refuses_what_the_engine_refuses():
+    good = next(iter(_DATA["by_renderer"].values()))[0]["feature_status"]
+    assert contract_violations(good) == []
+    first = good.split(",")[0]
+    for bad in (good + "," + first,                                   # a duplicate
+                good.replace(first, first.split("|")[0] + "|2", 1),   # status 2
+                good.replace(first, first.split("|")[0] + "|1|X", 1), # failure with 1
+                good.replace(first, first.split("|")[0] + "|4", 1),   # 4 without failure
+                ",".join(good.split(",")[1:]),                        # a feature missing
+                good + ",ALL|1",                                      # ALL
+                good.replace(",", ", ", 1)):                          # a space
+        assert contract_violations(bad), bad
+
+
+def test_every_measured_device_meets_the_contract():
+    for devs in _DATA["by_renderer"].values():
+        for d in devs:
+            assert contract_violations(d["feature_status"]) == [], d["label"]
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_every_session_emits_a_value_the_engine_accepts(monkeypatch, platform):
+    monkeypatch.setattr(sys, "platform", platform)
+    for seed in range(1, 600, 3):
+        prefs = translate_profile_to_prefs(generate_profile(seed=seed), timezone="America/New_York")
+        assert contract_violations(prefs["zoom.stealth.gfx.feature_status"]) == [], seed
+        # the engine's gate also refuses an empty renderer or vendor
+        assert prefs["zoom.stealth.webgl.renderer"] and prefs["zoom.stealth.webgl.vendor"], seed
+
+
+def test_a_session_without_a_persona_is_refused_not_emptied():
+    # until 2026-11-01 an unknown renderer emitted "" for both, and WebGL went to the host
+    import dataclasses
+    prof = generate_profile(seed=12)
+    alien = dataclasses.replace(prof, gpu=dataclasses.replace(prof.gpu, renderer="ANGLE (Nobody, Nothing)", device=""))
+    with pytest.raises(ValueError, match="no validated GPU persona"):
+        translate_profile_to_prefs(alien, timezone="America/New_York")
+
+
+def test_a_profile_without_a_device_label_still_declares_one():
+    # a Profile made before the device existed carries "": the seed's own draw
+    import dataclasses
+    prof = generate_profile(seed=12)
+    old = dataclasses.replace(prof, gpu=dataclasses.replace(prof.gpu, device=""))
+    a = translate_profile_to_prefs(prof, timezone="America/New_York")["zoom.stealth.gfx.feature_status"]
+    b = translate_profile_to_prefs(old, timezone="America/New_York")["zoom.stealth.gfx.feature_status"]
+    assert a == b

@@ -32,7 +32,7 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
-from ._webgl_personas import gfx_device_for, persona_for, render_noise_seed
+from ._webgl_personas import choose_gfx_device, gfx_device_for, persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
 
@@ -932,21 +932,19 @@ _BASELINE: Dict[str, Any] = {
     # does nothing - the second translation is paid only where the defect is.
     "zoom.stealth.webgl.shader_output_language":          "essl",
 
-    # Whether WebGL2 exists must not be the host adapter's decision. Mozilla's
-    # Windows blocklist (GfxInfo, OnlyAllowFeatureOnKnownConfig) refuses any vendor
-    # but Intel/NVIDIA/AMD, so on a Microsoft Basic / Hyper-V adapter webgl2 is null
-    # ("AllowWebgl2:false restricts context creation") while the declared GPU has
-    # it on retail. force-enabled skips that gate in WebGLContext::CreateAndInitGL;
-    # the page cannot read it. Every host, Linux Xvfb included (it was a Linux-only
-    # workaround until 54.50).
-    "webgl.force-enabled":                                True,
-    # The same blocklist also refuses FEATURE_WEBGL_ANGLE, and force-enabled does not
-    # reach that one: AllowWebglAccelAngle goes false, GLLibraryEGL skips the
-    # accelerated ANGLE display, and on the display left antialias is false with
-    # SAMPLES 0 on webgl1 and webgl2, while the declared GPU has 4. A blocklist pref
-    # outranks the static blocklist (GfxInfoBase::GetFeatureStatus); 1 is
-    # nsIGfxInfo::FEATURE_STATUS_OK. No ANGLE on Linux: the pref is read and moves nothing.
-    "gfx.blacklist.webgl.angle":                          1,
+    # `webgl.force-enabled` and `gfx.blacklist.webgl.angle` were here (54.50): they
+    # kept Mozilla's blocklist from refusing WebGL2 and accelerated ANGLE on a
+    # Microsoft Basic / Hyper-V host adapter. The engine now answers every gfx
+    # feature from zoom.stealth.gfx.feature_status (see _apply_gpu_persona), before
+    # either pref is read, so they would be ignored.
+
+    # Canvas 2D on the CPU (Skia) on every host. Measured 2026-11-01 on official
+    # Firefox 159 for Windows with the GPU process up: accelerated, one control
+    # scene differs from the CPU one in 28% of the bytes at 128 px (max 87) and
+    # 22% at 512 px (max 108), and the accelerated bytes follow the host's GPU;
+    # below 128 px both are identical. Even with the GPU process down the pref at
+    # true still changed 6-122 bytes, so it is declared, not left to the host.
+    "gfx.canvas.accelerated":                             False,
 
     # ⛔ `zoom.stealth.text.*` and not `zoom.stealth.font.*`, and the distinction
     # is not cosmetic: `test_fonts_are_not_configured_via_prefs` in the wrapper
@@ -1046,7 +1044,8 @@ _LINUX_XVFB_WORKAROUNDS: Dict[str, Any] = {
     # `gfx.webrender.force-disabled` was here and no file of the engine reads
     # it ([B171], tests/test_pref_types.py). What this table still does is
     # A12 of 28-valori-dell-host.md, for the canvas phase.
-    # `webgl.force-enabled` was here: it is in _BASELINE now, for every host.
+    # `webgl.force-enabled` was here, then in _BASELINE for every host until
+    # 2026-11-01: the engine now answers the blocklist from zoom.stealth.gfx.feature_status.
     # webgl.software-rendering-enabled / webgl.force-layers-readback removed in FF150.
 }
 
@@ -1226,12 +1225,20 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
         # it for the real device behind the persona's bucket (NAME|STATUS[|failureId]):
         # the engine answers GetFeatureStatus from it on every host, before the
         # gfx.blacklist.* prefs and both blocklists, so the host adapter decides nothing.
-        _device = gfx_device_for(profile.gpu.renderer, profile.gpu.device)
-        if _device:
-            prefs["zoom.stealth.gfx.feature_status"] = _device["feature_status"]
+        # A Profile made before the device existed carries "": the same draw
+        # generate_profile makes, from the seed.
+        _device = (gfx_device_for(profile.gpu.renderer, profile.gpu.device)
+                   or choose_gfx_device(persona, profile.seed))
+        if not _device:
+            raise ValueError("the persona %r has no real device to declare" % profile.gpu.renderer)
+        prefs["zoom.stealth.gfx.feature_status"] = _device["feature_status"]
     else:
-        prefs["zoom.stealth.webgl.renderer"] = ""
-        prefs["zoom.stealth.webgl.vendor"]   = ""
+        # ⛔ This emitted empty renderer and vendor until 2026-11-01, which left
+        # WebGL to the host and its blocklist. The engine refuses to start on an
+        # empty pair (the declaration gate), so the cause is named here instead.
+        raise ValueError(
+            "no validated GPU persona for renderer %r / vendor %r: a session always "
+            "presents one from the pool" % (profile.gpu.renderer, profile.gpu.vendor))
     return persona
 
 
