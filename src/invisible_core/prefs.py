@@ -934,6 +934,15 @@ _BASELINE: Dict[str, Any] = {
     # does nothing - the second translation is paid only where the defect is.
     "zoom.stealth.webgl.shader_output_language":          "essl",
 
+    # Whether WebGL2 exists must not be the host adapter's decision. Mozilla's
+    # Windows blocklist (GfxInfo, OnlyAllowFeatureOnKnownConfig) refuses any vendor
+    # but Intel/NVIDIA/AMD, so on a Microsoft Basic / Hyper-V adapter webgl2 is null
+    # ("AllowWebgl2:false restricts context creation") while the declared GPU has
+    # it on retail. force-enabled skips that gate in WebGLContext::CreateAndInitGL;
+    # the page cannot read it. Every host, Linux Xvfb included (it was a Linux-only
+    # workaround until 54.50).
+    "webgl.force-enabled":                                True,
+
     # ⛔ `zoom.stealth.text.*` and not `zoom.stealth.font.*`, and the distinction
     # is not cosmetic: `test_fonts_are_not_configured_via_prefs` in the wrapper
     # demands that NO `zoom.stealth.font.` pref is emitted, because the binary
@@ -1032,7 +1041,7 @@ _LINUX_XVFB_WORKAROUNDS: Dict[str, Any] = {
     # `gfx.webrender.force-disabled` was here and no file of the engine reads
     # it ([B171], tests/test_pref_types.py). What this table still does is
     # A12 of 28-valori-dell-host.md, for the canvas phase.
-    "webgl.force-enabled":                     True,
+    # `webgl.force-enabled` was here: it is in _BASELINE now, for every host.
     # webgl.software-rendering-enabled / webgl.force-layers-readback removed in FF150.
 }
 

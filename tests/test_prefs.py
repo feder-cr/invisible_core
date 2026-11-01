@@ -399,7 +399,8 @@ def test_xvfb_workarounds_absent_on_windows(monkeypatch):
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert "gfx.webrender.all" not in prefs
-    assert "webgl.force-enabled" not in prefs
+    # webgl.force-enabled is no longer a Linux workaround: it is set on every host
+    # (tests/test_webgl_not_decided_by_host_blocklist.py).
 
 
 # ──────────────────────────────────────────────────────────────────────
