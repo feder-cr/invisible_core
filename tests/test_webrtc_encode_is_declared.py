@@ -20,7 +20,6 @@ pytestmark = pytest.mark.unit
 WEBRTC_VIDEO = {"video/avc", "video/vp8", "video/vp9", "video/av1"}
 
 MODERN = "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0, D3D11)"
-D3D10 = "ANGLE (NVIDIA, NVIDIA GeForce 8800 GTX Direct3D11 vs_4_0 ps_4_0, D3D11)"
 
 
 def composed(av1_enabled=True, renderer=MODERN):
@@ -36,10 +35,9 @@ def table(prefs, name):
 
 
 @pytest.mark.parametrize("av1", [True, False])
-@pytest.mark.parametrize("renderer", [MODERN, D3D10])
-def test_the_table_is_never_empty(av1, renderer):
+def test_the_table_is_never_empty(av1):
     # Empty or missing: the engine's declaration gate stops the browser.
-    assert composed(av1, renderer).get("zoom.stealth.media.encode_support")
+    assert composed(av1).get("zoom.stealth.media.encode_support")
 
 
 @pytest.mark.parametrize("av1", [True, False])
@@ -53,10 +51,9 @@ def test_every_entry_is_a_token_the_engine_accepts():
     assert set(table(composed(), "zoom.stealth.media.encode_support").values()) <= {"no", "sw", "hw", "swhw"}
 
 
-@pytest.mark.parametrize("renderer", [MODERN, D3D10])
-def test_the_values_are_retail_159_for_windows(renderer):
+def test_the_values_are_retail_159_for_windows():
     # Retail Windows 159 encodes all four in software, whatever the GPU.
-    assert table(composed(True, renderer), "zoom.stealth.media.encode_support") == {
+    assert table(composed(True), "zoom.stealth.media.encode_support") == {
         "video/avc": "sw", "video/vp8": "sw", "video/vp9": "sw", "video/av1": "sw"}
 
 

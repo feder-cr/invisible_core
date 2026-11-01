@@ -18,7 +18,6 @@ The translation is split into:
 from __future__ import annotations
 
 import functools
-import re
 import sys
 # At import, not inside _iana_zones: zoneinfo reads the stdlib's build data for
 # its search path (sysconfig TZPATH) the first time it is imported, keyed by
@@ -281,9 +280,8 @@ _WIN_DECODING_INFO = chr(10).join([
 #  limits for an RTX 5080, an Intel iGPU and WARP (forceFallbackAdapter) on the
 #  same machine: they are constants of Firefox's D3D12 backend, not of the GPU.
 #  So they are declared once, for every identity with a Direct3D 12 GPU; the
-#  engine adds "core-features-and-limits" itself, as Firefox does. A D3D10-class
-#  renderer (vs_4_x, GeForce 8800 GTX, Intel 945GM) has no D3D12, and retail's
-#  requestAdapter() resolves null there: "none".
+#  engine adds "core-features-and-limits" itself, as Firefox does. Every Windows
+#  persona has one since the Direct3D 10 class slots left the pool (2026-11-01).
 # ──────────────────────────────────────────────────────────────────────
 _WIN_WEBGPU_FEATURES = chr(10).join([
     "bgra8unorm-storage",
@@ -1423,39 +1421,6 @@ def _apply_audio(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.audio.max_channel_count"] = profile.audio.max_channel_count
 
 
-#: A renderer the page reads as Direct3D 10 class hardware: shader model 4, or
-#: one of the names Firefox's SanitizeRenderer gives such a GPU (GeForce 8800
-#: GTX, Intel 945GM). None of it decodes VP8, VP9 or AV1 in hardware.
-_D3D10_CLASS = re.compile(r"\bvs_4_[01]\b|GeForce 8800 GTX|Intel 945GM")
-
-#: The codecs whose hardware decoding a D3D10 class GPU cannot have. H.264 is not
-#: one: those GPUs mostly decode it, and the population is mixed.
-_NEWER_THAN_D3D10 = ("vp8", "vp9", "av1", "vp09", "av01")
-
-
-def _decode_hardware_follows_gpu(table: str, renderer: str) -> str:
-    """The table with hardware dropped for VP8, VP9 and AV1 when the GPU the page
-    sees is D3D10 class: "swhw" -> "sw" in the decode-support table, and the
-    powerEfficient digit to 0 in the decodingInfo one.
-
-    The other GPU names Firefox reports (GeForce GTX 980, Intel(R) HD Graphics,
-    Radeon R9 200 ...) each cover generations with and without these decoders,
-    so the page cannot tell, and they keep retail Windows's answer."""
-    if not _D3D10_CLASS.search(renderer or ""):
-        return table
-    out = []
-    for line in table.split(chr(10)):
-        fields = line.split("|")
-        codec = fields[-2].rsplit("/", 1)[-1]
-        if codec in _NEWER_THAN_D3D10:
-            if fields[-1] == "swhw":
-                fields[-1] = "sw"
-            elif len(fields[-1]) == 3 and fields[-1].isdigit():
-                fields[-1] = fields[-1][:2] + "0"
-        out.append("|".join(fields))
-    return chr(10).join(out)
-
-
 def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # EME, declared TRUE on every host, and it is not cosmetic.
     #
@@ -1500,15 +1465,15 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # empty: "no". Declaring hardware there would contradict the canPlayType
     # "" the same pref gives.
     #
-    # Both tables then follow the GPU the page sees: a D3D10 class renderer
-    # has no VP8, VP9 or AV1 decoder, and answering "hardware" next to
-    # "vs_4_0" in WEBGL_debug_renderer_info contradicts the page's own reading.
-    renderer = profile.gpu.renderer
-    prefs["zoom.stealth.media.decode_support"] = _decode_hardware_follows_gpu(chr(10).join([
+    # Retail's tables on every persona: each GPU name the pool presents covers
+    # generations with and without these decoders (SanitizeRenderer: "GeForce
+    # GTX 980" is every GeForce 900 and later), so the page cannot tell. The
+    # Direct3D 10 class personas, whose renderer said they had no VP8/VP9/AV1
+    # decoder, left the pool on 2026-11-01 and the branch for them with it.
+    prefs["zoom.stealth.media.decode_support"] = chr(10).join([
         _WIN_DECODE_SUPPORT,
         "video/av1|" + ("swhw" if profile.codec.av1_enabled else "no"),
-    ]), renderer)
-    # Encode has no hardware bit to drop on a D3D10 class GPU: retail is software only.
+    ])
     prefs["zoom.stealth.media.encode_support"] = _WIN_ENCODE_SUPPORT
     # WebRTC drops the hardware bit of VP8 AFTER the declared answer, on GTK
     # only: AdjustWebrtcDecodeSupportVP8 in MediaDataCodec.cpp, behind this pref,
@@ -1517,12 +1482,11 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # Windows answers true. True is Windows' behaviour; on a Windows build the
     # pref does not exist and changes nothing.
     prefs["media.navigator.mediadatadecoder_vp8_hardware_enabled"] = True
-    # The WebGPU adapter (see _WIN_WEBGPU_FEATURES): none on a D3D10-class GPU.
-    prefs["zoom.stealth.webgpu.adapter"] = "none" if _D3D10_CLASS.search(renderer or "") else "d3d12"
+    # The WebGPU adapter (see _WIN_WEBGPU_FEATURES): every persona has Direct3D 12.
+    prefs["zoom.stealth.webgpu.adapter"] = "d3d12"
     prefs["zoom.stealth.webgpu.features"] = _WIN_WEBGPU_FEATURES
     prefs["zoom.stealth.webgpu.limits"] = _WIN_WEBGPU_LIMITS
-    prefs["zoom.stealth.media.decoding_info"] = _decode_hardware_follows_gpu(
-        _WIN_DECODING_INFO, renderer)
+    prefs["zoom.stealth.media.decoding_info"] = _WIN_DECODING_INFO
 
 
 def _apply_rasterisation(prefs: Dict[str, Any], profile: Profile) -> None:

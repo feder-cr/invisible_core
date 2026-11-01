@@ -62,14 +62,11 @@ def windows_renderers():
     return sorted({e["prefs"]["zoom.stealth.webgl.renderer"] for e in pool["win"]})
 
 
-def d3d10(renderer):
-    return any(s in renderer for s in ("vs_4_0", "vs_4_1", "GeForce 8800 GTX", "Intel 945GM"))
-
-
 @pytest.mark.parametrize("renderer", windows_renderers())
 def test_every_windows_persona_declares_the_adapter_its_gpu_has(renderer):
     prefs = prefs_for(renderer)
-    assert prefs["zoom.stealth.webgpu.adapter"] == ("none" if d3d10(renderer) else "d3d12")
+    # every Windows persona has Direct3D 12 since the Direct3D 10 class slots left the pool
+    assert prefs["zoom.stealth.webgpu.adapter"] == "d3d12"
     assert prefs["zoom.stealth.webgpu.features"].split(chr(10)) == RETAIL_FEATURES
     assert len(limits(prefs)) == 35
 
