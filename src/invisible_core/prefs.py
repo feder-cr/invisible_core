@@ -943,7 +943,7 @@ _BASELINE: Dict[str, Any] = {
     # does nothing - the second translation is paid only where the defect is.
     "zoom.stealth.webgl.shader_output_language":          "essl",
 
-    # `webgl.force-enabled` and `gfx.blacklist.webgl.angle` were here (54.50): they
+    # `webgl.force-enabled` and `gfx.blacklist.webgl.angle` were here until 2026-11-01: they
     # kept Mozilla's blocklist from refusing WebGL2 and accelerated ANGLE on a
     # Microsoft Basic / Hyper-V host adapter. The engine now answers every gfx
     # feature from zoom.stealth.gfx.feature_status (see _apply_gpu_persona), before
