@@ -23,7 +23,7 @@ class GPUProfile:
     class_tier: str        # "low_end" | "mid_range" | "high_end" | "integrated_old" | "integrated_modern"
     #: The real device behind the renderer bucket (a label of win_gfx_devices.json),
     #: whose blocklist outcomes the browser declares; "" when the bucket has none.
-    device: str = ""
+    device: str
 
 
 @dataclass(frozen=True)
