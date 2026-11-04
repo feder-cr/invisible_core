@@ -21,7 +21,7 @@ from invisible_core.constants import (
     FIREFOX_UPSTREAM_VERSION,
     RELEASE_URL_TEMPLATE,
 )
-from invisible_core.seal import SUPPORTED_LEGS
+from invisible_core.seal import SUPPORTED_LEGS, active_seal
 
 
 @pytest.mark.unit
@@ -131,17 +131,23 @@ def test_archive_name_rejects_unsupported_arches(machine):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("machine", ["arm64", "aarch64"])
-def test_archive_name_arm64_supported(machine):
-    """ARM64 is shipped now (issue #6): Linux aarch64 - e macOS arm64 fino a
-    `firefox-20`, uscito il 2026-08-26.
-    ARCHIVE_NAME must map both machine spellings to the canonical -arm64 asset.
+def test_archive_name_arm64_follows_the_seal(machine):
+    """Linux aarch64 shipped from issue #6 to `firefox-55` (macOS arm64 until
+    `firefox-20`); from `firefox-56` there is no Linux arm64 engine. ARCHIVE_NAME
+    maps both machine spellings to the canonical -arm64 asset of a seal that has
+    one, and to the refusal that names the last release with one otherwise.
 
     The version comes from BINARY_BASENAME rather than a literal: what this test
     is about is the arch/platform mapping, and a hardcoded version turns every
     upstream bump into a mechanical test edit - which is how a stale expectation
     gets "fixed" without anyone checking the asset actually exists.
     """
-    assert ARCHIVE_NAME("linux", machine) == f"{BINARY_BASENAME}-linux-arm64.tar.gz"
+    seal = active_seal()
+    if seal.is_local or any((a.platform, a.arch) == ("linux", "arm64") for a in seal.assets.values()):
+        assert ARCHIVE_NAME("linux", machine) == f"{BINARY_BASENAME}-linux-arm64.tar.gz"
+    else:
+        with pytest.raises(NotImplementedError, match="firefox-55"):
+            ARCHIVE_NAME("linux", machine)
     # The darwin line that stood here went with the mac on 2026-08-26; the
     # refusal has a case of its own, above.
 

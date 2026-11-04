@@ -47,9 +47,15 @@ SUPPORTED_SEAL_SCHEMA = 2
 # would have failed on, and which could not see WHICH platform was missing
 # anyway. A count cannot tell "three right legs" from "three legs, one of them
 # downloadable by nobody".
-# The two macOS ones went out on 2026-08-26; seals already published still
-# carry them and stay readable as history.
-SUPPORTED_LEGS = (("linux", "arm64"), ("linux", "x86_64"), ("win32", "x86_64"))
+# The two macOS ones went out on 2026-08-26, linux-arm64 from firefox-56 on
+# (2026-11-04); seals already published still carry them and stay readable as
+# history.
+SUPPORTED_LEGS = (("linux", "x86_64"), ("win32", "x86_64"))
+
+#: Legs we published once and no longer do, with the last release that has one. A
+#: host of such a leg, on a seal without its asset, is told which release to stay
+#: on instead of "no asset": the engine it needs exists, one major back.
+RETIRED_LEGS = {("linux", "arm64"): "firefox-55"}
 SUPPORTED_PLATFORMS = tuple(dict.fromkeys(p for p, _ in SUPPORTED_LEGS))
 
 #: Hosts with no asset of their own that run another leg's, by a guarantee of
@@ -288,6 +294,16 @@ class Seal:
             for a in self.assets.values():
                 if a.platform == platform_key and a.arch == want:
                     return a
+        last = RETIRED_LEGS.get((platform_key, arch))
+        if last is not None:
+            n = int(last.rsplit("-", 1)[1])
+            from .installer import install
+            from .pin import format_command
+            raise NotImplementedError(
+                f"no engine for {platform_key} {arch} in seal {self.tag}: we no longer publish one, "
+                f"and the last release with one is {last}. To keep running on this machine, stay on "
+                f"the core of that release (and on the invisible-playwright that requires it): "
+                f"{format_command(install('invisible-core', f'invisible-core<{n + 1}'))}")
         raise NotImplementedError(
             f"seal {self.tag} has no asset for platform={platform_key} arch={arch}")
 
