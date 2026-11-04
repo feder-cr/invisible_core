@@ -399,7 +399,8 @@ def test_xvfb_workarounds_absent_on_windows(monkeypatch):
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert "gfx.webrender.all" not in prefs
-    assert "webgl.force-enabled" not in prefs
+    # webgl.force-enabled is gone from every host: the engine answers the gfx
+    # blocklist from the declaration (tests/test_webgl_not_decided_by_host_blocklist.py).
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -542,7 +543,6 @@ def test_xvfb_workarounds_applied_on_linux(monkeypatch):
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     assert prefs["gfx.webrender.all"] is False
-    assert prefs["webgl.force-enabled"] is True
     # `gfx.webrender.force-disabled` is gone since 49.46.0: no file of the
     # engine reads it ([B171], tests/test_pref_types.py).
     assert "gfx.webrender.force-disabled" not in prefs
@@ -556,9 +556,9 @@ def test_xvfb_workarounds_caller_can_override(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(
-        p, extra_prefs={"webgl.force-enabled": False}, timezone="America/New_York"
+        p, extra_prefs={"gfx.webrender.all": True}, timezone="America/New_York"
     )
-    assert prefs["webgl.force-enabled"] is False
+    assert prefs["gfx.webrender.all"] is True
 
 
 @pytest.mark.unit

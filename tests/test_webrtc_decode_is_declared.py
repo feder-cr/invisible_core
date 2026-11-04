@@ -30,18 +30,22 @@ _SOURCE = EngineSource.pinned()
 WEBRTC_VIDEO = {"video/avc", "video/vp8", "video/vp9", "video/av1"}
 
 
-def composed(av1_enabled=True):
+#: The commonest Windows persona's renderer (webgl_gpu_pool.json).
+MODERN = "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0, D3D11)"
+
+
+def composed(av1_enabled=True, renderer=MODERN):
     """The prefs _apply_codecs writes for an identity with AV1 on or off."""
     codec = SimpleNamespace(av1_enabled=av1_enabled, webm_encoder_enabled=True,
                             mediasource_webm=True, mediasource_mp4=True)
     prefs = {}
-    _apply_codecs(prefs, SimpleNamespace(codec=codec))
+    _apply_codecs(prefs, SimpleNamespace(codec=codec, gpu=SimpleNamespace(renderer=renderer)))
     return prefs
 
 
-def declared(av1_enabled=True):
+def declared(av1_enabled=True, renderer=MODERN):
     """track mime type -> flags, as the engine parses the pref."""
-    spec = composed(av1_enabled)["zoom.stealth.media.decode_support"]
+    spec = composed(av1_enabled, renderer)["zoom.stealth.media.decode_support"]
     return dict(line.split("|", 1) for line in spec.split(chr(10)) if "|" in line)
 
 

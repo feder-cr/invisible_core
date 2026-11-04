@@ -32,7 +32,7 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
-from ._webgl_personas import persona_for, render_noise_seed
+from ._webgl_personas import choose_gfx_device, gfx_device_for, persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
 
@@ -220,6 +220,19 @@ _WIN_DECODE_SUPPORT = chr(10).join([
     "audio/mp4a-latm|sw",
 ])
 
+# What retail Windows 159 ENCODES for WebRTC, in decode_support's lines: software
+# only for all four WebRTC video codecs. Before this the engine asked the OpenH264
+# plugin (present or not, depending on whether the profile had downloaded it) and
+# the host's platform encoders. With video/avc declared in both tables the engine
+# also answers the H.264 software gate from them, not from the plugin or the GPU.
+# The engine refuses to start when this is empty (declaration gate).
+_WIN_ENCODE_SUPPORT = chr(10).join([
+    "video/avc|sw",
+    "video/vp8|sw",
+    "video/vp9|sw",
+    "video/av1|sw",
+])
+
 # ──────────────────────────────────────────────────────────────────────
 #  Declared mediaCapabilities.decodingInfo
 #
@@ -250,6 +263,77 @@ _WIN_DECODING_INFO = chr(10).join([
     "video/webm|vp09|111",
     "video/webm|vp8|110",
     "video/webm|vp9|110",
+])
+
+
+# ──────────────────────────────────────────────────────────────────────
+#  The WebGPU adapter
+#
+#  Firefox hands a page the features and limits wgpu reports for the real
+#  adapter: D3D12 on Windows, Vulkan on Linux, and on a Linux machine without a
+#  GPU a CPU adapter with isFallbackAdapter true. Measured 2026-10-31 with
+#  firefox-54 on Linux: isFallbackAdapter true, an extra "clip-distances" and 14
+#  limits away from retail (maxStorageBufferBindingSize 134217728 against
+#  2147483644, minUniformBufferOffsetAlignment 32 against 256, ...).
+#
+#  Retail Firefox 159 for Windows, headed, gave the same 13 features and 35
+#  limits for an RTX 5080, an Intel iGPU and WARP (forceFallbackAdapter) on the
+#  same machine: they are constants of Firefox's D3D12 backend, not of the GPU.
+#  So they are declared once, for every identity with a Direct3D 12 GPU; the
+#  engine adds "core-features-and-limits" itself, as Firefox does. Every Windows
+#  persona has one since the Direct3D 10 class slots left the pool (2026-11-01).
+# ──────────────────────────────────────────────────────────────────────
+_WIN_WEBGPU_FEATURES = chr(10).join([
+    "bgra8unorm-storage",
+    "depth-clip-control",
+    "depth32float-stencil8",
+    "dual-source-blending",
+    "float32-blendable",
+    "float32-filterable",
+    "indirect-first-instance",
+    "rg11b10ufloat-renderable",
+    "shader-f16",
+    "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
+    "timestamp-query",
+])
+
+_WIN_WEBGPU_LIMITS = chr(10).join([
+    "maxBindGroups=8",
+    "maxBindGroupsPlusVertexBuffers=24",
+    "maxBindingsPerBindGroup=4294967295",
+    "maxBufferSize=2147483644",
+    "maxColorAttachmentBytesPerSample=128",
+    "maxColorAttachments=8",
+    "maxComputeInvocationsPerWorkgroup=1024",
+    "maxComputeWorkgroupSizeX=1024",
+    "maxComputeWorkgroupSizeY=1024",
+    "maxComputeWorkgroupSizeZ=64",
+    "maxComputeWorkgroupStorageSize=32768",
+    "maxComputeWorkgroupsPerDimension=65535",
+    "maxDynamicStorageBuffersPerPipelineLayout=4",
+    "maxDynamicUniformBuffersPerPipelineLayout=8",
+    "maxInterStageShaderVariables=31",
+    "maxSampledTexturesPerShaderStage=64",
+    "maxSamplersPerShaderStage=64",
+    "maxStorageBufferBindingSize=2147483644",
+    "maxStorageBuffersInFragmentStage=64",
+    "maxStorageBuffersInVertexStage=64",
+    "maxStorageBuffersPerShaderStage=64",
+    "maxStorageTexturesInFragmentStage=64",
+    "maxStorageTexturesInVertexStage=64",
+    "maxStorageTexturesPerShaderStage=64",
+    "maxTextureArrayLayers=2048",
+    "maxTextureDimension1D=16384",
+    "maxTextureDimension2D=16384",
+    "maxTextureDimension3D=2048",
+    "maxUniformBufferBindingSize=65536",
+    "maxUniformBuffersPerShaderStage=64",
+    "maxVertexAttributes=30",
+    "maxVertexBufferArrayStride=2048",
+    "maxVertexBuffers=16",
+    "minStorageBufferOffsetAlignment=32",
+    "minUniformBufferOffsetAlignment=256",
 ])
 
 # ──────────────────────────────────────────────────────────────────────
@@ -447,28 +531,39 @@ _BASELINE: Dict[str, Any] = {
     # for and nothing is written; the user-facing setting
     # (`windowsLaunchOnLogin.enabled`) keeps its default.
     "browser.startup.windowsLaunchOnLogin.alreadyApplied": True,
-    # ⛔ `termsofuse.acceptedVersion: 999` USED TO BE HERE, AND IT WAS A DEAD
-    # DECLARATION. Removed 2026-08-19 after measuring it rather than deducing it.
+    # ⛔ THE FIRST RUN'S TERMS OF USE ARE THE CORE'S DECISION: ALREADY ACCEPTED.
+    # Federico, 2026-11-02: the core decides it, and by default nothing appears.
+    # Every launch is a new profile, and on a new profile official Firefox opens
+    # the pre-onboarding modal (the terms of use) over the page: the page has no
+    # focus and gets no mouse event until someone accepts. A person's browser
+    # accepted once, long ago; that is the state declared here, on every host.
     #
-    # It did nothing for two independent reasons, and either one is enough:
-    #  1. it duplicated the upstream default: browser/app/profile/firefox.js
-    #     already declares termsofuse.acceptedVersion as 999 on its own.
-    #  2. on its own it would not have been enough anyway. hasUserAcceptedCurrentTOU
-    #     (TelemetryReportingPolicy.sys.mjs:536) ALSO wants
-    #     termsofuse.acceptedDate to be non-null, and upstream sets it to "0".
-    #     Measured: with the version alone the modal comes up regardless.
+    # Measured on official 159.0, new profile, these lines in user.js
+    # (coord/firstrun/first_run_probe.py, read at 5 s and 70 s):
+    #  - none of them: the modal, page document.hasFocus() false;
+    #  - `browser.preonboarding.enabled` false alone: no modal, but the legacy
+    #    data-reporting flow takes over - a background tab on Mozilla's privacy
+    #    page, or with no first-run URL the data-reporting bar at 60 s, which
+    #    takes 40 px off innerHeight;
+    #  - the two `termsofuse.accepted*`: nothing at all, at 5 s or at 70 s,
+    #    page focused, mouse moves delivered. hasUserAcceptedCurrentTOU
+    #    (TelemetryReportingPolicy.sys.mjs) wants both: a date and a version
+    #    not below termsofuse.minimumVersion (4 in 159, the current one;
+    #    tests/test_first_run_is_declared.py ties the value to the engine's).
+    #    The legacy flow asks the same question first, so it stays quiet too.
+    # `browser.preonboarding.enabled` false is declared as well: the modal is
+    # off by its own switch, not only by an acceptance a newer minimumVersion
+    # could invalidate.
     #
-    # And it is not repairable from here in any case: the prefs in this dict
-    # travel over the protocol and Browser.enable applies them AFTER startup,
-    # while the modal is born with the window. Measured: the same prefs passed as
-    # firefox_user_prefs do not repair it, written into a user.js before launch
-    # they do. The remedy lives in the compiled default of our Firefox:
-    # browser/app/profile/firefox.js, termsofuse.acceptedDate.
-    #
-    # What keeping it cost: on a MOZILLA_OFFICIAL build the terms-of-use modal
-    # covers the viewport and eats EVERY mouse event - focus on BODY, zero
-    # mousedown, zero mousemove - while the keyboard keeps working. This line
-    # looked like it protected us and protected nothing.
+    # They must be in the profile before the window exists, since the modal is
+    # born with it: every launch writes them into user.js (`write_user_js`).
+    # The engine carried the acceptance as a compiled default until now
+    # (STEALTH-HOOK on termsofuse.acceptedVersion/acceptedDate in firefox.js):
+    # with the core declaring it, that is the engine's default no longer
+    # deciding anything.
+    "browser.preonboarding.enabled":                      False,
+    "termsofuse.acceptedVersion":                         4,
+    "termsofuse.acceptedDate":                            "1785573000000",
 
     # ⛔ THE FIVE NEWTAB PREFS WERE REMOVED (2026-08-20), AND IT IS AN OWNER
     # DECISION: "I want the original code back, of the 34mb, put this process
@@ -848,6 +943,20 @@ _BASELINE: Dict[str, Any] = {
     # does nothing - the second translation is paid only where the defect is.
     "zoom.stealth.webgl.shader_output_language":          "essl",
 
+    # `webgl.force-enabled` and `gfx.blacklist.webgl.angle` were here until 2026-11-01: they
+    # kept Mozilla's blocklist from refusing WebGL2 and accelerated ANGLE on a
+    # Microsoft Basic / Hyper-V host adapter. The engine now answers every gfx
+    # feature from zoom.stealth.gfx.feature_status (see _apply_gpu_persona), before
+    # either pref is read, so they would be ignored.
+
+    # Canvas 2D on the CPU (Skia) on every host. Measured 2026-11-01 on official
+    # Firefox 159 for Windows with the GPU process up: accelerated, one control
+    # scene differs from the CPU one in 28% of the bytes at 128 px (max 87) and
+    # 22% at 512 px (max 108), and the accelerated bytes follow the host's GPU;
+    # below 128 px both are identical. Even with the GPU process down the pref at
+    # true still changed 6-122 bytes, so it is declared, not left to the host.
+    "gfx.canvas.accelerated":                             False,
+
     # ⛔ `zoom.stealth.text.*` and not `zoom.stealth.font.*`, and the distinction
     # is not cosmetic: `test_fonts_are_not_configured_via_prefs` in the wrapper
     # demands that NO `zoom.stealth.font.` pref is emitted, because the binary
@@ -946,7 +1055,8 @@ _LINUX_XVFB_WORKAROUNDS: Dict[str, Any] = {
     # `gfx.webrender.force-disabled` was here and no file of the engine reads
     # it ([B171], tests/test_pref_types.py). What this table still does is
     # A12 of 28-valori-dell-host.md, for the canvas phase.
-    "webgl.force-enabled":                     True,
+    # `webgl.force-enabled` was here, then in _BASELINE for every host until
+    # 2026-11-01: the engine now answers the blocklist from zoom.stealth.gfx.feature_status.
     # webgl.software-rendering-enabled / webgl.force-layers-readback removed in FF150.
 }
 
@@ -1047,7 +1157,11 @@ _WIN_VIRT_DESKTOP_WORKAROUNDS: Dict[str, Any] = {
 #: type is what a page reads with one instanceof, no reference data and no
 #: second machine. MAX_VIEWPORT_DIMS (3386) is deliberately NOT here: the
 #: specification really does make that one an Int32Array.
-_WEBGL_FLOAT_PAIR_ENUMS = ("2928", "33901", "33902")
+#:
+#: DEPTH_RANGE left the pool on 2026-10-31 with every other piece of context
+#: state (tests/test_webgl_pool_declares_constants_only.py): Firefox answers it
+#: from the live context, which a declared value froze.
+_WEBGL_FLOAT_PAIR_ENUMS = ("33901", "33902")
 
 
 def _route_float_pairs(prefs: Dict[str, Any]) -> None:
@@ -1118,9 +1232,24 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
             else:
                 prefs[_k] = _v
         _route_float_pairs(prefs)
+        # The blocklist outcome of every gfx feature, as official Firefox 159 gives
+        # it for the real device behind the persona's bucket (NAME|STATUS[|failureId]):
+        # the engine answers GetFeatureStatus from it on every host, before the
+        # gfx.blacklist.* prefs and both blocklists, so the host adapter decides nothing.
+        # A Profile made before the device existed carries "": the same draw
+        # generate_profile makes, from the seed.
+        _device = (gfx_device_for(profile.gpu.renderer, profile.gpu.device)
+                   or choose_gfx_device(persona, profile.seed))
+        if not _device:
+            raise ValueError("the persona %r has no real device to declare" % profile.gpu.renderer)
+        prefs["zoom.stealth.gfx.feature_status"] = _device["feature_status"]
     else:
-        prefs["zoom.stealth.webgl.renderer"] = ""
-        prefs["zoom.stealth.webgl.vendor"]   = ""
+        # ⛔ This emitted empty renderer and vendor until 2026-11-01, which left
+        # WebGL to the host and its blocklist. The engine refuses to start on an
+        # empty pair (the declaration gate), so the cause is named here instead.
+        raise ValueError(
+            "no validated GPU persona for renderer %r / vendor %r: a session always "
+            "presents one from the pool" % (profile.gpu.renderer, profile.gpu.vendor))
     return persona
 
 
@@ -1353,10 +1482,17 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # declines it (AgnosticDecoderModule, WMFDecoderModule), so the set is
     # empty: "no". Declaring hardware there would contradict the canPlayType
     # "" the same pref gives.
+    #
+    # Retail's tables on every persona: each GPU name the pool presents covers
+    # generations with and without these decoders (SanitizeRenderer: "GeForce
+    # GTX 980" is every GeForce 900 and later), so the page cannot tell. The
+    # Direct3D 10 class personas, whose renderer said they had no VP8/VP9/AV1
+    # decoder, left the pool on 2026-11-01 and the branch for them with it.
     prefs["zoom.stealth.media.decode_support"] = chr(10).join([
         _WIN_DECODE_SUPPORT,
         "video/av1|" + ("swhw" if profile.codec.av1_enabled else "no"),
     ])
+    prefs["zoom.stealth.media.encode_support"] = _WIN_ENCODE_SUPPORT
     # WebRTC drops the hardware bit of VP8 AFTER the declared answer, on GTK
     # only: AdjustWebrtcDecodeSupportVP8 in MediaDataCodec.cpp, behind this pref,
     # which exists only in GTK builds and defaults to false there. Windows has
@@ -1364,6 +1500,10 @@ def _apply_codecs(prefs: Dict[str, Any], profile: Profile) -> None:
     # Windows answers true. True is Windows' behaviour; on a Windows build the
     # pref does not exist and changes nothing.
     prefs["media.navigator.mediadatadecoder_vp8_hardware_enabled"] = True
+    # The WebGPU adapter (see _WIN_WEBGPU_FEATURES): every persona has Direct3D 12.
+    prefs["zoom.stealth.webgpu.adapter"] = "d3d12"
+    prefs["zoom.stealth.webgpu.features"] = _WIN_WEBGPU_FEATURES
+    prefs["zoom.stealth.webgpu.limits"] = _WIN_WEBGPU_LIMITS
     prefs["zoom.stealth.media.decoding_info"] = _WIN_DECODING_INFO
 
 
