@@ -113,9 +113,6 @@ BASELINE_ASSETS = {
     "firefox-151.0-stealth-linux-x86_64.tar.gz": {
         "platform": "linux", "arch": "x86_64", "sha256": "1" * 64, "size": 1,
         "entry_rel": "firefox", "omni_sha256": "", "build_id": "20260101000002"},
-    "firefox-151.0-stealth-linux-arm64.tar.gz": {
-        "platform": "linux", "arch": "arm64", "sha256": "2" * 64, "size": 1,
-        "entry_rel": "firefox", "omni_sha256": "", "build_id": "20260101000003"},
 }
 
 #: "already published and byte-identical" - a NO-OP, not a refusal.
