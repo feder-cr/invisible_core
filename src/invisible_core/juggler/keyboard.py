@@ -23,8 +23,9 @@ The first draft of `_type` in `actions.py` sent exactly that:
 3. `keyup` NEVER carries `text`. With `text` Juggler raises
    `keyup does not support text option` and typing dies halfway through.
 
-**And the layout is not here**: it lives in `keylayout.py`, GENERATED from
-the bundle by `scripts/gen_key_layout.py`. Here there is only how a name is
+**And the layout is not here**: the non-printable keys live in `keylayout.py`,
+the printable keys of every layout in `keylayouts_windows.py`, generated on
+Windows by `scripts/gen_windows_keylayouts.py`. Here there is only how a name is
 resolved, which is the algorithm of `buildLayoutClosure` read in the driver
 and rewritten.
 """
