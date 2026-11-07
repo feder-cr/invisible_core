@@ -510,7 +510,8 @@ class Keyboard:
         if self.persona is None:
             return [(0.0, 0.0)] * len(text)
         from ._behaviour import plan_typing
-        return plan_typing(text, self.persona, nonce=self.acts.next("typing"))
+        return plan_typing(text, self.persona, nonce=self.acts.next("typing"),
+                           layout=self.layout)
 
     def _plan_shift(self, runs: int):
         """One `(lead_ms, lag_ms)` per run typed under Shift, from the

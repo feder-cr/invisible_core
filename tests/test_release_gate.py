@@ -1205,5 +1205,5 @@ def test_publish_refuses_a_core_sealed_to_no_downloadable_binary(core):
     text = out_of(r)
     assert r.returncode == 1, text
     assert "no assets" in text
-    assert "roll_seal" in text
+    assert "gh release download" in text and "seal.json" in text
     assert "twine" not in text, "an upload command was formed for a local-sealed core"

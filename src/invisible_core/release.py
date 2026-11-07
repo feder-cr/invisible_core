@@ -865,7 +865,7 @@ def cmd_publish(args) -> int:
         # but names none to fetch, so a published core's first launch fails at
         # ensure_binary with SealError. It is a legitimate TRANSIENT on a release
         # branch during a coupled engine+core rebase - the branch pins the new
-        # engine's SOURCE before roll_seal brings the published asset hashes - and
+        # engine's SOURCE before the published seal brings the asset hashes - and
         # it does NOT block that branch push: the pre-push publish gate runs
         # `check`, never `publish`, and only on a release tag. This sits on the
         # publish path, before the dry-run too, so a dry run reports it truthfully.
@@ -878,7 +878,9 @@ def cmd_publish(args) -> int:
             print("  ship a core whose every first launch fails at ensure_binary. Roll",
                   file=sys.stderr)
             print("  the published release seal in first, then publish:", file=sys.stderr)
-            print("    python scripts/roll_seal.py <firefox-N>", file=sys.stderr)
+            print("    gh release download <firefox-N> --repo feder-cr/firefox_antidetect_patch \\",
+                  file=sys.stderr)
+            print("      -p seal.json -O src/invisible_core/seal.json --clobber", file=sys.stderr)
             return EXIT_REFUSED
         if args.dry_run:
             print("\n--dry-run: the gate passed, and this is the upload it authorises:")
