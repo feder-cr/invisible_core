@@ -129,7 +129,7 @@ class Actions:
 
     def __init__(self, connection, session: str, lifecycle, injected, *,
                  acts, session_seed=None, motion_budget_s=None,
-                 engine_approach: bool = False):
+                 engine_approach: bool = False, layout: str = "us"):
         self.c = connection
         self.engine_approach = engine_approach
         self.session = session
@@ -183,8 +183,11 @@ class Actions:
         #: the state of the modifiers. Building one per action would lose
         #: "Shift is down" between a `down` and the next key, and
         #: `Shift+a` would type `a`.
+        #: The keyboard this persona types on (`keyboard.layout_for`, from the
+        #: session's language): which key a character is, with which modifiers.
         self.keyboard = Keyboard(connection, session, self.typing_persona,
-                                 acts=acts, latency=self.input_latency)
+                                 acts=acts, latency=self.input_latency,
+                                 layout=layout)
         #: The last pointer position. Used by the wheel and by drag and
         #: drop, which start from where the mouse IS - not from 0,0.
         self.position = (0.0, 0.0)
