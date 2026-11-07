@@ -35,6 +35,7 @@ import time
 from typing import Optional
 
 from .keylayout import LAYOUT
+from .keylayouts_windows import LANGUAGE_MAIN_TAG, LOCALE_KLID
 from .keylayouts_windows import LAYOUTS as WINDOWS_LAYOUTS
 
 #: The four that count as modifiers, in the driver's order.
@@ -76,26 +77,52 @@ class UnknownKey(ValueError):
     an empty event: a `keyCode: 0` does not fail, it lies."""
 
 
-#: The keyboard a persona types on, by the language it declares. The layout
-#: is the one Windows installs with that language: a persona whose locale is
-#: it-IT types on an Italian keyboard, where `@` is AltGr+ò and `ò` is a key.
-#: Languages with no table here type on the US keyboard, as before.
-LAYOUT_OF_LANGUAGE = {"it": "it", "de": "de", "fr": "fr", "es": "es"}
-LAYOUT_OF_LANGUAGE_REGION = {("pt", "BR"): "br", ("en", "GB"): "uk"}
+#: A layout is named by its Windows keyboard identifier (KLID). These short
+#: names stay as aliases of the most used ones.
+US = "00000409"
+LAYOUT_ALIASES = {"us": US, "it": "00000410", "de": "00000407", "fr": "0000040C",
+           "es": "0000040A", "br": "00000416", "uk": "00000809"}
+#: A bare language whose own row in Microsoft's table is not its main market.
+_MAIN_TAG = {"en": "en-US"}
+
+
+def _klid_of_tag(tag: str) -> Optional[str]:
+    if tag in LOCALE_KLID:
+        return LOCALE_KLID[tag]
+    lang = tag.split("-")[0]
+    main = _MAIN_TAG.get(lang) or LANGUAGE_MAIN_TAG.get(lang)
+    return LOCALE_KLID.get(main) if main else None
 
 
 def layout_for(languages, region: Optional[str] = None) -> str:
-    """The layout name for a session's language list (`SessionLocale.languages`,
-    or the `intl.accept_languages` string) and region: the first tag decides."""
+    """The keyboard (KLID) of a session, from its first language and its region.
+
+    The order is that of a real Windows install, by Microsoft's table of default
+    input profiles: the keyboard of the language in that country (German in
+    Switzerland types on the Swiss keyboard); else the keyboard of the language
+    (German -> German); for a language Windows has no profile for (Asturian,
+    Sardinian...), the keyboard of the country's main language, which is what
+    its speakers have; else the US keyboard. An IME language types Latin text
+    through the keyboard under its IME. Nothing here reads the host."""
     if isinstance(languages, str):
         languages = [t.strip() for t in languages.split(",") if t.strip()]
     if not languages:
-        return "us"
+        return US
     parts = languages[0].replace("_", "-").split("-")
     lang = parts[0].lower()
-    reg = (region or (parts[1] if len(parts) > 1 and len(parts[1]) == 2 else "")).upper()
-    return (LAYOUT_OF_LANGUAGE_REGION.get((lang, reg))
-            or LAYOUT_OF_LANGUAGE.get(lang) or "us")
+    reg = (region or next((x for x in parts[1:] if len(x) == 2), "")).upper()
+    if reg and "%s-%s" % (lang, reg) in LOCALE_KLID:
+        return LOCALE_KLID["%s-%s" % (lang, reg)]
+    klid = _klid_of_tag(languages[0]) or _klid_of_tag(lang)
+    if klid:
+        return klid
+    if reg:
+        from .._locale import _COUNTRY_FIREFOX_BUILDS
+        for build, _share in _COUNTRY_FIREFOX_BUILDS.get(reg, ()):
+            klid = LOCALE_KLID.get("%s-%s" % (build.split("-")[0], reg)) or _klid_of_tag(build)
+            if klid:
+                return klid
+    return US
 
 
 def _layout_table(layout: str) -> dict:
@@ -104,7 +131,7 @@ def _layout_table(layout: str) -> dict:
     Firefox's `keyCode` on Windows (59 for `;`, not Chromium's 186). Keys the
     bundle has no entry for (IntlBackslash, IntlRo, NumpadComma) are added;
     `AltRight` is `AltGraph` on a layout that has AltGr, as Firefox reports it."""
-    win = WINDOWS_LAYOUTS[layout]
+    win = WINDOWS_LAYOUTS[LAYOUT_ALIASES.get(layout, layout)]
     table = {}
     for code, d in LAYOUT.items():
         if code == "AltGraph" and win["hasAltGr"]:
@@ -200,7 +227,8 @@ _CLOSURES: dict = {}
 
 
 def closure_for(layout: str) -> dict:
-    """The closure of a layout, built once."""
+    """The closure of a layout (KLID or alias), built once."""
+    layout = LAYOUT_ALIASES.get(layout, layout)
     if layout not in _CLOSURES:
         _CLOSURES[layout] = _build_closure(layout)
     return _CLOSURES[layout]
