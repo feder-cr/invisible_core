@@ -441,10 +441,38 @@ _LEFT_HAND = set("`12345qwertasdfgzxcvb~!@#$%QWERTASDFGZXCVB")
 _RIGHT_HAND = set("67890-=yuiop[]\\hjkl;'nm,./^&*()_+YUIOP{}|HJKL:\"NM<>?")
 
 
-def _hand(ch: str) -> str:
-    if ch in _LEFT_HAND:
+#: Which hand presses each physical key, by DOM `code`: touch typing on a
+#: standard row-staggered keyboard. The hand follows the KEY, not the
+#: character: on AZERTY `a` is on KeyQ and on QWERTZ `z` is on KeyY.
+_LEFT_CODES = frozenset(
+    ["Backquote", "IntlBackslash"] + ["Digit%d" % d for d in range(1, 6)]
+    + ["Key" + c for c in "QWERTASDFGZXCVB"])
+_RIGHT_CODES = frozenset(
+    ["Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal",
+     "BracketLeft", "BracketRight", "Backslash", "Semicolon", "Quote",
+     "Comma", "Period", "Slash", "IntlRo"]
+    + ["Key" + c for c in "YUIOPHJKLNM"])
+
+
+def _hand(ch: str, layout: str = "us") -> str:
+    """"L", "R" or "?" for the hand that types `ch` on the persona's keyboard.
+
+    ⛔ BY PHYSICAL KEY. The character tables above are the US keyboard's; on
+    any other layout they named the wrong hand (an Italian `ò` was "?", a
+    French `a` was right-hand). The key comes from the layout's closure; the
+    US answer is unchanged, character for character."""
+    if layout == "us":
+        if ch in _LEFT_HAND:
+            return "L"
+        if ch in _RIGHT_HAND:
+            return "R"
+        return "?"
+    from .keyboard import closure_for
+    d = closure_for(layout).get(ch)
+    code = d.get("code") if d and len(ch) == 1 else None
+    if code in _LEFT_CODES:
         return "L"
-    if ch in _RIGHT_HAND:
+    if code in _RIGHT_CODES:
         return "R"
     return "?"
 
@@ -629,7 +657,7 @@ def plan_press_settle(persona: PointerPersona, nonce: int = 0) -> float:
 
 
 def plan_typing(text: str, persona: TypingPersona,
-                nonce: int = 0) -> List[Tuple[float, float]]:
+                nonce: int = 0, layout: str = "us") -> List[Tuple[float, float]]:
     """One `(dwell_ms, gap_ms)` per character of `text`.
 
     `dwell_ms` is how long that key stays down; `gap_ms` is the wait before the
@@ -653,7 +681,7 @@ def plan_typing(text: str, persona: TypingPersona,
         if ch == nxt:
             gap *= persona.same_key_factor
         else:
-            a, b = _hand(ch), _hand(nxt)
+            a, b = _hand(ch, layout), _hand(nxt, layout)
             if a != "?" and b != "?":
                 gap *= (persona.alternate_hand_factor if a != b
                         else persona.same_hand_factor)
