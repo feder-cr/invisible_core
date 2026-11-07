@@ -461,7 +461,7 @@ def _hand(ch: str, layout: str = "us") -> str:
     any other layout they named the wrong hand (an Italian `ò` was "?", a
     French `a` was right-hand). The key comes from the layout's closure; the
     US answer is unchanged, character for character."""
-    if layout == "us":
+    if layout in ("us", "00000409"):
         if ch in _LEFT_HAND:
             return "L"
         if ch in _RIGHT_HAND:

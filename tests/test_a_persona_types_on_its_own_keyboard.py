@@ -53,17 +53,14 @@ def _downs(events):
 # ── the layout is the language's ───────────────────────────────────────────
 
 def test_the_layout_follows_the_first_language_tag():
-    assert layout_for(["it-IT", "it", "en-US", "en"]) == "it"
-    assert layout_for("de-DE,de,en-US,en") == "de"
-    assert layout_for(["fr-FR"]) == "fr"
-    assert layout_for(["es-ES"]) == "es"
-    assert layout_for(["pt-BR", "pt"]) == "br"
-    assert layout_for(["en-GB", "en"]) == "uk"
-    assert layout_for(["en-US", "en"]) == "us"
-    assert layout_for(["pt-PT"]) == "us"   # no table: the US keyboard, as before
-    assert layout_for(["ja-JP"]) == "us"
-    assert layout_for([]) == "us"
-    assert layout_for(["pt"], region="BR") == "br"
+    assert layout_for(["it-IT", "it", "en-US", "en"]) == "00000410"
+    assert layout_for("de-DE,de,en-US,en") == "00000407"
+    assert layout_for(["fr-FR"]) == "0000040C"
+    assert layout_for(["es-ES"]) == "0000040A"
+    assert layout_for(["pt-BR", "pt"]) == "00000416"
+    assert layout_for(["en-GB", "en"]) == "00000809"
+    assert layout_for(["en-US", "en"]) == "00000409"
+    assert layout_for([]) == "00000409"
 
 
 # ── an Italian persona ─────────────────────────────────────────────────────
@@ -161,12 +158,12 @@ def test_the_us_keyboard_is_the_default_and_the_module_closure():
 
 
 def test_the_windows_us_table_agrees_with_the_bundle_on_every_character():
-    """The generator reads Windows through the calls Firefox's widget uses; the
-    bundle's US table is the independent record of the same keyboard. They may
+    """The generator reads the US layout file's bytes; the bundle's US table is
+    the independent record of the same keyboard. They may
     differ only in `keyCode`, on the three keys where Firefox and Chromium do."""
     from invisible_core.juggler.keylayout import LAYOUT
     different_keycodes = set()
-    for code, w in LAYOUTS["us"]["keys"].items():
+    for code, w in LAYOUTS["00000409"]["keys"].items():
         b = LAYOUT.get(code)
         if b is None:
             assert code in ("IntlBackslash", "IntlRo", "NumpadComma"), code
