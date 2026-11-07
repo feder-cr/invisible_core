@@ -64,10 +64,10 @@ def extract(bundle: str) -> str:
 def main() -> int:
     here = pathlib.Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser()
-    # The driver bundle lived in invisible-playwright and is gone; name one
-    # with INVPW_DRIVER_BUNDLE (see below) to re-derive injected.js.
-    ap.add_argument("--bundle", default=str(
-        here / "_driver" / "package" / "lib" / "coreBundle.js"))
+    # No default: the driver bundle is in no tree. A bundle is named
+    # explicitly (--bundle or INVPW_DRIVER_BUNDLE), or the script stops below
+    # and says how to get one.
+    ap.add_argument("--bundle", default=None)
     ap.add_argument("--out", default=str(
         here / "src" / "invisible_core" / "juggler" / "injected.js"))
     ap.add_argument("--check", action="store_true")
@@ -79,10 +79,10 @@ def main() -> int:
     # the ability to RE-DERIVE it, and letting that arrive as
     # `FileNotFoundError` from a path deep in an argparse default sends the
     # reader looking for a broken script instead of a deleted folder.
-    named = os.environ.get("INVPW_DRIVER_BUNDLE")
-    path = pathlib.Path(named) if named else pathlib.Path(a.bundle)
-    if not path.exists():
-        print("NOT COMPARABLE: no driver bundle at %s." % path)
+    named = a.bundle or os.environ.get("INVPW_DRIVER_BUNDLE")
+    path = pathlib.Path(named) if named else None
+    if path is None or not path.exists():
+        print("NOT COMPARABLE: no driver bundle %s." % ("at %s" % path if path else "named"))
         print("  `injected.js` is committed and still valid - what is gone is "
               "the ability to re-derive it.")
         print("  To get one back: git worktree add <dir> <the last commit that "
