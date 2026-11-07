@@ -34,9 +34,10 @@ import time
 from typing import Optional
 
 from .keylayout import LAYOUT
+from .keylayouts_windows import LAYOUTS as WINDOWS_LAYOUTS
 
 #: The four that count as modifiers, in the driver's order.
-MODIFIERS = ("Alt", "Control", "Meta", "Shift")
+MODIFIERS = ("Alt", "AltGraph", "Control", "Meta", "Shift")
 
 #: ⛔ Firefox's mask is NOT Gecko's and is NOT `1 << index`: read in
 #: `toModifiersMask2` of the bundle. Juggler translates it itself into
@@ -74,7 +75,60 @@ class UnknownKey(ValueError):
     an empty event: a `keyCode: 0` does not fail, it lies."""
 
 
-def _build_closure() -> dict:
+#: The keyboard a persona types on, by the language it declares. The layout
+#: is the one Windows installs with that language: a persona whose locale is
+#: it-IT types on an Italian keyboard, where `@` is AltGr+ò and `ò` is a key.
+#: Languages with no table here type on the US keyboard, as before.
+LAYOUT_OF_LANGUAGE = {"it": "it", "de": "de", "fr": "fr", "es": "es"}
+LAYOUT_OF_LANGUAGE_REGION = {("pt", "BR"): "br", ("en", "GB"): "uk"}
+
+
+def layout_for(languages, region: Optional[str] = None) -> str:
+    """The layout name for a session's language list (`SessionLocale.languages`,
+    or the `intl.accept_languages` string) and region: the first tag decides."""
+    if isinstance(languages, str):
+        languages = [t.strip() for t in languages.split(",") if t.strip()]
+    if not languages:
+        return "us"
+    parts = languages[0].replace("_", "-").split("-")
+    lang = parts[0].lower()
+    reg = (region or (parts[1] if len(parts) > 1 and len(parts[1]) == 2 else "")).upper()
+    return (LAYOUT_OF_LANGUAGE_REGION.get((lang, reg))
+            or LAYOUT_OF_LANGUAGE.get(lang) or "us")
+
+
+def _layout_table(layout: str) -> dict:
+    """The bundle's table with the printable keys of this Windows layout in
+    place of the US ones: `key`/`shiftKey`/`altGrKey`/`shiftAltGrKey` and
+    Firefox's `keyCode` on Windows (59 for `;`, not Chromium's 186). Keys the
+    bundle has no entry for (IntlBackslash, IntlRo, NumpadComma) are added;
+    `AltRight` is `AltGraph` on a layout that has AltGr, as Firefox reports it."""
+    win = WINDOWS_LAYOUTS[layout]
+    table = {}
+    for code, d in LAYOUT.items():
+        if code == "AltGraph" and win["hasAltGr"]:
+            continue  # not a DOM code: Firefox on Windows reports AltRight as AltGraph
+        w = win["keys"].get(code)
+        if w is None:
+            table[code] = dict(d)
+            continue
+        e = {k: v for k, v in d.items() if k not in ("key", "shiftKey", "shiftKeyCode",
+                                                      "keyCode", "keyCodeWithoutLocation")}
+        e["keyCode"] = w["keyCode"]
+        for level in ("key", "shiftKey", "altGrKey", "shiftAltGrKey"):
+            if w.get(level):
+                e[level] = w[level]
+        e.setdefault("key", "")
+        table[code] = e
+    for code, w in win["keys"].items():
+        if code not in table:
+            table[code] = {k: v for k, v in w.items() if k != "dead"}
+    if win["hasAltGr"]:
+        table["AltRight"] = dict(table["AltRight"], key="AltGraph")
+    return table
+
+
+def _build_closure(layout: str = "us") -> dict:
     """The name -> description dict, in the same shape as the driver.
 
     A key is reachable by `code` (`KeyA`), by `key` if it is a single
@@ -84,7 +138,8 @@ def _build_closure() -> dict:
     on the numpad.
     """
     out: dict = {}
-    for code, d in LAYOUT.items():
+    table = _layout_table(layout)
+    for code, d in table.items():
         key = d.get("key") or ""
         descr = {
             "key": key,
@@ -104,9 +159,16 @@ def _build_closure() -> dict:
             shifted["text"] = d["shiftKey"]
             if d.get("shiftKeyCode"):
                 shifted["keyCode"] = d["shiftKeyCode"]
-        out[code] = dict(descr, shifted=shifted)
+        altgr = shift_altgr = None
+        if d.get("altGrKey"):
+            altgr = dict(descr, key=d["altGrKey"], text=d["altGrKey"])
+        if d.get("shiftAltGrKey"):
+            shift_altgr = dict(descr, key=d["shiftAltGrKey"], text=d["shiftAltGrKey"])
+        out[code] = dict(descr, shifted=shifted, altgr=altgr, shift_altgr=shift_altgr)
         for alias in ALIASES.get(code, []):
             out[alias] = descr
+        if key == "AltGraph":
+            out["AltGraph"] = descr  # the name Playwright gives the key
         if d.get("location"):
             continue
         # ⛔ THE CHARACTER RESOLVES LIKE ITS KEY, shifted form included. It
@@ -121,10 +183,30 @@ def _build_closure() -> dict:
         if shifted:
             out.setdefault(shifted["key"],
                            dict(shifted, shifted=None, needs_shift=True))
+        # ⛔ AND A CHARACTER THAT ONLY EXISTS WITH ALTGR SAYS SO: `@` on an
+        # Italian keyboard is AltGr+ò, `{` on it is AltGr+Shift+è; `down`
+        # and `press` hold AltGraph (and Shift) for them.
+        if altgr:
+            out.setdefault(altgr["key"], dict(altgr, shifted=None, needs_altgr=True))
+        if shift_altgr:
+            out.setdefault(shift_altgr["key"],
+                           dict(shift_altgr, shifted=None, needs_shift=True,
+                                needs_altgr=True))
     return out
 
 
-LAYOUT_CLOSURE = _build_closure()
+_CLOSURES: dict = {}
+
+
+def closure_for(layout: str) -> dict:
+    """The closure of a layout, built once."""
+    if layout not in _CLOSURES:
+        _CLOSURES[layout] = _build_closure(layout)
+    return _CLOSURES[layout]
+
+
+#: The US keyboard's closure: what a session with no layout of its own types on.
+LAYOUT_CLOSURE = closure_for("us")
 
 
 class Keyboard:
@@ -136,14 +218,19 @@ class Keyboard:
     """
 
     def __init__(self, connection, session: str, persona=None, *, acts,
-                 latency=None):
+                 latency=None, layout: str = "us"):
         self.c = connection
         self.session = session
         self.modifiers: set = set()
         self.pressed: set = set()
         #: The codes `down` pressed Shift for on its own (see `down`), so `up`
-        #: of the same key releases it.
+        #: of the same key releases it; the same for AltGraph.
         self._implicit_shift: set = set()
+        self._implicit_altgr: set = set()
+        #: The keyboard this persona types on (`layout_for`): which key a
+        #: character is, and with which modifiers. "us" when nothing says.
+        self.layout = layout
+        self._closure = closure_for(layout)
         #: ⛔ THE RHYTHM HAS AN OWNER NOW, and this is it.
         #:
         #: A keypress used to be two protocol messages back to back, so a page
@@ -176,21 +263,26 @@ class Keyboard:
     # ── the resolution ──────────────────────────────────────────────────────
     def describe(self, key: str) -> dict:
         name = "Control" if key == "ControlOrMeta" else key
-        d = LAYOUT_CLOSURE.get(name)
+        d = self._closure.get(name)
         if d is None:
             raise UnknownKey(
                 "unknown key: %r. Valid names are the layout's `code` "
                 "values (KeyA, Digit1, Enter), a single character, or an "
                 "alias (Shift, Control, Alt, Meta)." % key)
-        if "Shift" in self.modifiers and d.get("shifted"):
+        shift, altgr = "Shift" in self.modifiers, "AltGraph" in self.modifiers
+        if altgr and shift and d.get("shift_altgr"):
+            d = d["shift_altgr"]
+        elif altgr and d.get("altgr"):
+            d = d["altgr"]
+        elif shift and d.get("shifted"):
             d = d["shifted"]
         d = dict(d)
         # ⛔ With a modifier other than Shift held down, `text` does NOT
         # come out: `Control+a` does not write an "a" into the field. Read
         # in the driver, and without this line a `press("Control+a")` would
-        # insert the character.
-        if len(self.modifiers) > 1 or \
-                (len(self.modifiers) == 1 and "Shift" not in self.modifiers):
+        # insert the character. AltGraph is the other exception: it is how
+        # a European keyboard reaches `@`, `[`, `{`.
+        if self.modifiers - {"Shift", "AltGraph"}:
             d["text"] = ""
         d.update(FIREFOX_OVERRIDES.get(d["key"], {}))
         return d
@@ -205,8 +297,14 @@ class Keyboard:
         """True for a character that only exists with Shift down (`A`, `@`,
         `!`) - by name, never by key code: `Digit2` is a key, `@` is what Shift
         makes of it."""
-        d = LAYOUT_CLOSURE.get(key)
+        d = self._closure.get(key)
         return bool(d and d.get("needs_shift"))
+
+    def needs_altgr(self, key: str) -> bool:
+        """True for a character that only exists with AltGr down on this
+        keyboard (`@` on an Italian one, `[` on a German one)."""
+        d = self._closure.get(key)
+        return bool(d and d.get("needs_altgr"))
 
     # ── the verbs ────────────────────────────────────────────────────────────
     def down(self, key: str) -> None:
@@ -215,9 +313,12 @@ class Keyboard:
         # this hand; this is the floor under every other way in - a raw
         # `keyboard.down("@")` - so no path can send `@` with `shiftKey:
         # false`, which no keyboard produces. Released by `up` of the same key.
+        if self.needs_altgr(key) and "AltGraph" not in self.modifiers:
+            self.down("AltGraph")
+            self._implicit_altgr.add(self._closure[key]["code"])
         if self.needs_shift(key) and "Shift" not in self.modifiers:
             self.down("Shift")
-            self._implicit_shift.add(LAYOUT_CLOSURE[key]["code"])
+            self._implicit_shift.add(self._closure[key]["code"])
         d = self.describe(key)
         repeat = d["code"] in self.pressed
         self.pressed.add(d["code"])
@@ -250,6 +351,9 @@ class Keyboard:
         if d["code"] in self._implicit_shift:
             self._implicit_shift.discard(d["code"])
             self.up("Shift")
+        if d["code"] in self._implicit_altgr:
+            self._implicit_altgr.discard(d["code"])
+            self.up("AltGraph")
 
     def _born(self, params: dict) -> dict:
         """A key event's parameters with its latency, when the session has
@@ -292,23 +396,27 @@ class Keyboard:
         # ⛔ A FINAL KEY THAT ONLY EXISTS WITH SHIFT GETS SHIFT, with this
         # hand's lead and release (B270): `press("@")` used to send `@` with
         # `shiftKey: false`.
-        shift = (self.needs_shift(final) and "Shift" not in self.modifiers
-                 and "Shift" not in held)
-        lead_ms, lag_ms = self._plan_shift(1)[0] if shift else (0.0, 0.0)
+        # ⛔ AND ONE THAT ONLY EXISTS WITH ALTGR GETS ALTGRAPH the same way:
+        # `press("@")` on an Italian keyboard is AltGr+ò, `press("{")` is
+        # AltGr+Shift+è. Each held modifier has its own lead and release.
+        holds = [m for m, needed in (("AltGraph", self.needs_altgr(final)),
+                                     ("Shift", self.needs_shift(final)))
+                 if needed and m not in self.modifiers and m not in held]
+        timings = self._plan_shift(len(holds))
         for m in held:
             self.down(m)
         try:
-            if shift:
-                self.down("Shift")
+            for m, (lead_ms, _) in zip(holds, timings):
+                self.down(m)
                 _sleep_ms(lead_ms)
             try:
                 self.down(final)
                 _sleep_ms(dwell_ms)
                 self.up(final)
             finally:
-                if shift:
+                for m, (_, lag_ms) in reversed(list(zip(holds, timings))):
                     _sleep_ms(lag_ms)
-                    self.up("Shift")
+                    self.up(m)
         finally:
             for m in reversed(held):
                 self.up(m)
@@ -365,7 +473,7 @@ class Keyboard:
             if starts[i]:
                 self.down("Shift")
                 _sleep_ms(lead_at[i])
-            if ch in LAYOUT_CLOSURE:
+            if ch in self._closure:
                 self.press(ch, dwell_ms=dwell_ms)
             else:
                 self.insert_text(ch)

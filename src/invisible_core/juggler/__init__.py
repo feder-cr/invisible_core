@@ -8,7 +8,7 @@
 | `injected.py` | loads `injected.js` into the UTILITY world and calls it: selectors and actionability; and, for `execute_script`, the crossings into the page's own world |
 | `injected.js` | extracted from the Playwright bundle with `scripts/gen_injected_source.py`. It is not upstream: it carries the fork's stealth fixes |
 | `actions.py` | the retry loop and every input action. `engine_approach` says who draws the pointer's approach: the client's cursor (Playwright) or this side (Selenium, Puppeteer) |
-| `keyboard.py`, `keylayout.py` | from a key name to the four fields `Page.dispatchKeyEvent` demands |
+| `keyboard.py`, `keylayout.py`, `keylayouts_windows.py` | from a key name to the four fields `Page.dispatchKeyEvent` demands, on the keyboard of the persona's language |
 | `_behaviour.py`, `_motion.py`, `_pacing.py` | the human rhythm: personas, paths, and the discipline every movement is delivered under, on the client's cursor and here alike |
 
 ⛔ ONE COPY, AND THAT IS THE WHOLE POINT (80-decision-log.md [D85]). Until
