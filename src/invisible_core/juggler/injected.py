@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 import pathlib
-import time
+import threading
 from typing import Any, Optional
 
 from .connection import ProtocolError, ReplyTimeout
@@ -170,6 +170,9 @@ class InjectedScript:
         self.session = session
         #: (frameId, worldName) -> executionContextId
         self.contexts: dict = {}
+        #: Notified when a context is born: a wait for a frame's world sleeps
+        #: on it until the event that makes the world, not in turns.
+        self._contexts_changed = threading.Condition()
         #: frameId -> (executionContextId it was built in, objectId)
         #:
         #: ⛔ THE CONTEXT IS PART OF THE KEY, AND IT IS NOT BOOKKEEPING: it is
@@ -203,6 +206,10 @@ class InjectedScript:
         #: here because this object is the one that owns the engine's init
         #: script list - see `_push_scripts`.
         self._init_scripts: list = []
+        #: Held while the list changes AND while it is sent: the command
+        #: replaces the engine's list, so two changes sent in the other order
+        #: would leave the engine with the first one's list.
+        self._scripts_lock = threading.Lock()
         # ⛔ Registered on the connection's list, never chained onto whoever
         # was there before: see the note in `Connection._listeners`.
         connection.add_listener(self._route)
@@ -219,8 +226,10 @@ class InjectedScript:
     def _on_event(self, method: str, p: dict) -> None:
         if method == "Runtime.executionContextCreated":
             aux = p.get("auxData") or {}
-            self.contexts[(aux.get("frameId"), aux.get("name") or "")] = \
-                p["executionContextId"]
+            with self._contexts_changed:
+                self.contexts[(aux.get("frameId"), aux.get("name") or "")] = \
+                    p["executionContextId"]
+                self._contexts_changed.notify_all()
         elif method == "Runtime.executionContextDestroyed":
             dead = p["executionContextId"]
             for k in [k for k, v in self.contexts.items() if v == dead]:
@@ -254,7 +263,8 @@ class InjectedScript:
         """Creates the utility world. An EMPTY script is enough: what
         matters is the `worldName`, which is the only thing that makes
         the context come into being."""
-        self._push_scripts()
+        with self._scripts_lock:
+            self._push_scripts()
 
     def _push_scripts(self) -> None:
         """Send the WHOLE list, because the command replaces it.
@@ -285,8 +295,9 @@ class InjectedScript:
         would run it behind the Xray, where the page cannot see anything it
         defines, and the call would succeed while doing nothing observable.
         """
-        self._init_scripts.append(source)
-        self._push_scripts()
+        with self._scripts_lock:
+            self._init_scripts.append(source)
+            self._push_scripts()
 
     def remove_init_script(self, source: str) -> None:
         """Undo one. Removes ONE occurrence, not every copy.
@@ -294,9 +305,10 @@ class InjectedScript:
         ⛔ The same source added twice is two scripts by Playwright's
         contract, and disposing one handle must leave the other alive.
         """
-        if source in self._init_scripts:
-            self._init_scripts.remove(source)
-            self._push_scripts()
+        with self._scripts_lock:
+            if source in self._init_scripts:
+                self._init_scripts.remove(source)
+                self._push_scripts()
 
     def _send_in(self, method: str, params: dict, *,
                  timeout: Optional[float]) -> Any:
@@ -364,18 +376,27 @@ class InjectedScript:
                     raise
 
     def context_id(self, frame_id: str, *, timeout: Optional[float] = 10.0) -> str:
-        key = (frame_id, UTILITY_WORLD)
-        deadline = Deadline(timeout)
-        while key not in self.contexts:
-            if deadline.passed():
-                worlds = sorted(n for f, n in self.contexts if f == frame_id)
-                raise TimeoutError(
-                    "the utility world (%s) has not been born for frame "
-                    "%s in %.0fs. Worlds seen for that frame: %s. Did "
-                    "you call install()?" % (UTILITY_WORLD, frame_id,
-                                             timeout, worlds or "none"))
-            time.sleep(0.01)
-        return self.contexts[key]
+        context = self._world(frame_id, UTILITY_WORLD, Deadline(timeout))
+        if context is None:
+            worlds = sorted(n for f, n in self.contexts if f == frame_id)
+            raise TimeoutError(
+                "the utility world (%s) has not been born for frame "
+                "%s in %.0fs. Worlds seen for that frame: %s. Did "
+                "you call install()?" % (UTILITY_WORLD, frame_id,
+                                         timeout, worlds or "none"))
+        return context
+
+    def _world(self, frame_id: str, world: str, deadline: Deadline) -> Any:
+        """The context of `world` in `frame_id`, once the engine has made it;
+        None when the deadline passes first. Woken by the creation event, not
+        polled."""
+        key = (frame_id, world)
+        with self._contexts_changed:
+            while key not in self.contexts:
+                if deadline.passed():
+                    return None
+                self._contexts_changed.wait(deadline.left())
+            return self.contexts[key]
 
     # ── evaluation ──────────────────────────────────────────────────────────
     def _result(self, response: dict) -> dict:
@@ -633,62 +654,25 @@ class InjectedScript:
                 ids.append(object_id)
         return ids
 
-    def scroll_into_view(self, frame_id: str, element: str) -> bool:
-        """Bring the element into the viewport, and say whether it moved.
+    def scroll_into_view(self, frame_id: str, element: str,
+                         rect: Optional[dict] = None) -> None:
+        """Bring the element into the viewport, or `rect` of it ({x, y,
+        width, height} in the element's own box: a point is a rect of size 0).
 
-        ⛔ IT WAS MISSING, AND THAT IS WHY A CLICK BELOW THE FOLD FAILED. The
-        retry loop asked whether the element was visible, stable and enabled -
-        all true for something 3000 px down the page - then computed its point
-        from `getContentQuads`, which answers in main-frame coordinates. The
-        event was dispatched at a y outside the viewport, landed on nothing,
-        and the hit-target check reported `<html>` several hundred times before
-        the deadline. Playwright scrolls as part of actionability; we did not.
-
-        ⛔ `scrollIntoView`, called FROM THE UTILITY WORLD. Scrolling is
-        page-visible by construction - a real user scrolls - so there is
-        nothing to hide here; what the world buys is that the call goes to the
-        NATIVE method through the Xray rather than to whatever the site may
-        have replaced it with.
-
-        ⛔ `block: "center"` rather than the default `"start"`: an element
-        flush against the top edge is a point that a sticky header covers on a
-        great many pages, and the interceptor would then correctly report that
-        the event lands elsewhere.
-
-        ⛔ ONLY IF NEEDED, as Chromium's `scrollIntoViewIfNeeded`. It centred
-        every time, and Playwright asks for it before every click (EVA before
-        every mouse move too): each click on an element already in full view
-        moved the page under it, which neither Chromium nor a person does. An
-        element whose box lies wholly inside its frame's viewport, and that
-        frame's box inside its parent's up to the top, is left where it is
-        (False). The viewport is the layout one without scrollbars (the
-        smaller of `innerWidth`/`innerHeight` and the root's client size, which
-        also covers quirks mode). A parent frame we cannot read (cross-origin)
-        cannot be judged, so that case scrolls as before: `scrollIntoView`
-        moves every ancestor frame too.
+        The engine's `Page.scrollIntoViewIfNeeded` (firefox-58): the page's
+        own `scrollIntoView`, reached through the Xray so a site that replaced
+        it changes nothing, only when the element or the rect is not in full
+        view in its frame and every frame above, and centred, so a sticky
+        header does not cover the point. A click on an element already in view
+        moves nothing, as in a real browser. Until firefox-58 the command
+        failed on every node and this was a script injected into the page;
+        that script, and the dropped `rect`, are gone.
         """
-        return bool(self.call(
-            frame_id,
-            "(injected, el) => {"
-            " const box = el.getBoundingClientRect();"
-            " const inside = (r, w) => {"
-            "   const d = w.document.documentElement;"
-            "   const vw = Math.min(w.innerWidth, (d && d.clientWidth) || w.innerWidth);"
-            "   const vh = Math.min(w.innerHeight, (d && d.clientHeight) || w.innerHeight);"
-            "   return r.left >= 0 && r.top >= 0 && r.right <= vw && r.bottom <= vh; };"
-            " let w = window, r = box, seen = inside(r, w);"
-            " while (seen && w !== w.top) {"
-            "   const fe = w.frameElement;"
-            "   if (!fe) { seen = false; break; }"
-            "   const f = fe.getBoundingClientRect(), dx = f.left + fe.clientLeft, dy = f.top + fe.clientTop;"
-            "   r = {left: r.left + dx, top: r.top + dy, right: r.right + dx, bottom: r.bottom + dy};"
-            "   w = w.parent; seen = inside(r, w); }"
-            " if (seen) return false;"
-            " el.scrollIntoView({block: 'center', inline: 'center',"
-            "                    behavior: 'instant'});"
-            " const after = el.getBoundingClientRect();"
-            " return after.top !== box.top || after.left !== box.left; }",
-            {"objectId": element}))
+        params = {"frameId": frame_id, "objectId": element}
+        if rect is not None:
+            params["rect"] = rect
+        self.c.send("Page.scrollIntoViewIfNeeded", params,
+                    session=self.session)
 
     def content_origin(self, frame_id: str) -> dict:
         """Where this frame's content area starts, in SCREEN css pixels.
@@ -1028,17 +1012,14 @@ class InjectedScript:
         caller's code ran in the page's own context, the one with the empty
         name; nothing here asks for that one any more.
         """
-        deadline = Deadline(timeout)
-        key = (frame_id, CALLER_WORLD)
-        while key not in self.contexts:
-            if deadline.passed():
-                raise TimeoutError(
-                    "the caller's world never appeared for frame %s - did "
-                    "you call install()? Worlds seen: %s"
-                    % (frame_id, sorted(n for f, n in self.contexts
-                                        if f == frame_id)))
-            time.sleep(0.01)
-        return self.contexts[key]
+        context = self._world(frame_id, CALLER_WORLD, Deadline(timeout))
+        if context is None:
+            raise TimeoutError(
+                "the caller's world never appeared for frame %s - did "
+                "you call install()? Worlds seen: %s"
+                % (frame_id, sorted(n for f, n in self.contexts
+                                    if f == frame_id)))
+        return context
 
     def evaluate_raw(self, context_id: str, expression: str, *,
                      by_value: bool = False,

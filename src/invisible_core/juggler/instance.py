@@ -274,6 +274,10 @@ class Browser:
         self._files = files
         self._closed = False
         self._sessions: Dict[str, str] = {}
+        #: Targets that have detached: a wait for the session of one of them
+        #: ends with TargetClosedError instead of waiting for an attach that
+        #: cannot come (a tab the site opened and closed at once).
+        self._detached: set = set()
         #: targetId -> the engine's `targetInfo` (its context, its opener).
         #: ⛔ KEPT FOR EVERY TARGET, not only for the pages this process asked
         #: for: a link with `target=_blank` or a `window.open()` makes a tab
@@ -338,6 +342,7 @@ class Browser:
             with self._sessions_ready:
                 self._sessions.pop(target_id, None)
                 self._targets.pop(target_id, None)
+                self._detached.add(target_id)
                 self._sessions_ready.notify_all()
             # ⛔ AND ITS `Page` IS RETIRED HERE, whoever closed it. Until
             # 41.39.0 only `Page.close()` retired one, so a tab the site
@@ -400,6 +405,10 @@ class Browser:
         deadline = Deadline(timeout)
         with self._sessions_ready:
             while target_id not in self._sessions:
+                if target_id in self._detached:
+                    raise connection.TargetClosedError(
+                        "target %s detached before its session was taken"
+                        % target_id)
                 if self._conn_gone:
                     raise connection.TargetClosedError(
                         "the browser closed before a session attached for "
@@ -524,6 +533,16 @@ class Browser:
             self.context_send("Browser.setBypassCSP",
                               {"browserContextId": context_id,
                                "bypassCSP": True})
+        # Downloads are opt-in in the engine: Juggler intercepts one only when
+        # the context has download options ({behavior: saveToDisk|cancel,
+        # downloadsDir}). Given here they hold from the context's first page;
+        # a second command after the context exists left a window in which
+        # Firefox's own handling ran.
+        downloads = options.get("downloadOptions")
+        if downloads:
+            self.context_send("Browser.setDownloadOptions",
+                              {"browserContextId": context_id,
+                               "downloadOptions": downloads})
         # ⛔ Inverted on purpose: the option says `javaScriptEnabled=False`,
         # Juggler says `javaScriptDisabled=True`. Passing one straight into the
         # other would turn scripting OFF for every default context, which is

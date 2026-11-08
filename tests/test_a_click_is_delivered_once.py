@@ -150,8 +150,8 @@ class _Injected:
         self.checks += 1
         return "done" if self.page.hittable else "<div id='something-else'>"
 
-    def scroll_into_view(self, frame, element):
-        return False
+    def scroll_into_view(self, frame, element, rect=None):
+        return None
 
     def dispose(self, frame, element):
         pass

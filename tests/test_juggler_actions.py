@@ -221,8 +221,8 @@ class _Recorder:
     def element_states(self, frame, element, states):
         return {"ok": True}
 
-    def scroll_into_view(self, frame, element):
-        return False
+    def scroll_into_view(self, frame, element, rect=None):
+        return None
 
     def dispose(self, frame, element):
         self.disposed.append(element)

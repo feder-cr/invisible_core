@@ -384,11 +384,19 @@ class Actions:
                     # geometry has just changed underneath.
                     point = self._center_point(f, element, position, deadline)
                     if point is not None and not self._in_viewport(point):
-                        if self.inj.scroll_into_view(f, element):
+                        # The point asked for, when there is one: the engine
+                        # brings that rect of the element into view.
+                        rect = ({"x": float(position["x"]), "y": float(position["y"]),
+                                 "width": 0, "height": 0}
+                                if isinstance(position, dict) and "x" in position
+                                and "y" in position else None)
+                        self.inj.scroll_into_view(f, element, rect)
+                        moved = self._center_point(f, element, position, deadline)
+                        if moved is not None and moved != point:
                             reason = ("the element was outside the viewport; "
                                       "scrolled it in and starting over")
                             continue
-                        point = self._center_point(f, element, position, deadline)
+                        point = moved
                     if point is None:
                         reason = "the element has no quad (it isn't visible)"
                     elif trial:
