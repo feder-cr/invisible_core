@@ -19,6 +19,9 @@ from typing import Dict
 # ──────────────────────────────────────────────────────────────────────
 
 _WIN_LIGHT_COLORS: Dict[str, str] = {
+    # The engine's declaration gate refuses to start without this palette, and
+    # `ui.-moz-field` / `ui.-moz-fieldtext` (and their `.dark`) are among the
+    # prefs it requires: each name below is declared here and nowhere else.
     # Measured against stock Firefox 151 on Windows, 2026-08-09, not chosen.
     # A page resolves every one of these through getComputedStyle, and our Linux
     # build answered GTK's values for all seven: menuhover was rgb(53,132,228)
@@ -94,7 +97,8 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
     "ui.buttonborder":              "#000000",
     "ui.captiontext":               "#000000",
     "ui.graytext":                  "#6D6D6D",
-    "ui.highlight":                 "#0078D7",
+    # REA, Firefox 159.0 retail xul.dll: GetSysColor COLOR_HIGHLIGHT on Windows 11
+    "ui.highlight":                 "#0078D4",
     "ui.highlighttext":             "#FFFFFF",
     "ui.inactiveborder":            "#F4F7FC",
     "ui.inactivecaption":           "#BFCDDB",
@@ -116,11 +120,14 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
     "ui.marktext":                  "#000000",
     "ui.accentcolor":                  "#0060DF",
     "ui.accentcolortext":           "#FFFFFF",
-    "ui.selecteditem":              "#0078D7",
+    "ui.selecteditem":              "#0078D4",
     "ui.selecteditemtext":          "#FFFFFF",
-    "ui.-moz-hyperlinktext":        "#0066CC",
+    # REA, Firefox 159.0 retail xul.dll: stand-in table (links, Mark, Accent, Field)
+    "ui.-moz-hyperlinktext":        "#0000EE",
     "ui.-moz-activehyperlinktext":  "#EE0000",
     "ui.-moz-visitedhyperlinktext": "#551A8B",
+    "ui.-moz-field":                "#FFFFFF",
+    "ui.-moz-fieldtext":            "#000000",
 }
 
 #: The names whose value changes in the DARK scheme, as `ui.<name>.dark`.
@@ -134,6 +141,12 @@ _WIN_LIGHT_COLORS: Dict[str, str] = {
 #: to the plain name (GetColorFromPref). The alpha is two hex digits:
 #: rgba(0,221,255,0.306) is 0x4E/255.
 _WIN_DARK_COLORS: Dict[str, str] = {
+    # REA, Firefox 159.0 retail xul.dll: stand-in table / GenericDarkColor on Windows 11
+    "ui.-moz-hyperlinktext.dark":     "#00CADB",
+    "ui.-moz-activehyperlinktext.dark": "#FF6666",
+    "ui.-moz-visitedhyperlinktext.dark": "#FFADFF",
+    "ui.-moz-field.dark":             "#2B2A33",
+    "ui.-moz-fieldtext.dark":         "#FBFBFE",
     "ui.highlight.dark":              "#00DDFF4E",
     "ui.highlighttext.dark":          "#000000",
     "ui.selecteditem.dark":           "#00DDFF",
