@@ -45,6 +45,7 @@ from pathlib import Path
 import pytest
 import responses
 
+from invisible_core import download
 from invisible_core.constants import RELEASE_URL_TEMPLATE
 from invisible_core.download import (
     cache_dir_for_seal,
@@ -187,13 +188,17 @@ def write_seal(path: Path, *, tag: str = "firefox-18", version: str = SEALED_VER
 
 @pytest.fixture
 def cache(tmp_path, monkeypatch):
-    """An isolated cache root, plus the public-repo download path (no token), so
-    _resolve_asset_url returns the direct URL instead of calling the API."""
+    """An isolated cache root, plus the public-repo download path (no token), with the
+    direct link as the only source: the API route is tested in test_download.py."""
     root = tmp_path / "Cache"
     root.mkdir()
     monkeypatch.setenv("INVISIBLE_PLAYWRIGHT_CACHE_DIR", str(root))
     monkeypatch.delenv("STEALTHFOX_GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    # The index of the release is the network: these tests are about what
+    # happens after the source is chosen, so the direct link is the source.
+    monkeypatch.setattr(download, "release_asset_urls",
+                        lambda owner, repo, tag, name, direct: [direct])
     got = cache_root()
     assert got == root, f"cache_root() ignored the override: {got}"
     assert str(got).startswith(str(tmp_path)), "refusing to run against a real cache"

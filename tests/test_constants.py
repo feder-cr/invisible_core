@@ -205,7 +205,7 @@ def test_release_url_template_is_https():
 
 @pytest.mark.unit
 def test_release_url_template_has_required_placeholders():
-    """{tag} and {asset} must both be present, otherwise _resolve_asset_url
+    """{tag} and {asset} must both be present, otherwise _resolve_asset_urls
     won't format a usable URL and downloads fail with confusing 404s."""
     assert "{tag}" in RELEASE_URL_TEMPLATE
     assert "{asset}" in RELEASE_URL_TEMPLATE

@@ -148,7 +148,7 @@ def no_network(monkeypatch):
     the tests that must not serve a warm tree, and a failure everywhere else."""
     def boom(*a, **k):
         raise NetworkTouched(f"cold path taken: {a[:2]}")
-    monkeypatch.setattr(download, "_resolve_asset_url", boom)
+    monkeypatch.setattr(download, "_resolve_asset_urls", boom)
     monkeypatch.setattr(download, "_download_file", boom)
     return boom
 

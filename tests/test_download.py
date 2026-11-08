@@ -54,7 +54,7 @@ from invisible_core.download import (
     _github_token,
     _parse_checksums,
     _parse_owner_repo,
-    _resolve_asset_url,
+    _resolve_asset_urls,
     _sha256_file,
     cache_dir_for_version,
     cache_root,
@@ -300,35 +300,112 @@ def test_github_token_none_when_unset(monkeypatch):
 
 
 # ========================================================================== #
-# _resolve_asset_url - public-repo direct URL vs private-repo API resolution
+# _resolve_asset_urls - API route first, direct link as the fallback
 # ========================================================================== #
 # This function chooses between two code paths based on whether a GitHub
 # token is set. Both paths produce a downloadable URL but via different
 # mechanisms, and a regression here would surface as 404 / 403 / wrong
 # binary downloaded.
 
-@pytest.mark.unit
-def test_resolve_asset_url_public_returns_direct_url(monkeypatch):
-    """No token → return the direct releases/download URL verbatim."""
-    monkeypatch.delenv("STEALTHFOX_GITHUB_TOKEN", raising=False)
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    url = _resolve_asset_url("firefox-4", "thing.zip")
-    assert url == RELEASE_URL_TEMPLATE.format(tag="firefox-4", asset="thing.zip")
-    assert "api.github.com" not in url  # public path must skip the API
+_INDEX = ("https://api.github.com/repos/feder-cr/firefox_antidetect_patch"
+          "/releases/tags/firefox-4")
 
 
 @pytest.mark.unit
-def test_resolve_asset_url_public_url_format_is_stable(monkeypatch):
-    """The exact URL shape is what GitHub clients have learned to cache.
-    Changing it without bumping BINARY_VERSION would 404 on first fetch
-    for every existing user - guard against accidental drift."""
+@responses.activate
+def test_resolve_asset_urls_public_puts_the_api_route_first(monkeypatch):
+    """No token: the asset's API URL first, the direct link after it. On
+    2026-11-08 the direct link answered 504 for every release while the API
+    route served the same bytes, so the API route leads."""
     monkeypatch.delenv("STEALTHFOX_GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    url = _resolve_asset_url("firefox-4", "abc.tar.gz")
-    assert url == (
+    responses.add(responses.GET, _INDEX, status=200, json={"assets": [
+        {"name": "thing.zip", "url": "https://api.github.com/repos/o/r/releases/assets/7"}]})
+    urls = _resolve_asset_urls("firefox-4", "thing.zip")
+    assert urls == ["https://api.github.com/repos/o/r/releases/assets/7",
+                    RELEASE_URL_TEMPLATE.format(tag="firefox-4", asset="thing.zip")]
+    assert "Authorization" not in responses.calls[0].request.headers
+
+
+@pytest.mark.unit
+@responses.activate
+def test_resolve_asset_urls_public_falls_back_when_the_index_fails(monkeypatch, no_waiting):
+    """A rate-limited or broken index is not a failed install: the direct link
+    is what this code used before, and it is asked once, without retries."""
+    monkeypatch.delenv("STEALTHFOX_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    responses.add(responses.GET, _INDEX, status=403)
+    urls = _resolve_asset_urls("firefox-4", "thing.zip")
+    assert urls == [RELEASE_URL_TEMPLATE.format(tag="firefox-4", asset="thing.zip")]
+    assert len(responses.calls) == 1
+    assert no_waiting == []
+
+
+@pytest.mark.unit
+def test_resolve_asset_urls_public_url_format_is_stable(monkeypatch, no_waiting):
+    """The direct link's exact shape is what every installed core asks for.
+    Guard against accidental drift."""
+    monkeypatch.delenv("STEALTHFOX_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(download.requests, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError("off")))
+    assert _resolve_asset_urls("firefox-4", "abc.tar.gz")[-1] == (
         "https://github.com/feder-cr/firefox_antidetect_patch/releases/"
         "download/firefox-4/abc.tar.gz"
     )
+
+
+@pytest.mark.unit
+@responses.activate
+def test_a_504_on_the_direct_link_is_served_by_the_api_route(monkeypatch, tmp_path, no_waiting):
+    """The failure of 2026-11-08: every direct release link answered 504, the
+    API route answered 200. The download must come through, without waiting."""
+    monkeypatch.delenv("STEALTHFOX_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    api = "https://api.github.com/repos/o/r/releases/assets/7"
+    direct = RELEASE_URL_TEMPLATE.format(tag="firefox-4", asset="thing.zip")
+    responses.add(responses.GET, _INDEX, status=200,
+                  json={"assets": [{"name": "thing.zip", "url": api}]})
+    responses.add(responses.GET, direct, status=504)
+    seen = {}
+
+    def bytes_on_request(request):
+        seen["accept"] = request.headers.get("Accept")
+        return (200, {}, b"ENGINE")
+    responses.add_callback(responses.GET, api, callback=bytes_on_request)
+
+    dst = tmp_path / "thing.zip"
+    _download_file(_resolve_asset_urls("firefox-4", "thing.zip"), dst)
+    assert dst.read_bytes() == b"ENGINE"
+    assert seen["accept"] == "application/octet-stream"
+    assert no_waiting == []
+
+
+@pytest.mark.unit
+@responses.activate
+def test_a_504_on_the_api_route_is_served_by_the_direct_link(tmp_path, no_waiting):
+    api = "https://api.github.com/repos/o/r/releases/assets/7"
+    direct = "https://github.com/o/r/releases/download/t/thing.zip"
+    responses.add(responses.GET, api, status=504)
+    responses.add(responses.GET, direct, status=200, body=b"ENGINE")
+    dst = tmp_path / "thing.zip"
+    _download_file([api, direct], dst)
+    assert dst.read_bytes() == b"ENGINE"
+    assert no_waiting == []
+
+
+@pytest.mark.unit
+@responses.activate
+def test_the_last_source_s_404_is_what_the_caller_sees(tmp_path, no_waiting):
+    """`ensure_binary` turns a 404 into the missing-release message, so the
+    direct link's 404 must come out as an HTTPError, not as a retry note."""
+    api = "https://api.github.com/repos/o/r/releases/assets/7"
+    direct = "https://github.com/o/r/releases/download/t/thing.zip"
+    responses.add(responses.GET, api, status=504)
+    responses.add(responses.GET, direct, status=404)
+    with pytest.raises(requests.HTTPError) as exc:
+        _download_file([api, direct], tmp_path / "thing.zip")
+    assert exc.value.response.status_code == 404
 
 
 @pytest.mark.unit
@@ -352,8 +429,8 @@ def test_resolve_asset_url_private_uses_api_with_token(monkeypatch):
         ]},
         status=200,
     )
-    url = _resolve_asset_url("firefox-4", "wanted.zip")
-    assert url == "https://api.github.com/.../2"
+    urls = _resolve_asset_urls("firefox-4", "wanted.zip")
+    assert urls[0] == "https://api.github.com/.../2"
 
 
 @pytest.mark.unit
@@ -372,7 +449,7 @@ def test_resolve_asset_url_private_raises_when_asset_missing(monkeypatch):
         status=200,
     )
     with pytest.raises(RuntimeError, match="not-here.zip"):
-        _resolve_asset_url("firefox-4", "not-here.zip")
+        _resolve_asset_urls("firefox-4", "not-here.zip")
 
 
 @pytest.mark.unit
@@ -387,7 +464,7 @@ def test_resolve_asset_url_private_propagates_api_4xx(monkeypatch):
     )
     responses.add(responses.GET, api_url, status=404)
     with pytest.raises(requests.HTTPError):
-        _resolve_asset_url("firefox-99", "thing.zip")
+        _resolve_asset_urls("firefox-99", "thing.zip")
 
 
 @pytest.mark.unit
@@ -407,7 +484,7 @@ def test_resolve_asset_url_private_sends_auth_header(monkeypatch):
         return (200, {}, '{"assets":[{"name":"x.zip","url":"https://x/y"}]}')
     responses.add_callback(responses.GET, api_url, callback=callback,
                            content_type="application/json")
-    _resolve_asset_url("firefox-4", "x.zip")
+    _resolve_asset_urls("firefox-4", "x.zip")
     assert captured["auth"] == "token ghp_secret"
 
 

@@ -27,6 +27,10 @@ TAG = "2026.10.14"
 def cache(tmp_path, monkeypatch):
     monkeypatch.setenv("INVISIBLE_PLAYWRIGHT_CACHE_DIR", str(tmp_path))
     monkeypatch.delenv("STEALTHFOX_GEOIP_MMDB", raising=False)
+    # The index of the release is the network: these tests are about what
+    # happens after the source is chosen, so the direct link is the source.
+    monkeypatch.setattr(dl, "release_asset_urls",
+                        lambda owner, repo, tag, name, direct: [direct])
     return tmp_path
 
 
