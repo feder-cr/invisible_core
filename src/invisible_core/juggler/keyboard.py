@@ -77,6 +77,13 @@ class UnknownKey(ValueError):
     an empty event: a `keyCode: 0` does not fail, it lies."""
 
 
+#: The persona's keyboards, KLIDs joined by commas, the language's first
+#: (`layouts_for`). Declared once, with the session's language and country,
+#: by `prefs._apply_locale`; server-only: `instance.launch` and the wrapper's
+#: server take it out of the prefs before the profile is written, and hand it
+#: to every page's keyboard.
+KEYBOARD_LAYOUT_PREF = "invisible.server.keyboard_layout"
+
 #: A layout is named by its Windows keyboard identifier (KLID). These short
 #: names stay as aliases of the most used ones.
 US = "00000409"

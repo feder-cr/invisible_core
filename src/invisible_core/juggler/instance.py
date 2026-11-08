@@ -162,6 +162,12 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
         # would write a session identifier onto disk for no reader at all.
         browser_prefs, session_seed, motion_budget_s = take_session_motion(
             prefs or {})
+        # The persona's keyboards, out of the prefs like the seed: declared by
+        # `prefs._apply_locale`; from the language alone when a caller wrote
+        # its prefs without it.
+        from .keyboard import KEYBOARD_LAYOUT_PREF, layouts_for
+        layout = browser_prefs.pop(KEYBOARD_LAYOUT_PREF, None) or ",".join(
+            layouts_for(browser_prefs.get("intl.accept_languages") or ""))
         write_user_js(files.profile, browser_prefs)
         # ⛔ PARSED BEFORE THE BROWSER STARTS, so a proxy we cannot express
         # refuses the launch instead of leaving a process running without one.
@@ -199,7 +205,8 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
     try:
         return Browser(conn, read_version(executable),
                        session_seed=session_seed,
-                       motion_budget_s=motion_budget_s, files=files)
+                       motion_budget_s=motion_budget_s, files=files,
+                       layout=layout)
     except BaseException:
         conn.close()
         files.remove()
@@ -252,7 +259,8 @@ class Browser:
 
     def __init__(self, conn: Any, version: str, *, session_seed: Any = None,
                  motion_budget_s: Any = None,
-                 files: Optional[SessionFiles] = None) -> None:
+                 files: Optional[SessionFiles] = None,
+                 layout: str = "us") -> None:
         self.conn = conn
         self.version = version
         #: ⛔ THE SESSION'S SEED, and the reason it lives on the BROWSER rather
@@ -263,6 +271,10 @@ class Browser:
         #: downstream reads that as "no rhythm" rather than as a default one.
         self.session_seed = session_seed
         self.motion_budget_s = motion_budget_s
+        #: The persona's keyboards (`keyboard.layouts_for`, KLIDs joined by
+        #: commas), which every page's hands type on. Until 58.55.0 a page made
+        #: here typed on the US keyboard whatever the persona's language.
+        self.layout = layout
         #: Every page of the session gets the next number, and its acts are
         #: numbered from it (`PageActs`): two tabs never draw the same click,
         #: field or typed string. The Playwright wrapper numbers its pages the
@@ -768,7 +780,7 @@ class Page:
                                acts=PageActs(next(browser._page_numbers)),
                                session_seed=browser.session_seed,
                                motion_budget_s=browser.motion_budget_s,
-                               engine_approach=True)
+                               engine_approach=True, layout=browser.layout)
         self._listeners: List[Callable] = []
         self._detached = False
         self.replayed_events = browser.replay(session, conn.dispatch_event)

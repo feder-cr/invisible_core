@@ -1796,6 +1796,12 @@ def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
     # en-AU build) maps that to "en-US, en", and the session declared en-AU
     # here while navigator.language said en-US.
     prefs["intl.accept_languages"]     = locale.accept_languages
+    # The keyboards of this language in this country (German in Switzerland
+    # types on the Swiss one), the second one Windows installs with it after:
+    # one declaration, read by every client's keyboard.
+    from .juggler.keyboard import KEYBOARD_LAYOUT_PREF, layouts_for
+    prefs[KEYBOARD_LAYOUT_PREF] = ",".join(
+        layouts_for(list(locale.languages), locale.region))
     # ⛔ NO SECOND COPY OF THE WIRE HEADER. Firefox derives Accept-Language
     # from intl.accept_languages (and from a context's language override) in
     # nsHttpHandler, with the q-values of rust_prepare_accept_languages. Until
