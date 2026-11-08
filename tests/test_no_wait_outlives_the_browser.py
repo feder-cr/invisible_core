@@ -140,3 +140,47 @@ def test_a_real_connection_tells_its_close_listeners_when_the_pipe_ends():
     os.close(from_w)  # the browser's end goes away
     assert told.wait(5), "the close listener was never called"
     assert c.gone
+
+
+# A tab the site opens and closes at once (a popup that closes itself)
+# detaches; a wait for its session waited for an attach that cannot come, for
+# as long as the browser lived. A CDP server built on the core raced the wait
+# against the detach event with futures of its own.
+
+def _attach_and_detach(conn, target):
+    conn.dispatch_event("Browser.attachedToTarget",
+                        {"sessionId": "S-" + target,
+                         "targetInfo": {"targetId": target, "type": "page"}}, None)
+    conn.dispatch_event("Browser.detachedFromTarget",
+                        {"sessionId": "S-" + target, "targetId": target}, None)
+
+
+def test_waiting_for_the_session_of_a_target_that_detached_ends():
+    conn = _Conn()
+    browser = Browser(conn, "151.0")
+    _attach_and_detach(conn, "T2")
+    raised = _raised_within(lambda: browser.session_for("T2"))
+    assert isinstance(raised, TargetClosedError) and "T2" in str(raised)
+
+
+def test_a_wait_under_way_ends_when_its_target_detaches():
+    conn = _Conn()
+    browser = Browser(conn, "151.0")
+    threading.Timer(0.2, conn.dispatch_event, args=(
+        "Browser.detachedFromTarget", {"sessionId": "S-T3", "targetId": "T3"},
+        None)).start()
+    raised = _raised_within(lambda: browser.session_for("T3"))
+    assert isinstance(raised, TargetClosedError) and "T3" in str(raised)
+
+
+# The download behaviour is a context option: sent with the others, before the
+# context's first page. A CDP server built on the core sent it with a second
+# command after the context existed, and rolled the context back when it failed.
+
+def test_download_options_are_sent_before_the_context_is_handed_back():
+    conn = _Conn()
+    browser = Browser(conn, "151.0")
+    browser.new_context({"downloadOptions": {"behavior": "cancel"}})
+    methods = [m for m, _ in conn.sent]
+    assert methods.index("Browser.createBrowserContext") < \
+        methods.index("Browser.setDownloadOptions")

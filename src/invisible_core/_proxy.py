@@ -28,6 +28,7 @@ proxied session can still leak through.
 from __future__ import annotations
 
 from typing import Any, Dict, NamedTuple, Optional
+from urllib.parse import unquote
 
 
 #: What a caller may write on the left, the four names the engine's
@@ -100,6 +101,20 @@ def parse_proxy(proxy: Optional[Dict[str, Any]]) -> Optional[ProxyEndpoint]:
     kind = _PROXY_TYPES[scheme]
 
     rest = rest.split("/", 1)[0]
+    # Credentials in the URL (`http://user:pass@host:port`), percent-decoded
+    # as a URL's userinfo is. They were read as part of the host, the colon of
+    # `user:pass` taken for the port's. Given in the URL and in the fields
+    # too, they are refused: which pair the caller meant is a guess.
+    username = str(proxy.get("username") or "")
+    password = str(proxy.get("password") or "")
+    if "@" in rest:
+        userinfo, _, rest = rest.rpartition("@")
+        if username or password:
+            raise ValueError(
+                "proxy server %r carries credentials and so do the username "
+                "and password fields: give them in one place" % server)
+        user_text, _, password_text = userinfo.partition(":")
+        username, password = unquote(user_text), unquote(password_text)
     if rest.startswith("["):            # an IPv6 literal keeps its brackets
         host, _, tail = rest.partition("]")
         host, port_text = host[1:], (tail[1:] if tail.startswith(":") else "")
@@ -131,8 +146,8 @@ def parse_proxy(proxy: Optional[Dict[str, Any]]) -> Optional[ProxyEndpoint]:
     if isinstance(bypass, str):
         bypass = [b.strip() for b in bypass.split(",") if b.strip()]
     return ProxyEndpoint(type=kind, host=host, port=port,
-                         username=str(proxy.get("username") or ""),
-                         password=str(proxy.get("password") or ""),
+                         username=username,
+                         password=password,
                          bypass=tuple(bypass or ()))
 
 

@@ -175,7 +175,7 @@ def classify_gpu(gpu_value: Dict[str, str]) -> str:
     # NVIDIA: Firefox SanitizeRenderer.cpp collapses every GeForce into one of
     # 3 vintage buckets (8800 GTX / GTX 480 / GTX 980). The renderer string
     # exposed to JS is therefore vintage; pairing it with modern cores/screen
-    # creates an internal mismatch that FP Pro's tampering_ml flags. We pick
+    # creates an internal mismatch that the studied system's tampering_ml flags. We pick
     # `low_end` for all 3 buckets so cores stay 4-12 and screen 1080-1440p,
     # consistent with what a real user with each of those (vintage) cards
     # would have. Workstation overrides keep their high-tier classification.

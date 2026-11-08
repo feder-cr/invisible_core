@@ -354,3 +354,25 @@ def test_a_malformed_endpoint_leaves_no_half_written_prefs():
     with pytest.raises(ValueError):
         configure_proxy({"server": "socks5://host:not-a-number"}, prefs)
     assert prefs == {}, f"prefs dirtied by the refusal: {prefs}"
+
+
+# ── credentials in the URL ───────────────────────────────────────────────────
+# `http://user:pass@host:port` was read with the userinfo as part of the host:
+# the host "user:pass@proxy.example", the credentials empty, and no error. A
+# CDP server built on the core split the URL itself before handing it over.
+
+def test_credentials_in_the_url_are_the_proxys():
+    ep = parse_proxy({"server": "http://alice:s3cret@proxy.example:8080"})
+    assert (ep.host, ep.port, ep.username, ep.password) == \
+        ("proxy.example", 8080, "alice", "s3cret")
+
+
+def test_credentials_in_the_url_are_percent_decoded():
+    ep = parse_proxy({"server": "socks5://a%40b:p%3Aw%40rd@10.0.0.1:1080"})
+    assert (ep.host, ep.username, ep.password) == ("10.0.0.1", "a@b", "p:w@rd")
+
+
+def test_credentials_given_twice_are_refused():
+    with pytest.raises(ValueError, match="give them in one place"):
+        parse_proxy({"server": "http://alice:x@proxy.example:8080",
+                     "username": "bob", "password": "y"})

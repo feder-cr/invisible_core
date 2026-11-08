@@ -342,7 +342,7 @@ _WIN_WEBGPU_LIMITS = chr(10).join([
 #  The 20 `ui.font.*` also live in the binary's all.js. That copy was kept
 #  as a floor for a binary launched WITHOUT this package, because Gecko's own
 #  Linux default names "Sans" at 13.3333px, a family that does not exist on
-#  Windows (FpJS Pro tampering=True on 2026-08-07). It is a second source of
+#  Windows (the studied system tampering=True on 2026-08-07). It is a second source of
 #  truth all the same, and it was wrong on the three form-control fonts
 #  (see `_apply_fonts`): it goes with the next engine, and this is the one
 #  source (28-valori-dell-host.md A7).
@@ -410,9 +410,9 @@ _BASELINE: Dict[str, Any] = {
     "privacy.resistFingerprinting.letterboxing": False,
 
     # FF150 fingerprintingProtection - enabled by default (or remotely via
-    # Mozilla webcompat overrides). FP Pro detects the side-effects and
+    # Mozilla webcompat overrides). The studied system detects the side-effects and
     # flips `privacy_settings: true`. On FF146 these were all off → False.
-    # Force off so FP Pro reports privacy_settings:false (matches FF146).
+    # Force off so the studied system reports privacy_settings:false (matches FF146).
     "privacy.fingerprintingProtection":                              False,
     "privacy.fingerprintingProtection.pbmode":                       False,
     "privacy.fingerprintingProtection.remoteOverrides.enabled":      False,
@@ -996,7 +996,7 @@ _BASELINE: Dict[str, Any] = {
     "zoom.stealth.webgl2.extensions":                     _WEBGL2_EXTENSIONS,
     # WebGL numeric param overrides - kept empty (A/B test 2026-04-22 showed
     # mismatches between the values we shipped and ANGLE's real envelope
-    # raised FP Pro's ML tampering score). Slot kept for future experiments.
+    # raised the studied system's ML tampering score). Slot kept for future experiments.
     "zoom.stealth.webgl.int_params":                      "",
     "zoom.stealth.webgl.int2_params":                     "",
     "zoom.stealth.webgl.shader_precisions":               "",
@@ -1030,7 +1030,7 @@ _BASELINE: Dict[str, Any] = {
     "dom.webgpu.enabled":                                 True,
 
     # Audio fingerprint noise OFF. RE 2026-06-22: the per-session OfflineAudioContext
-    # noise (gated by hw_seed) was THE dominant driver of FP Pro tampering_ml on Windows
+    # noise (gated by hw_seed) was THE dominant driver of the studied system's tampering_ml on Windows
     # - b005 Win dropped 0.4349 -> 0.0564 with audio noise alone disabled (canvas_text/
     # emoji unchanged, so they were a red-herring). The audio value is already host-indep
     # AND identical to a real FF's canonical OfflineAudioContext sum, so a fixed (un-noised)
@@ -1193,15 +1193,15 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
     On Linux we spoof to a Windows ANGLE renderer string (profile.gpu.renderer)
     so cross-platform sessions report a consistent Windows GPU identity.
     On Windows/mac, spoofing a renderer string ALONE is unsafe - the ~81
-    getParameter values stay real, so a name<->params hash mismatch FP Pro flags
+    getParameter values stay real, so a name<->params hash mismatch the studied system flags
     (setting GTX 980 over real Arc A750 params scored ~0.70). Instead we apply a
     VALIDATED PERSONA (see _webgl_personas): a {renderer, vendor} whose params are
     the shared ANGLE D3D11 caps (vendor-independent - identical on any host, per the
     ANGLE source) and whose extension list is FORCED below. That is a coherent fake
-    GPU that passes FP Pro host-independently (the host's real GPU never leaks). If no
+    GPU that passes the studied system host-independently (the host's real GPU never leaks). If no
     validated persona exists for the sampled gpu_class yet, fall back to the host-real
     renderer (empty -> native ANGLE; SanitizeRenderer at ClientWebGLContext.cpp:2592).
-    Apply the camoufox-derived real-Firefox GPU persona on EVERY host (Win/Linux/Mac).
+    Apply the telemetry-derived real-Firefox GPU persona on EVERY host (Win/Linux/Mac).
     We must ALWAYS look Windows (rule), and the WebGL override is platform-independent:
     SanitizeRenderer (ClientWebGLContext.cpp) is pure string regex, and the param/extension
     overrides are pref-driven, so the C++ presents the SAME Windows ANGLE GPU regardless of
@@ -1224,7 +1224,7 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
     if persona:
         # Apply the FULL coherent WebGL override (renderer + vendor + webgl1/webgl2 extensions
         # + ~100 getParameter values + shader-precision formats). Setting ALL of them - not just
-        # the renderer string - keeps renderer<->params coherent (FP Pro cross-checks them); a
+        # the renderer string - keeps renderer<->params coherent (the studied system cross-checks them); a
         # string-only spoof over the host's real params is the old ~0.85 mismatch.
         for _k, _v in persona["prefs"].items():
             if _k == "zoom.stealth.webgl2.enabled":
@@ -1548,7 +1548,7 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     answers `font: menu` from its own per-OS defaults, which on Linux name
     "Sans" at 13.3333px - a family that does not exist on Windows, on a build
     whose every other signal says Windows. Measured 2026-08-07, that single
-    disagreement is what drove FpJS Pro to tampering=True on Linux with
+    disagreement is what drove the studied system to tampering=True on Linux with
     Windows clean, same seed and same IP.
 
     ⛔ The 20 `ui.font.*` prefs also ship compiled into the binary's all.js,
@@ -1796,6 +1796,12 @@ def _apply_locale(prefs: Dict[str, Any], locale: SessionLocale) -> None:
     # en-AU build) maps that to "en-US, en", and the session declared en-AU
     # here while navigator.language said en-US.
     prefs["intl.accept_languages"]     = locale.accept_languages
+    # The keyboards of this language in this country (German in Switzerland
+    # types on the Swiss one), the second one Windows installs with it after:
+    # one declaration, read by every client's keyboard.
+    from .juggler.keyboard import KEYBOARD_LAYOUT_PREF, layouts_for
+    prefs[KEYBOARD_LAYOUT_PREF] = ",".join(
+        layouts_for(list(locale.languages), locale.region))
     # ⛔ NO SECOND COPY OF THE WIRE HEADER. Firefox derives Accept-Language
     # from intl.accept_languages (and from a context's language override) in
     # nsHttpHandler, with the q-values of rust_prepare_accept_languages. Until
@@ -1892,7 +1898,7 @@ def _apply_render_seed(prefs: Dict[str, Any], profile: Profile) -> None:
     # alias was never declared in the yaml and read by nothing - dropped
     # 2026-06-10. The render-noise seed is DECOUPLED from the identity seed and
     # drawn from a calibrated CLEAN pool: the canvas/WebGL render HASH it drives
-    # is the dominant FP Pro tampering_ml signal, and some hw_seeds yield a
+    # is the studied system's dominant tampering_ml signal, and some hw_seeds yield a
     # "suspicious" render hash. render_noise_seed() maps to the clean pool while
     # keeping per-seed determinism + diversity. See _webgl_personas.
     prefs["zoom.stealth.fpp.hw_seed"] = render_noise_seed(profile.seed)
@@ -2159,7 +2165,7 @@ def show_cursor_prefs(show_cursor: Any) -> Dict[str, Any]:
     with nobody touching the mouse reads as "this is a bot" to anyone glancing
     at the screen. That was the argument for shipping it off, it is still the
     argument, and the owner decided on 2026-08-28 to ship it ON anyway, the way
-    Camoufox does. A caller who wants the old behaviour passes
+    other hardened Firefox builds do. A caller who wants the old behaviour passes
     `show_cursor=False` and gets it.
 
     ⛔ AND IT IS DECLARED HERE, like every other engine switch, so the browser

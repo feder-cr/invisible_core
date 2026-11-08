@@ -234,7 +234,7 @@ def test_a_renderer_the_pool_cannot_present_is_refused_not_relabelled():
     """A free string can never be honoured, so it must not be accepted.
 
     The ~81 getParameter values, the shader precisions and the extension list
-    travel with the name; a name over foreign params is the mismatch FP Pro
+    travel with the name; a name over foreign params is the mismatch the studied system
     scores at ~0.70. Accepting the string and quietly keeping the seed's persona
     is what produced a Profile that reported one GPU while the page read another."""
     with pytest.raises(ValueError) as excinfo:

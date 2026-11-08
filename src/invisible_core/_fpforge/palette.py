@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Dict
 
 # ──────────────────────────────────────────────────────────────────────
-#  System colors - FP Pro probes getComputedStyle(div) with CSS system
+#  System colors - the studied system probes getComputedStyle(div) with CSS system
 #  keywords (ButtonFace, Menu, Highlight, …) and hashes the result into
 #  signal s142. On Linux, Firefox resolves these via GTK theme → GTK
 #  RGB values diverge from Windows Win32 palette → server-side anomaly
