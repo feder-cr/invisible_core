@@ -353,9 +353,28 @@ class Keyboard:
 
     def _switch_for(self, name: str) -> None:
         """Make active the keyboard `name` is typed on, when it is another."""
-        i = self._keyboard_of(name, self._active)
-        if i is not None:
-            self._active = i
+        self._switch_to(self._keyboard_of(name, self._active))
+
+    def _switch_to(self, board: Optional[int]) -> None:
+        """Make keyboard `board` the active one, the way a user does: left Alt
+        and left Shift, Windows' default shortcut "between input languages".
+        Windows changes the layout once both are released, and the page sees
+        both keys (widget/windows hands every key message it gets to the
+        page). Nothing is sent when the keyboard is already the active one.
+        With more than two keyboards the shortcut steps to the next one, so it
+        is pressed until `board` is reached."""
+        if board is None or board == self._active:
+            return
+        while self._active != board:
+            lead_ms, lag_ms = self._plan_shift(1)[0]
+            self.down("AltLeft")
+            _sleep_ms(lead_ms)
+            self.down("ShiftLeft")
+            _sleep_ms(self._dwell_ms())
+            self.up("ShiftLeft")
+            _sleep_ms(lag_ms)
+            self.up("AltLeft")
+            self._active = (self._active + 1) % len(self.layouts)
 
     def describe(self, key: str) -> dict:
         name = "Control" if key == "ControlOrMeta" else key
@@ -565,9 +584,12 @@ class Keyboard:
                    and bool(self._closures[board][ch].get("needs_shift"))
                    and "Shift" not in self.modifiers
                    for ch, board in zip(text, boards)]
-        starts = [s and (i == 0 or not shifted[i - 1])
+        # A run ends where the keyboard changes: the switch is pressed with
+        # Shift up.
+        starts = [s and (i == 0 or not shifted[i - 1] or boards[i - 1] != boards[i])
                   for i, s in enumerate(shifted)]
-        ends = [s and (i == len(text) - 1 or not shifted[i + 1])
+        ends = [s and (i == len(text) - 1 or not shifted[i + 1]
+                       or boards[i + 1] != boards[i])
                 for i, s in enumerate(shifted)]
         timing = iter(self._plan_shift(sum(starts)))
         lead_at, lag_at = {}, {}
@@ -578,11 +600,11 @@ class Keyboard:
                 lag_at[i] = lag
         for i, ch in enumerate(text):
             dwell_ms, gap_ms = plan[i]
+            self._switch_to(boards[i])
             if starts[i]:
                 self.down("Shift")
                 _sleep_ms(lead_at[i])
             if boards[i] is not None:
-                self._active = boards[i]
                 self.press(ch, dwell_ms=dwell_ms)
             else:
                 self.insert_text(ch)

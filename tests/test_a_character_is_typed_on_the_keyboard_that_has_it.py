@@ -10,7 +10,9 @@ installs with the language (Microsoft's table of default input profiles), and
 types the `x` of an address on it, with KeyX. Now the persona has the list
 (`layouts_for`), a character goes to the first keyboard that has it, and only a
 character no keyboard has is inserted as text (Nepali in India: Windows
-installs no second keyboard).
+installs no second keyboard). The switch is pressed as a user presses it:
+left Alt and left Shift, Windows' default shortcut between input languages,
+whose key messages Firefox hands to the page.
 """
 from __future__ import annotations
 
@@ -41,6 +43,11 @@ def _keys(sent):
             else (p["type"], p["key"], p["code"]) for m, p in sent]
 
 
+#: Left Alt down, left Shift down, left Shift up, left Alt up.
+SWITCH = [("keydown", "Alt", "AltLeft"), ("keydown", "Shift", "ShiftLeft"),
+          ("keyup", "Shift", "ShiftLeft"), ("keyup", "Alt", "AltLeft")]
+
+
 @pytest.mark.parametrize("languages, region, layouts", [
     (["ru-RU"], "RU", ["00000419", "00000409"]),
     (["el-GR"], "GR", ["00000408", "00000409"]),
@@ -55,15 +62,38 @@ def test_the_keyboards_are_the_ones_windows_installs(languages, region, layouts)
 def test_a_latin_letter_on_a_russian_persona_is_typed_on_english_with_its_key():
     c, kb = _kb(layouts_for(["ru-RU"], "RU"))
     kb.press("x")
-    assert _keys(c.sent) == [("keydown", "x", "KeyX"), ("keyup", "x", "KeyX")]
+    assert _keys(c.sent) == SWITCH + [("keydown", "x", "KeyX"), ("keyup", "x", "KeyX")]
+    assert kb.layout == "00000409"
 
 
 def test_a_text_switches_keyboard_where_a_character_needs_it():
     c, kb = _kb(layouts_for(["ru-RU"], "RU"))
     kb.type("дa")
-    assert _keys(c.sent) == [("keydown", "д", "KeyL"), ("keyup", "д", "KeyL"),
-                             ("keydown", "a", "KeyA"), ("keyup", "a", "KeyA")]
+    assert _keys(c.sent) == [("keydown", "д", "KeyL"), ("keyup", "д", "KeyL")] + SWITCH + [
+        ("keydown", "a", "KeyA"), ("keyup", "a", "KeyA")]
     assert kb.layout == "00000409"
+
+
+def test_no_switch_is_pressed_for_a_character_on_the_active_keyboard():
+    c, kb = _kb(layouts_for(["ru-RU"], "RU"))
+    kb.type("да")
+    kb.press("x")
+    c.sent.clear()
+    kb.type("ab.")
+    kb.press("Enter")
+    assert not [k for k in _keys(c.sent) if k[1] == "Alt"]
+
+
+def test_a_shifted_run_is_cut_where_the_keyboard_changes():
+    """Shift is up while the switch is pressed: `ДX` is Shift+Д, the switch,
+    then Shift+X, not one run under one Shift."""
+    c, kb = _kb(layouts_for(["ru-RU"], "RU"))
+    kb.type("ДX")
+    keys = _keys(c.sent)
+    alt = keys.index(("keydown", "Alt", "AltLeft"))
+    assert keys[alt - 1] == ("keyup", "Shift", "ShiftLeft")
+    assert keys[alt:alt + 4] == SWITCH
+    assert keys[alt + 4] == ("keydown", "Shift", "ShiftLeft")
 
 
 def test_the_switched_keyboard_stays_until_a_character_needs_another():
