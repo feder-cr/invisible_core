@@ -148,7 +148,6 @@ _WIN_DARK_COLORS: Dict[str, str] = {
     "ui.-moz-field.dark":             "#2B2A33",
     "ui.-moz-fieldtext.dark":         "#FBFBFE",
     "ui.highlight.dark":              "#00DDFF4E",
-    "ui.highlighttext.dark":          "#000000",
     "ui.selecteditem.dark":           "#00DDFF",
     "ui.selecteditemtext.dark":       "#2B2A33",
     "ui.-moz-dialog.dark":            "#23222B",

@@ -23,7 +23,7 @@ TABLE = [
     ("ui.highlight", "#0078D4", "#00DDFF4E"),
     ("ui.selecteditem", "#0078D4", "#00DDFF"),
     ("ui.selecteditemtext", "#FFFFFF", "#2B2A33"),
-    ("ui.highlighttext", "#FFFFFF", None),
+    ("ui.highlighttext", "#FFFFFF", None),  # dark: the text colour, set by the engine (retail GenericDarkColor)
     ("ui.mark", "#FFFF00", None),
     ("ui.marktext", "#000000", None),
     ("ui.accentcolor", "#0060DF", None),
@@ -45,4 +45,4 @@ def test_every_system_colour_is_retail_159(seed, dark_theme):
             assert prefs.get(name + ".dark") == dark, name
         else:
             # the dark scheme falls back to the plain pref (GetColorFromPref)
-            assert name + ".dark" not in prefs or name == "ui.highlighttext", name
+            assert name + ".dark" not in prefs, name
