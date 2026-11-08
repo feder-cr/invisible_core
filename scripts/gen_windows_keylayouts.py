@@ -951,6 +951,22 @@ def locale_klids() -> dict:
     return out
 
 
+def locale_secondaries() -> dict:
+    """tag -> the second keyboard Windows installs with the language, from the
+    same table: what a user of a language whose keyboard lacks a character (a
+    Latin letter on a Russian or Greek keyboard) switches to and types it on.
+    Only for a row whose primary is a keyboard; under an IME the keyboard is
+    already the one Latin text is typed on."""
+    out = {}
+    for p in PROFILES:
+        tag = p["tag"]
+        if not tag or tag in out or not p["primary"]:
+            continue
+        if p["secondary"] and p["secondary"] != p["primary"]:
+            out[tag] = p["secondary"]
+    return out
+
+
 def language_main_tags() -> dict:
     """language -> the tag of Microsoft's row for the language itself (no region in its name)."""
     out = {}
@@ -961,7 +977,7 @@ def language_main_tags() -> dict:
 
 
 def build(dll_dir: pathlib.Path) -> dict:
-    klids = sorted(set(locale_klids().values()))
+    klids = sorted(set(locale_klids().values()) | set(locale_secondaries().values()))
     layouts, refused = {}, []
     for klid in klids:
         name = FILES[klid].lower()
@@ -973,7 +989,8 @@ def build(dll_dir: pathlib.Path) -> dict:
         layouts[klid] = layout_from_bytes(data)
     if refused:
         raise SystemExit("refused, not the pinned Windows files:\n  " + "\n  ".join(refused))
-    return {"layouts": layouts, "locale": locale_klids(), "main": language_main_tags(),
+    return {"layouts": layouts, "locale": locale_klids(), "secondary": locale_secondaries(),
+            "main": language_main_tags(),
             "names": {k: NAMES[k] for k in klids}}
 
 
@@ -986,11 +1003,14 @@ def render(b: dict) -> str:
         "Windows 11 (26100) layout files; do not hand-edit.\n\n"
         "LAYOUTS: KLID -> {hasAltGr, keys: DOM code -> keyCode, key, shiftKey, altGrKey,\n"
         "shiftAltGrKey, dead}. LOCALE_KLID: language tag -> KLID (Microsoft's default\n"
-        "input profiles). LANGUAGE_MAIN_TAG: language -> the tag of its own row.\n"
+        "input profiles). LOCALE_SECONDARY: language tag -> the second keyboard Windows\n"
+        "installs with it. LANGUAGE_MAIN_TAG: language -> the tag of its own row.\n"
         '"""\n'
         "from __future__ import annotations\n\n"
-        "#: %d layouts.\nLAYOUT_NAMES = %s\n\nLOCALE_KLID = %s\n\nLANGUAGE_MAIN_TAG = %s\n\nLAYOUTS = %s\n"
-        % (len(b["layouts"]), lit(b["names"]), lit(b["locale"]), lit(b["main"]), lit(b["layouts"])))
+        "#: %d layouts.\nLAYOUT_NAMES = %s\n\nLOCALE_KLID = %s\n\nLOCALE_SECONDARY = %s\n\n"
+        "LANGUAGE_MAIN_TAG = %s\n\nLAYOUTS = %s\n"
+        % (len(b["layouts"]), lit(b["names"]), lit(b["locale"]), lit(b["secondary"]),
+           lit(b["main"]), lit(b["layouts"])))
 
 
 def main() -> int:

@@ -35,7 +35,7 @@ import time
 from typing import Optional
 
 from .keylayout import LAYOUT
-from .keylayouts_windows import LANGUAGE_MAIN_TAG, LOCALE_KLID
+from .keylayouts_windows import LANGUAGE_MAIN_TAG, LOCALE_KLID, LOCALE_SECONDARY
 from .keylayouts_windows import LAYOUTS as WINDOWS_LAYOUTS
 
 #: The four that count as modifiers, in the driver's order.
@@ -86,12 +86,44 @@ LAYOUT_ALIASES = {"us": US, "it": "00000410", "de": "00000407", "fr": "0000040C"
 _MAIN_TAG = {"en": "en-US"}
 
 
-def _klid_of_tag(tag: str) -> Optional[str]:
+def _row_of_tag(tag: str) -> Optional[str]:
+    """The row of Microsoft's table a tag reads: its own, else its language's."""
     if tag in LOCALE_KLID:
-        return LOCALE_KLID[tag]
+        return tag
     lang = tag.split("-")[0]
     main = _MAIN_TAG.get(lang) or LANGUAGE_MAIN_TAG.get(lang)
-    return LOCALE_KLID.get(main) if main else None
+    return main if main in LOCALE_KLID else None
+
+
+def _klid_of_tag(tag: str) -> Optional[str]:
+    row = _row_of_tag(tag)
+    return LOCALE_KLID[row] if row else None
+
+
+def _row_for(languages, region: Optional[str]) -> Optional[str]:
+    """The row of Microsoft's table a session's keyboard comes from (see
+    `layout_for`), or None for the US keyboard nothing named."""
+    if isinstance(languages, str):
+        languages = [t.strip() for t in languages.split(",") if t.strip()]
+    if not languages:
+        return None
+    parts = languages[0].replace("_", "-").split("-")
+    lang = parts[0].lower()
+    reg = (region or next((x for x in parts[1:] if len(x) == 2), "")).upper()
+    if reg and "%s-%s" % (lang, reg) in LOCALE_KLID:
+        return "%s-%s" % (lang, reg)
+    row = _row_of_tag(languages[0]) or _row_of_tag(lang)
+    if row:
+        return row
+    if reg:
+        from .._locale import _COUNTRY_FIREFOX_BUILDS
+        for build, _share in _COUNTRY_FIREFOX_BUILDS.get(reg, ()):
+            row = ("%s-%s" % (build.split("-")[0], reg)
+                   if "%s-%s" % (build.split("-")[0], reg) in LOCALE_KLID
+                   else _row_of_tag(build))
+            if row:
+                return row
+    return None
 
 
 def layout_for(languages, region: Optional[str] = None) -> str:
@@ -104,25 +136,24 @@ def layout_for(languages, region: Optional[str] = None) -> str:
     Sardinian...), the keyboard of the country's main language, which is what
     its speakers have; else the US keyboard. An IME language types Latin text
     through the keyboard under its IME. Nothing here reads the host."""
-    if isinstance(languages, str):
-        languages = [t.strip() for t in languages.split(",") if t.strip()]
-    if not languages:
-        return US
-    parts = languages[0].replace("_", "-").split("-")
-    lang = parts[0].lower()
-    reg = (region or next((x for x in parts[1:] if len(x) == 2), "")).upper()
-    if reg and "%s-%s" % (lang, reg) in LOCALE_KLID:
-        return LOCALE_KLID["%s-%s" % (lang, reg)]
-    klid = _klid_of_tag(languages[0]) or _klid_of_tag(lang)
-    if klid:
-        return klid
-    if reg:
-        from .._locale import _COUNTRY_FIREFOX_BUILDS
-        for build, _share in _COUNTRY_FIREFOX_BUILDS.get(reg, ()):
-            klid = LOCALE_KLID.get("%s-%s" % (build.split("-")[0], reg)) or _klid_of_tag(build)
-            if klid:
-                return klid
-    return US
+    row = _row_for(languages, region)
+    return LOCALE_KLID[row] if row else US
+
+
+def layouts_for(languages, region: Optional[str] = None) -> list:
+    """Every keyboard the session's Windows has, in order: `layout_for`'s, then
+    the second one Windows installs with that language by Microsoft's table of
+    default input profiles (English US with Russian, Greek, Arabic, Hebrew and
+    most languages whose script is not Latin). A user types a character their
+    keyboard lacks by switching to the next one that has it."""
+    row = _row_for(languages, region)
+    if not row:
+        return [US]
+    out = [LOCALE_KLID[row]]
+    second = LOCALE_SECONDARY.get(row)
+    if second and second not in out:
+        out.append(second)
+    return out
 
 
 def _layout_table(layout: str) -> dict:
@@ -247,7 +278,7 @@ class Keyboard:
     """
 
     def __init__(self, connection, session: str, persona=None, *, acts,
-                 latency=None, layout: str = "us"):
+                 latency=None, layout="us"):
         self.c = connection
         self.session = session
         self.modifiers: set = set()
@@ -256,10 +287,20 @@ class Keyboard:
         #: of the same key releases it; the same for AltGraph.
         self._implicit_shift: set = set()
         self._implicit_altgr: set = set()
-        #: The keyboard this persona types on (`layout_for`): which key a
-        #: character is, and with which modifiers. "us" when nothing says.
-        self.layout = layout
-        self._closure = closure_for(layout)
+        #: The keyboards this persona has (`layouts_for`), the first one
+        #: active: which key a character is, and with which modifiers. A list,
+        #: or one KLID, or KLIDs joined by commas; "us" when nothing says.
+        #:
+        #: ⛔ A CHARACTER THE ACTIVE KEYBOARD LACKS IS TYPED ON THE NEXT ONE
+        #: THAT HAS IT, with its key events, as a user switches layout to type
+        #: it: a Russian user writes the `x` of an address on English (US),
+        #: with KeyX. The keyboard stays active until a character needs
+        #: another. Only a character no keyboard has is inserted as text.
+        if isinstance(layout, str):
+            layout = [l.strip() for l in layout.split(",") if l.strip()] or ["us"]
+        self.layouts = list(layout)
+        self._closures = [closure_for(l) for l in self.layouts]
+        self._active = 0
         #: ⛔ THE RHYTHM HAS AN OWNER NOW, and this is it.
         #:
         #: A keypress used to be two protocol messages back to back, so a page
@@ -290,6 +331,51 @@ class Keyboard:
         self.latency = latency
 
     # ── the resolution ──────────────────────────────────────────────────────
+    @property
+    def layout(self) -> str:
+        """The active keyboard."""
+        return self.layouts[self._active]
+
+    @property
+    def _closure(self) -> dict:
+        return self._closures[self._active]
+
+    def _keyboard_of(self, name: str, active: int) -> Optional[int]:
+        """Which keyboard `name` is typed on with `active` the active one: the
+        active one if it has it, else the first one that does; None when none
+        has it."""
+        if name in self._closures[active]:
+            return active
+        for i, closure in enumerate(self._closures):
+            if name in closure:
+                return i
+        return None
+
+    def _switch_for(self, name: str) -> None:
+        """Make active the keyboard `name` is typed on, when it is another."""
+        self._switch_to(self._keyboard_of(name, self._active))
+
+    def _switch_to(self, board: Optional[int]) -> None:
+        """Make keyboard `board` the active one, the way a user does: left Alt
+        and left Shift, Windows' default shortcut "between input languages".
+        Windows changes the layout once both are released, and the page sees
+        both keys (widget/windows hands every key message it gets to the
+        page). Nothing is sent when the keyboard is already the active one.
+        With more than two keyboards the shortcut steps to the next one, so it
+        is pressed until `board` is reached."""
+        if board is None or board == self._active:
+            return
+        while self._active != board:
+            lead_ms, lag_ms = self._plan_shift(1)[0]
+            self.down("AltLeft")
+            _sleep_ms(lead_ms)
+            self.down("ShiftLeft")
+            _sleep_ms(self._dwell_ms())
+            self.up("ShiftLeft")
+            _sleep_ms(lag_ms)
+            self.up("AltLeft")
+            self._active = (self._active + 1) % len(self.layouts)
+
     def describe(self, key: str) -> dict:
         name = "Control" if key == "ControlOrMeta" else key
         d = self._closure.get(name)
@@ -342,6 +428,7 @@ class Keyboard:
         # this hand; this is the floor under every other way in - a raw
         # `keyboard.down("@")` - so no path can send `@` with `shiftKey:
         # false`, which no keyboard produces. Released by `up` of the same key.
+        self._switch_for(key)
         if self.needs_altgr(key) and "AltGraph" not in self.modifiers:
             self.down("AltGraph")
             self._implicit_altgr.add(self._closure[key]["code"])
@@ -428,6 +515,7 @@ class Keyboard:
         # ⛔ AND ONE THAT ONLY EXISTS WITH ALTGR GETS ALTGRAPH the same way:
         # `press("@")` on an Italian keyboard is AltGr+ò, `press("{")` is
         # AltGr+Shift+è. Each held modifier has its own lead and release.
+        self._switch_for(final)
         holds = [m for m, needed in (("AltGraph", self.needs_altgr(final)),
                                      ("Shift", self.needs_shift(final)))
                  if needed and m not in self.modifiers and m not in held]
@@ -479,16 +567,29 @@ class Keyboard:
         asks for anything.
         """
         plan = self._plan(text)
+        # The keyboard each character is typed on, decided before the first
+        # key: the Shift runs below depend on it.
+        boards, active = [], self._active
+        for ch in text:
+            board = self._keyboard_of(ch, active)
+            boards.append(board)
+            if board is not None:
+                active = board
         # ⛔ A RUN OF CHARACTERS THAT ONLY EXIST WITH SHIFT IS TYPED UNDER ONE
         # SHIFT, the way a hand types `ABC` or `!!` (B270). Shift goes down
         # its lead before the run's first key and comes up its lag after the
         # run's last; both are taken out of the gaps around the run, so the
         # per-key rhythm `plan_typing` drew stays what it was.
-        shifted = [self.needs_shift(ch) and "Shift" not in self.modifiers
-                   for ch in text]
-        starts = [s and (i == 0 or not shifted[i - 1])
+        shifted = [board is not None
+                   and bool(self._closures[board][ch].get("needs_shift"))
+                   and "Shift" not in self.modifiers
+                   for ch, board in zip(text, boards)]
+        # A run ends where the keyboard changes: the switch is pressed with
+        # Shift up.
+        starts = [s and (i == 0 or not shifted[i - 1] or boards[i - 1] != boards[i])
                   for i, s in enumerate(shifted)]
-        ends = [s and (i == len(text) - 1 or not shifted[i + 1])
+        ends = [s and (i == len(text) - 1 or not shifted[i + 1]
+                       or boards[i + 1] != boards[i])
                 for i, s in enumerate(shifted)]
         timing = iter(self._plan_shift(sum(starts)))
         lead_at, lag_at = {}, {}
@@ -499,10 +600,11 @@ class Keyboard:
                 lag_at[i] = lag
         for i, ch in enumerate(text):
             dwell_ms, gap_ms = plan[i]
+            self._switch_to(boards[i])
             if starts[i]:
                 self.down("Shift")
                 _sleep_ms(lead_at[i])
-            if ch in self._closure:
+            if boards[i] is not None:
                 self.press(ch, dwell_ms=dwell_ms)
             else:
                 self.insert_text(ch)
