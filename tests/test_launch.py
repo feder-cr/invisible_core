@@ -195,3 +195,39 @@ def test_build_launch_env_no_proxy_no_webrtc_no_tz():
 def test_build_launch_env_caller_webrtc_wins():
     env = build_launch_env({}, srflx_declared="203.0.113.9", base_env={"STEALTHFOX_WEBRTC_PUBLIC_IP": "198.51.100.1"})
     assert env["STEALTHFOX_WEBRTC_PUBLIC_IP"] == "198.51.100.1"
+
+
+# ── what the browser takes from the machine's environment ────────────────────
+# Until 59.57.0 the whole of os.environ went into the browser: a machine's
+# FREETYPE_PROPERTIES changed glyph hinting, FONTCONFIG_* chose fonts,
+# LD_PRELOAD / LD_LIBRARY_PATH loaded other libraries into the engine, and its
+# proxy variables, its MOZ_* switches, its locale and even a GITHUB_TOKEN were
+# handed to Firefox. Now only the variables a process needs to start, named one
+# by one, and the package's own, go in.
+
+HOST = {
+    "FREETYPE_PROPERTIES": "truetype:interpreter-version=35",
+    "FONTCONFIG_FILE": "/etc/fonts/other.conf", "FONTCONFIG_PATH": "/etc/fonts",
+    "LD_PRELOAD": "/usr/lib/libhook.so", "LD_LIBRARY_PATH": "/opt/libs",
+    "HTTP_PROXY": "http://10.0.0.1:3128", "https_proxy": "http://10.0.0.1:3128",
+    "MOZ_DISABLE_CONTENT_SANDBOX": "1", "LANG": "ja_JP.UTF-8", "LC_ALL": "ja_JP.UTF-8",
+    "GITHUB_TOKEN": "ghp_secret", "SESSIONNAME": "Console",
+    "PATH": "/usr/bin", "HOME": "/home/u", "DISPLAY": ":0", "XAUTHORITY": "/home/u/.Xauthority",
+    "SystemRoot": r"C:\Windows", "LOCALAPPDATA": r"C:\Users\u\AppData\Local",
+    "MOZ_LOG": "StealthMedia:5", "INVPW_SESSION_TOKEN": "t", "STEALTHFOX_GEOIP_MMDB": "/x.mmdb",
+}
+
+
+def test_the_machine_s_font_library_and_proxy_settings_stay_behind():
+    env = build_launch_env({}, base_env=dict(HOST))
+    for name in ("FREETYPE_PROPERTIES", "FONTCONFIG_FILE", "FONTCONFIG_PATH", "LD_PRELOAD",
+                 "LD_LIBRARY_PATH", "HTTP_PROXY", "https_proxy", "MOZ_DISABLE_CONTENT_SANDBOX",
+                 "LANG", "LC_ALL", "GITHUB_TOKEN", "SESSIONNAME"):
+        assert name not in env, name
+
+
+def test_what_a_process_needs_to_start_and_our_own_variables_go_in():
+    env = build_launch_env({}, base_env=dict(HOST))
+    for name in ("PATH", "HOME", "DISPLAY", "XAUTHORITY", "SystemRoot", "LOCALAPPDATA",
+                 "MOZ_LOG", "INVPW_SESSION_TOKEN", "STEALTHFOX_GEOIP_MMDB"):
+        assert env[name] == HOST[name], name

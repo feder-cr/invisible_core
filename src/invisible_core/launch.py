@@ -112,6 +112,42 @@ def tz_env(timezone: str) -> str:
 #: one environment for both builds is the thing that cannot drift.
 _DISPLAY_BACKEND = {"MOZ_ENABLE_WAYLAND": "0", "GDK_BACKEND": "x11"}
 
+#: ⛔ WHAT THE BROWSER MAY TAKE FROM THE MACHINE'S ENVIRONMENT, BY NAME. Every
+#: other variable stays behind. Until 59.57.0 the whole of `os.environ` went in,
+#: so a machine's FREETYPE_PROPERTIES changed how glyphs are hinted, its
+#: FONTCONFIG_* chose the fonts fontconfig reads, LD_PRELOAD / LD_LIBRARY_PATH
+#: loaded other libraries into the engine, its proxy variables and its MOZ_*
+#: switches reached Firefox: values a page can measure, decided by the host.
+#: What is let through is what a process needs to start and to find its own
+#: session: where Windows and the user's folders are, the executable search
+#: path, the temporary directory (the session's own, set by SessionFiles), the
+#: display and the session bus on Linux (the hidden surface overrides them), and
+#: the debug log, which a page never sees. The locale of the machine (LANG,
+#: LC_*) stays behind too: Firefox's languages come from the profile.
+_HOST_ENV_ALLOWED = frozenset(name.upper() for name in (
+    # Windows: where the system and the user's folders are
+    "SystemRoot", "windir", "SystemDrive", "ComSpec", "PATHEXT",
+    "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+    "CommonProgramFiles", "CommonProgramFiles(x86)", "CommonProgramW6432",
+    "ALLUSERSPROFILE", "PUBLIC", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    "APPDATA", "LOCALAPPDATA",
+    # both
+    "PATH", "TEMP", "TMP", "TMPDIR", "HOME",
+    # Linux: the user's session and its display
+    "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "XAUTHORITY",
+    "WAYLAND_DISPLAY",
+    # the engine's debug log: written to a file, seen by no page
+    "MOZ_LOG", "MOZ_LOG_FILE",
+))
+#: Variables of ours: the package's own switches, and what a launcher stamps.
+_OWN_ENV_PREFIXES = ("STEALTHFOX_", "INVPW_", "INVISIBLE_")
+
+
+def _host_env(base: Dict[str, str]) -> Dict[str, str]:
+    """The part of the machine's environment the browser may take (above)."""
+    return {k: v for k, v in base.items()
+            if k.upper() in _HOST_ENV_ALLOWED or k.upper().startswith(_OWN_ENV_PREFIXES)}
+
 
 def build_launch_env(
     prefs: Dict[str, Any],
@@ -171,7 +207,7 @@ def build_launch_env(
             "engine reads the session's zone from juggler.timezone.override, not "
             "from TZ. It will be removed in the next release.",
             DeprecationWarning, stacklevel=2)
-    env = dict(os.environ if base_env is None else base_env)
+    env = _host_env(dict(os.environ if base_env is None else base_env))
     if manifest_path is not None:
         # An already-set value in base_env wins, same rule as the WebRTC IP:
         # an A/B harness has to be able to point this somewhere else.
