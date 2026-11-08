@@ -35,7 +35,7 @@ import time
 from typing import Optional
 
 from .keylayout import LAYOUT
-from .keylayouts_windows import LANGUAGE_MAIN_TAG, LOCALE_KLID, LOCALE_SECONDARY
+from .keylayouts_windows import LOCALE_KEYBOARDS, LOCALE_KLID
 from .keylayouts_windows import LAYOUTS as WINDOWS_LAYOUTS
 
 #: The four that count as modifiers, in the driver's order.
@@ -77,8 +77,8 @@ class UnknownKey(ValueError):
     an empty event: a `keyCode: 0` does not fail, it lies."""
 
 
-#: The persona's keyboards, KLIDs joined by commas, the language's first
-#: (`layouts_for`). Declared once, with the session's language and country,
+#: The persona's keyboards, as Windows writes its input profiles: LANGID:KLID
+#: joined by semicolons, the language's first (`profiles_for`). Declared once, with the session's language and country,
 #: by `prefs._apply_locale`; server-only: `instance.launch` and the wrapper's
 #: server take it out of the prefs before the profile is written, and hand it
 #: to every page's keyboard.
@@ -89,17 +89,20 @@ KEYBOARD_LAYOUT_PREF = "invisible.server.keyboard_layout"
 US = "00000409"
 LAYOUT_ALIASES = {"us": US, "it": "00000410", "de": "00000407", "fr": "0000040C",
            "es": "0000040A", "br": "00000416", "uk": "00000809"}
-#: A bare language whose own row in Microsoft's table is not its main market.
-_MAIN_TAG = {"en": "en-US"}
+#: The primary languages (LANGID & 0x3ff) whose system is written right to
+#: left, as win32kbase's RIMIsDefaultUILanguageRTL lists them (26300.9711):
+#: Arabic, Hebrew, Urdu, Persian, Sindhi, Syriac, Pashto, Divehi, Uyghur,
+#: Dari, Central Kurdish; and four whole LANGIDs.
+_RTL_PRIMARY = {0x01, 0x0D, 0x20, 0x29, 0x59, 0x5A, 0x63, 0x65, 0x80, 0x8C, 0x92}
+_RTL_LANGIDS = {0x0846, 0x0850, 0x0860, 0x7C46, 0x7C50}
 
 
 def _row_of_tag(tag: str) -> Optional[str]:
-    """The row of Microsoft's table a tag reads: its own, else its language's."""
+    """The locale of Windows a tag reads: its own, else its language's."""
     if tag in LOCALE_KLID:
         return tag
     lang = tag.split("-")[0]
-    main = _MAIN_TAG.get(lang) or LANGUAGE_MAIN_TAG.get(lang)
-    return main if main in LOCALE_KLID else None
+    return lang if lang in LOCALE_KLID else None
 
 
 def _klid_of_tag(tag: str) -> Optional[str]:
@@ -147,20 +150,31 @@ def layout_for(languages, region: Optional[str] = None) -> str:
     return LOCALE_KLID[row] if row else US
 
 
-def layouts_for(languages, region: Optional[str] = None) -> list:
-    """Every keyboard the session's Windows has, in order: `layout_for`'s, then
-    the second one Windows installs with that language by Microsoft's table of
-    default input profiles (English US with Russian, Greek, Arabic, Hebrew and
-    most languages whose script is not Latin). A user types a character their
-    keyboard lacks by switching to the next one that has it."""
+def profiles_for(languages, region: Optional[str] = None) -> list:
+    """Every input profile the session's Windows has, in Windows' order, as
+    (LANGID, KLID): what Windows installs with the language in that country,
+    the keyboards-to-install of its locale (locale.nls). Russian has Russian
+    and English US; Persian has Persian, Persian (Standard) and English US;
+    Armenian has two Armenian keyboards and Russian. A user types a character
+    the active keyboard lacks by switching to one that has it."""
     row = _row_for(languages, region)
     if not row:
-        return [US]
-    out = [LOCALE_KLID[row]]
-    second = LOCALE_SECONDARY.get(row)
-    if second and second not in out:
-        out.append(second)
+        return [("0409", US)]
+    return [tuple(p) for p in LOCALE_KEYBOARDS[row]]
+
+
+def layouts_for(languages, region: Optional[str] = None) -> list:
+    """The KLIDs of `profiles_for`, in order, once each."""
+    out = []
+    for _lang, klid in profiles_for(languages, region):
+        if klid not in out:
+            out.append(klid)
     return out
+
+
+def profiles_pref(languages, region: Optional[str] = None) -> str:
+    """`profiles_for` as Windows writes it: LANGID:KLID joined by semicolons."""
+    return ";".join("%s:%s" % p for p in profiles_for(languages, region))
 
 
 def _layout_table(layout: str) -> dict:
@@ -276,6 +290,23 @@ def closure_for(layout: str) -> dict:
 LAYOUT_CLOSURE = closure_for("us")
 
 
+def _parse_profiles(layout) -> list:
+    """(LANGID, KLID) pairs from Windows' form, KLIDs joined by commas (each its
+    own language, numbered), or a list of either."""
+    if isinstance(layout, str):
+        layout = [x.strip() for x in layout.replace(";", ",").split(",") if x.strip()] or ["us"]
+    out = []
+    for n, item in enumerate(layout):
+        if isinstance(item, (tuple, list)):
+            lang, klid = item
+        elif ":" in item:
+            lang, klid = item.split(":", 1)
+        else:
+            lang, klid = "%04x" % (0xF000 + n), item
+        out.append((lang.lower(), klid if klid in LAYOUT_ALIASES else klid.upper()))
+    return out
+
+
 class Keyboard:
     """The state of modifiers and pressed keys, plus the four verbs.
 
@@ -294,20 +325,34 @@ class Keyboard:
         #: of the same key releases it; the same for AltGraph.
         self._implicit_shift: set = set()
         self._implicit_altgr: set = set()
-        #: The keyboards this persona has (`layouts_for`), the first one
-        #: active: which key a character is, and with which modifiers. A list,
-        #: or one KLID, or KLIDs joined by commas; "us" when nothing says.
+        #: The input profiles this persona has (`profiles_for`), the first one
+        #: active: which key a character is, and with which modifiers. Windows'
+        #: own form (LANGID:KLID joined by semicolons), or KLIDs joined by
+        #: commas (each its own language), or a list; "us" when nothing says.
         #:
-        #: ⛔ A CHARACTER THE ACTIVE KEYBOARD LACKS IS TYPED ON THE NEXT ONE
-        #: THAT HAS IT, with its key events, as a user switches layout to type
-        #: it: a Russian user writes the `x` of an address on English (US),
-        #: with KeyX. The keyboard stays active until a character needs
-        #: another. Only a character no keyboard has is inserted as text.
-        if isinstance(layout, str):
-            layout = [l.strip() for l in layout.split(",") if l.strip()] or ["us"]
-        self.layouts = list(layout)
+        #: ⛔ A CHARACTER THE ACTIVE KEYBOARD LACKS IS TYPED ON ONE THAT HAS
+        #: IT, with its key events, switched to as a user switches: left Alt +
+        #: left Shift to the next input language, Ctrl + Shift to the next
+        #: keyboard of the same language (msctf's defaults with no Toggle
+        #: values). Windows keeps one active keyboard per language, and so does
+        #: this class. Only a character no keyboard has is inserted as text.
+        self.profiles = _parse_profiles(layout)
+        self.layouts = [klid for _lang, klid in self.profiles]
         self._closures = [closure_for(l) for l in self.layouts]
+        self._languages = list(dict.fromkeys(lang for lang, _klid in self.profiles))
+        #: The active keyboard of each language, as Windows remembers it.
+        self._current = {lang: next(i for i, (l, _k) in enumerate(self.profiles) if l == lang)
+                         for lang in self._languages}
         self._active = 0
+        #: ⛔ AN OPEN CASE, DECLARED: a right-to-left system. msctf gives the
+        #: switch between keyboards of one language no shortcut when
+        #: SM_MIDEASTENABLED is set, and what sets it is not yet known (the
+        #: bit of gpsi->dwSRVIFlags; win32k's RTL test reads the UI language).
+        #: Until it is, a persona whose language is written right to left
+        #: never switches keyboard inside a language: a character only another
+        #: keyboard of the same language has is inserted as text.
+        first = int(self.profiles[0][0], 16)
+        self._intra_switch = not ((first & 0x3FF) in _RTL_PRIMARY or first in _RTL_LANGIDS)
         #: ⛔ THE RHYTHM HAS AN OWNER NOW, and this is it.
         #:
         #: A keypress used to be two protocol messages back to back, so a page
@@ -347,41 +392,75 @@ class Keyboard:
     def _closure(self) -> dict:
         return self._closures[self._active]
 
-    def _keyboard_of(self, name: str, active: int) -> Optional[int]:
+    def _reachable(self, board: int, current: dict) -> bool:
+        """Whether a user can make `board` active: always, unless switching
+        inside a language has no shortcut (the open right-to-left case), when
+        only each language's active keyboard is reachable."""
+        return self._intra_switch or current[self.profiles[board][0]] == board
+
+    def _keyboard_of(self, name: str, active: int, current: Optional[dict] = None) -> Optional[int]:
         """Which keyboard `name` is typed on with `active` the active one: the
-        active one if it has it, else the first one that does; None when none
-        has it."""
+        active one if it has it, else the reachable one that does in the fewest
+        presses, as a user goes (back to Armenian, a letter both Armenian
+        keyboards have is typed on the one Armenian was left on), Windows' order
+        breaking a tie; None when none has it."""
+        current = self._current if current is None else current
         if name in self._closures[active]:
             return active
+        best = None
         for i, closure in enumerate(self._closures):
-            if name in closure:
-                return i
-        return None
+            if name in closure and self._reachable(i, current):
+                alt, ctrl, _a, _c = self._steps(i, active, current)
+                if best is None or alt + ctrl < best[0]:
+                    best = (alt + ctrl, i)
+        return None if best is None else best[1]
 
     def _switch_for(self, name: str) -> None:
         """Make active the keyboard `name` is typed on, when it is another."""
         self._switch_to(self._keyboard_of(name, self._active))
 
+    def _chord(self, first: str) -> None:
+        """`first` + left Shift, pressed and released with this hand's timing:
+        Windows switches once both are up, and the page sees both keys
+        (widget/windows hands every key message it gets to the page)."""
+        lead_ms, lag_ms = self._plan_shift(1)[0]
+        self.down(first)
+        _sleep_ms(lead_ms)
+        self.down("ShiftLeft")
+        _sleep_ms(self._dwell_ms())
+        self.up("ShiftLeft")
+        _sleep_ms(lag_ms)
+        self.up(first)
+
+    def _steps(self, board: int, active: int, current: dict) -> tuple:
+        """(Alt+Shift presses, Ctrl+Shift presses) from `active` to `board`, and
+        the state after: languages step forward in their order, the keyboards
+        of one language in theirs, and a language comes back on the keyboard it
+        was left on."""
+        lang = self.profiles[board][0]
+        alt = 0
+        if lang != self.profiles[active][0]:
+            order = self._languages
+            alt = (order.index(lang) - order.index(self.profiles[active][0])) % len(order)
+            active = current[lang]
+        ctrl = 0
+        if active != board:
+            own = [i for i, (l, _k) in enumerate(self.profiles) if l == lang]
+            ctrl = (own.index(board) - own.index(active)) % len(own)
+        current = dict(current, **{lang: board})
+        return alt, ctrl, board, current
+
     def _switch_to(self, board: Optional[int]) -> None:
         """Make keyboard `board` the active one, the way a user does: left Alt
-        and left Shift, Windows' default shortcut "between input languages".
-        Windows changes the layout once both are released, and the page sees
-        both keys (widget/windows hands every key message it gets to the
-        page). Nothing is sent when the keyboard is already the active one.
-        With more than two keyboards the shortcut steps to the next one, so it
-        is pressed until `board` is reached."""
+        + left Shift until its language, then Ctrl + Shift until the keyboard.
+        Nothing is sent when it is already the active one."""
         if board is None or board == self._active:
             return
-        while self._active != board:
-            lead_ms, lag_ms = self._plan_shift(1)[0]
-            self.down("AltLeft")
-            _sleep_ms(lead_ms)
-            self.down("ShiftLeft")
-            _sleep_ms(self._dwell_ms())
-            self.up("ShiftLeft")
-            _sleep_ms(lag_ms)
-            self.up("AltLeft")
-            self._active = (self._active + 1) % len(self.layouts)
+        alt, ctrl, self._active, self._current = self._steps(board, self._active, self._current)
+        for _ in range(alt):
+            self._chord("AltLeft")
+        for _ in range(ctrl):
+            self._chord("ControlLeft")
 
     def describe(self, key: str) -> dict:
         name = "Control" if key == "ControlOrMeta" else key
@@ -576,12 +655,12 @@ class Keyboard:
         plan = self._plan(text)
         # The keyboard each character is typed on, decided before the first
         # key: the Shift runs below depend on it.
-        boards, active = [], self._active
+        boards, active, current = [], self._active, dict(self._current)
         for ch in text:
-            board = self._keyboard_of(ch, active)
+            board = self._keyboard_of(ch, active, current)
             boards.append(board)
-            if board is not None:
-                active = board
+            if board is not None and board != active:
+                _a, _c, active, current = self._steps(board, active, current)
         # ⛔ A RUN OF CHARACTERS THAT ONLY EXIST WITH SHIFT IS TYPED UNDER ONE
         # SHIFT, the way a hand types `ABC` or `!!` (B270). Shift goes down
         # its lead before the run's first key and comes up its lag after the

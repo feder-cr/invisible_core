@@ -165,9 +165,9 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
         # The persona's keyboards, out of the prefs like the seed: declared by
         # `prefs._apply_locale`; from the language alone when a caller wrote
         # its prefs without it.
-        from .keyboard import KEYBOARD_LAYOUT_PREF, layouts_for
-        layout = browser_prefs.pop(KEYBOARD_LAYOUT_PREF, None) or ",".join(
-            layouts_for(browser_prefs.get("intl.accept_languages") or ""))
+        from .keyboard import KEYBOARD_LAYOUT_PREF, profiles_pref
+        layout = browser_prefs.pop(KEYBOARD_LAYOUT_PREF, None) or profiles_pref(
+            browser_prefs.get("intl.accept_languages") or "")
         write_user_js(files.profile, browser_prefs)
         # ⛔ PARSED BEFORE THE BROWSER STARTS, so a proxy we cannot express
         # refuses the launch instead of leaving a process running without one.
