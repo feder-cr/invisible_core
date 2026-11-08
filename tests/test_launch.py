@@ -210,7 +210,8 @@ HOST = {
     "FONTCONFIG_FILE": "/etc/fonts/other.conf", "FONTCONFIG_PATH": "/etc/fonts",
     "LD_PRELOAD": "/usr/lib/libhook.so", "LD_LIBRARY_PATH": "/opt/libs",
     "HTTP_PROXY": "http://10.0.0.1:3128", "https_proxy": "http://10.0.0.1:3128",
-    "MOZ_DISABLE_CONTENT_SANDBOX": "1", "LANG": "ja_JP.UTF-8", "LC_ALL": "ja_JP.UTF-8",
+    "MOZ_DISABLE_CONTENT_SANDBOX": "1", "LANG": "it_IT.UTF-8", "LC_ALL": "it_IT.UTF-8",
+    "LC_CTYPE": "it_IT.UTF-8",
     "GITHUB_TOKEN": "ghp_secret", "SESSIONNAME": "Console",
     "PATH": "/usr/bin", "HOME": "/home/u", "DISPLAY": ":0", "XAUTHORITY": "/home/u/.Xauthority",
     "SystemRoot": r"C:\Windows", "LOCALAPPDATA": r"C:\Users\u\AppData\Local",
@@ -222,8 +223,15 @@ def test_the_machine_s_font_library_and_proxy_settings_stay_behind():
     env = build_launch_env({}, base_env=dict(HOST))
     for name in ("FREETYPE_PROPERTIES", "FONTCONFIG_FILE", "FONTCONFIG_PATH", "LD_PRELOAD",
                  "LD_LIBRARY_PATH", "HTTP_PROXY", "https_proxy", "MOZ_DISABLE_CONTENT_SANDBOX",
-                 "LANG", "LC_ALL", "GITHUB_TOKEN", "SESSIONNAME"):
+                 "LC_ALL", "LC_CTYPE", "GITHUB_TOKEN", "SESSIONNAME"):
         assert name not in env, name
+
+
+def test_the_c_library_s_locale_is_declared_the_same_on_every_machine():
+    # The machine's Italian locale stays behind, and an empty one would leave the
+    # C library in ASCII: the browser sees C.UTF-8 on every machine.
+    assert build_launch_env({}, base_env=dict(HOST))["LANG"] == "C.UTF-8"
+    assert build_launch_env({}, base_env={"PATH": "/usr/bin"})["LANG"] == "C.UTF-8"
 
 
 def test_what_a_process_needs_to_start_and_our_own_variables_go_in():
