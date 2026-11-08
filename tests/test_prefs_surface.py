@@ -320,7 +320,7 @@ def test_the_pool_still_offers_real_per_session_diversity():
 # those prefs BEFORE asking the platform. With them absent Gecko answers from
 # its own per-OS defaults, which in the Unix block name "Sans" at 13.3333px - a
 # family no Windows machine has, on a build whose every other signal says
-# Windows. Measured 2026-08-07: that one disagreement drove FpJS Pro to
+# Windows. Measured 2026-08-07: that one disagreement drove the studied system to
 # tampering=True on Linux with Windows clean, same seed and same IP.
 
 _UI_ELEMENTS = (

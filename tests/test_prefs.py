@@ -22,7 +22,7 @@ from invisible_core.prefs import translate_profile_to_prefs
 
 @pytest.mark.unit
 def test_translate_includes_gpu_renderer_windows(monkeypatch):
-    """On Windows we falsify the GPU to a real-Firefox GPU from the camoufox-derived pool
+    """On Windows we falsify the GPU to a real-Firefox GPU from the telemetry-derived pool
     (prevalence-weighted; full coherent renderer+vendor+params+extensions). The chosen GPU's
     renderer/vendor are applied verbatim and the renderer is in ANGLE D3D11 wire format."""
     monkeypatch.setattr(sys, "platform", "win32")
@@ -474,7 +474,7 @@ def test_lan_ip_seed_zero_has_no_zero_octets():
 
 @pytest.mark.unit
 def test_gpu_renderer_set_from_profile_on_linux(monkeypatch):
-    # PG1: on Linux (as on EVERY host) we apply the camoufox-derived Windows-ANGLE GPU persona,
+    # PG1: on Linux (as on EVERY host) we apply the telemetry-derived Windows-ANGLE GPU persona,
     # so the page sees a consistent Windows GPU (rule: always look Windows). The C++ WebGL
     # override is platform-independent (SanitizeRenderer is pure string regex), so the same
     # persona renderer/vendor is presented on Linux too - no more "Generic Renderer".

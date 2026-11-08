@@ -475,7 +475,7 @@
   }
  ],
  "_meta": {
-  "source": "camoufox webgl_data.db (offline extract; real Firefox WebGL telemetry)",
+  "source": "a real-Firefox WebGL telemetry DB (offline extract)",
   "note": "prefs are zoom.stealth.webgl.* override values; prob normalized per-OS",
   "win_slot_5": "2026-07-27: this slot held 'ANGLE (Microsoft, Microsoft Basic Render Driver ...)', the string Windows reports when there is NO GPU driver - a datacenter tell, and one detectors weigh directly. It drew on 1.4% of seeds including 42, the seed in our own quickstart. Replaced in place with the pool's Intel HD persona rather than deleted: the probability mass and every other slot's cumulative boundary are unchanged, so only the seeds that drew the rasterizer move. The 444-row browserforge telemetry pool (webgl_renderer_pool.json) contains ZERO software renderers, which is the evidence that this persona never belonged in a desktop pool. The WHOLE prefs dict is copied, not just the two name strings: vendor, renderer and int_params all differed, and a real GPU name over a rasterizer's parameter limits is a worse tell than the honest rasterizer was.",
   "lin_slots_5_and_7": "2026-07-27: both held Mesa's software rasterizer (llvmpipe), combined 8.97% - seven times the mass of the Windows rasterizer that was removed the day before, and saying the same thing: this machine has no GPU driver. Unreachable today because the loader reads only the 'win' list (we always claim Windows), so this moved zero seeds; cleaned now so that wiring up per-OS personas is not gated on remembering it. Replaced IN PLACE keeping each prob, per the rule that removing an entry renormalises the draw and reorders every boundary above it.",
