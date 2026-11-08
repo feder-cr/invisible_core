@@ -123,19 +123,54 @@ def cache_dir_for_version(version: str | None = None) -> Path:
     return engine_root() / version
 
 
-def _resolve_asset_url(tag: str, asset_name: str) -> str:
-    """Return a downloadable URL for the asset.
+def release_asset_urls(owner: str, repo: str, tag: str, asset_name: str,
+                       direct: str) -> list[str]:
+    """Where to fetch one public release asset, best source first.
 
-    For private repos the direct `releases/download/<tag>/<asset>` URL returns
-    404 even with a token, so we resolve via the API: list assets for the
-    release tag, find the one matching `asset_name`, and use its API URL with
-    `Accept: application/octet-stream` (which 302-redirects to a signed URL).
-    For public repos the direct URL still works without a token.
+    Two routes reach the same bytes: the asset's API URL, asked with
+    `Accept: application/octet-stream` (302 to a signed URL), and the direct
+    `releases/download/<tag>/<asset>` link. They fail independently. On
+    2026-11-08 the direct link answered 504 for every release on GitHub while
+    the API route answered 200 for the same file, so a core that only knew the
+    direct link could not install an engine at all.
+
+    The API route goes first and the direct link stays as the fallback, because
+    the API is rate limited for an anonymous caller (60 requests an hour per
+    address) and a shared CI address can run out. The index is asked ONCE and
+    not retried: any failure, a 403 for the rate limit included, means "use the
+    direct link", which is what this code did before. An asset the index does
+    not list is left to the direct link, whose 404 is what
+    `_missing_release_message` reads.
+    """
+    api = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
+    try:
+        r = requests.get(api, headers={"Accept": "application/vnd.github+json"},
+                         timeout=30)
+        r.raise_for_status()
+        assets = r.json().get("assets", [])
+    except Exception as exc:
+        _note(f"  the release index for {tag} did not answer ({exc}); "
+              f"using the direct link")
+        return [direct]
+    for a in assets:
+        if a.get("name") == asset_name and a.get("url"):
+            return [a["url"], direct]
+    return [direct]
+
+
+def _resolve_asset_urls(tag: str, asset_name: str) -> list[str]:
+    """Where to fetch the engine archive, best source first.
+
+    Without a token see `release_asset_urls`. With one, the API is the route
+    that works for a private repo (its direct link 404s even with the token),
+    so the index is asked with retries and its 404 is raised; the direct link
+    is still listed after it, for a public repo whose API route is down.
     """
     token = _github_token()
-    if not token:
-        return RELEASE_URL_TEMPLATE.format(tag=tag, asset=asset_name)
     owner, repo = _parse_owner_repo(RELEASE_URL_TEMPLATE)
+    direct = RELEASE_URL_TEMPLATE.format(tag=tag, asset=asset_name)
+    if not token:
+        return release_asset_urls(owner, repo, tag, asset_name, direct)
     api = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
 
     # Retried for the same reason the asset itself is, and it is easy to forget
@@ -149,7 +184,7 @@ def _resolve_asset_url(tag: str, asset_name: str) -> str:
     r = _with_retries(_ask, f"the release index for {tag}")
     for a in r.json().get("assets", []):
         if a.get("name") == asset_name:
-            return a["url"]
+            return [a["url"], direct]
     raise RuntimeError(f"asset {asset_name!r} not found in release {tag!r}")
 
 
@@ -382,9 +417,15 @@ def _with_retries(call, what: str, attempts: int = DOWNLOAD_ATTEMPTS):
             _SLEEP(wait)
 
 
-def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None,
+def _download_file(url, dst: Path, chunk_size: int = 1 << 16, progress=None,
                    attempts: int = DOWNLOAD_ATTEMPTS) -> None:
     """Download ``url`` to ``dst``, asking again when the failure is transient.
+
+    ``url`` is one URL or a list of them, best first, all serving the same
+    bytes (see `release_asset_urls`). One attempt tries each in turn: a source
+    that fails with an HTTP error or a transient one hands over to the next at
+    once, and only the LAST source's failure is what the attempt reports, so a
+    404 from the direct link still reaches the missing-release message.
 
     ``dst`` is truncated at the start of every attempt, so a retry starts from
     byte zero: there is no resume here, and the failure that wants one - a
@@ -400,8 +441,22 @@ def _download_file(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None
     down the opposite answer and would have inherited a ten-second wait on the
     way to a fallback it was taking anyway.
     """
-    return _with_retries(lambda: _download_once(url, dst, chunk_size, progress),
-                         url.rsplit("/", 1)[-1], attempts)
+    sources = [url] if isinstance(url, str) else list(url)
+    name = sources[-1].rsplit("/", 1)[-1]
+
+    def _one_attempt():
+        for i, source in enumerate(sources):
+            try:
+                return _download_once(source, dst, chunk_size, progress)
+            except Exception as exc:
+                last = i == len(sources) - 1
+                if last or not (_is_transient(exc)
+                                or isinstance(exc, requests.HTTPError)):
+                    raise
+                _note(f"  {name}: {source.split('/')[2]} failed ({exc}); "
+                      f"trying {sources[i + 1].split('/')[2]}")
+
+    return _with_retries(_one_attempt, name, attempts)
 
 
 def _download_once(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None) -> None:
@@ -417,10 +472,13 @@ def _download_once(url: str, dst: Path, chunk_size: int = 1 << 16, progress=None
     exists to cap."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     headers: dict[str, str] = {}
-    token = _github_token()
-    if token and url.startswith("https://api.github.com/"):
-        headers["Authorization"] = f"token {token}"
+    if url.startswith("https://api.github.com/"):
+        # The asset's API URL answers with the bytes only when asked for them;
+        # without this header it answers with the asset's JSON description.
         headers["Accept"] = "application/octet-stream"
+        token = _github_token()
+        if token:
+            headers["Authorization"] = f"token {token}"
     limit = _download_deadline()
     started = time.monotonic()
     with requests.get(url, stream=True, timeout=60, headers=headers) as r:
@@ -670,14 +728,15 @@ def ensure_binary(version: str | None = None, progress=None, status=None,
     # call). A killed download's tree is removed by the next download, which is
     # the only thing that could reuse its space.
     sweep_orphaned_tmp(engine_root())
-    url_archive = _resolve_asset_url(seal.tag, asset.name)
+    sources = _resolve_asset_urls(seal.tag, asset.name)
+    url_archive = sources[-1]
     tmp_dir = engine_root() / f".tmp-{seal.tag}-{os.getpid()}"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     with tempfile.TemporaryDirectory() as td:
         archive_path = Path(td) / asset.name
         _phase("downloading")
         try:
-            _download_file(url_archive, archive_path, progress=progress)
+            _download_file(sources, archive_path, progress=progress)
         except requests.HTTPError as exc:
             if getattr(exc.response, "status_code", None) != 404:
                 raise

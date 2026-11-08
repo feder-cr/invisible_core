@@ -35,7 +35,7 @@ from .constants import (
     GEOIP_REPO,
 )
 from .download import (DOWNLOAD_ATTEMPTS, _download_file, _extract,
-                       _github_token, state_dir)
+                       _github_token, release_asset_urls, state_dir)
 
 __all__ = ["ensure_geoip_mmdb", "geoip_mmdb_path"]
 
@@ -128,6 +128,8 @@ def _download_geoip_tag(tag: str, *, attempts: int) -> Path:
     if found is not None:
         return found
     url = GEOIP_RELEASE_URL_TEMPLATE.format(tag=tag, asset=GEOIP_ASSET)
+    owner, repo = GEOIP_REPO.split("/", 1)
+    sources = release_asset_urls(owner, repo, tag, GEOIP_ASSET, url)
     root = _geoip_root()
     root.mkdir(parents=True, exist_ok=True)
     # Beside the tag directories, on the same filesystem so the rename is
@@ -136,7 +138,7 @@ def _download_geoip_tag(tag: str, *, attempts: int) -> Path:
     try:
         with tempfile.TemporaryDirectory() as td:
             archive = Path(td) / GEOIP_ASSET
-            _download_file(url, archive, attempts=attempts)
+            _download_file(sources, archive, attempts=attempts)
             _extract(archive, staging)
         mmdb = _mmdb_in(staging)
         if mmdb is None:
