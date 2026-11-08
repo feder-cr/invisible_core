@@ -42,7 +42,7 @@ def test_language_and_country_pick_the_windows_default(langs, region, klid):
 
 @pytest.mark.parametrize("langs, region, klid", [
     (["ast"], "ES", "0000040A"),   # Asturian in Spain: the Spanish keyboard
-    (["sc"], "IT", "00000410"),    # Sardinian in Italy: the Italian keyboard
+    (["sc"], "IT", "00000409"),    # Sardinian in Italy: English US, what Windows installs (locale.nls)
     (["szl"], "PL", "00000415"),   # Silesian in Poland: the Polish keyboard
 ])
 def test_a_language_without_a_windows_profile_takes_its_country_s(langs, region, klid):

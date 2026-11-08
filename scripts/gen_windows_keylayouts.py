@@ -1,7 +1,7 @@
 """Generates `juggler/keylayouts_windows.py`: every keyboard a Windows persona can type on.
 
 ⛔ READ FROM THE FILES' BYTES, NOT FROM THE MACHINE. The tables come from the
-layout files Windows 11 (26100) ships, `kbd*.dll`, parsed as data: the
+layout files Windows ships, `kbd*.dll`, parsed as data: the
 KBDTABLES structure that `KbdLayerDescriptor` returns (kbd.h of the Windows
 DDK). No Windows API is called and no layout is loaded, so the result does not
 depend on the machine that runs this script, nor on its Windows version: every
@@ -12,13 +12,24 @@ The files can sit in any directory (`--dll-dir`), on any OS.
 (`widget/windows/KeyboardLayout.cpp`, `ConvertNativeKeyCodeToDOMKeyCode`, and
 `widget/SharedWidgetUtils.cpp`, `ComputeKeyCodeFromChar`).
 
-WHICH keyboard a persona has is Microsoft's own table of default input
-profiles per language and region ("Default input profiles (input locales) in
-Windows", learn.microsoft.com), embedded below as PROFILES; IME languages type
-Latin text through the keyboard under the IME (IME_BASE).
+The reference is Windows 11 26H2, build 26300.9711 (cumulative KB5127648), on the 26100 base: 24H2,
+25H2 and 26H2 share one servicing branch, so at the same cumulative their files are the
+same; they change with cumulatives (the Arabic layouts did in 2025-2026), and these are .9711's.
 
-    python scripts/gen_windows_keylayouts.py [--dll-dir DIR]          # regenerates
-    python scripts/gen_windows_keylayouts.py [--dll-dir DIR] --check  # 1 if stale
+WHICH keyboards a persona has is what Windows itself installs with its language
+and country: the keyboards-to-install of its locale (LOCALE_SKEYBOARDSTOINSTALL)
+in `locale.nls` of the same build, read from its bytes and pinned like the
+layout files. The file's layout is Wine's (include/winternl.h NLS_LOCALE_HEADER,
+NLS_LOCALE_DATA, NLS_LOCALE_LCNAME_INDEX; dlls/kernelbase/locale.c, wine-mirror
+78e52205), whose own locale.nls writes a constant in that field; read here from
+Windows' file, it gives for all 927 locales of the build what GetLocaleInfoEx
+returns (checked once, by hand, as a test of the reader). Each locale has a list
+of LANGID:KLID profiles: Russian has Russian and English US, Persian has two
+Persian keyboards and English US. IME profiles stay out: an IME language types
+Latin text through the keyboard under its IME (IME_BASE).
+
+    python scripts/gen_windows_keylayouts.py [--dll-dir DIR] [--nls FILE]          # regenerates
+    python scripts/gen_windows_keylayouts.py [--dll-dir DIR] [--nls FILE] --check  # 1 if stale
 
 Do not hand-edit the output.
 """
@@ -34,6 +45,9 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "src" / "invisible_core" / "juggler" / "keylayouts_windows.py"
 DEFAULT_DLL_DIR = pathlib.Path(r"C:\Windows\System32")
+DEFAULT_NLS = DEFAULT_DLL_DIR / "locale.nls"
+#: SHA-256 of locale.nls of the reference build: anything else is refused.
+NLS_PIN = "00d972d678db02525b731e1286e8daf53e87e5cbc58edcaf90de4222470a639a"
 
 #: Physical keys that produce characters: scan code -> DOM `code`
 #: (widget/NativeKeyToDOMCodeName.inc, CODE_MAP_WIN).
@@ -79,376 +93,8 @@ SHIFT, CTRL, ALT = 1, 2, 4
 IME_BASE = {"ja": "00000411", "ko": "00000412", "zh": "00000409", "vi": "00000409",
             "am": "00000409", "ti": "00000409", "yi": "00000409"}
 
-#: Microsoft's "Default input profiles (input locales) in Windows" table, one row per
-#: language/region: tag (None when Windows has no culture for the row), primary and
-#: secondary keyboard (KLID; None for an IME).
-PROFILES = [{'name': 'Afrikaans', 'tag': 'af-ZA', 'primary': '00000409', 'secondary': None},
- {'name': 'Afrikaans (Namibia)', 'tag': 'af-NA', 'primary': '00000409', 'secondary': None},
- {'name': 'Albanian', 'tag': 'sq-AL', 'primary': '0000041C', 'secondary': None},
- {'name': 'Albanian (Kosovo)', 'tag': 'sq-XK', 'primary': '00000409', 'secondary': None},
- {'name': 'Alsatian (France)', 'tag': 'gsw-FR', 'primary': '0000040C', 'secondary': None},
- {'name': 'Amharic', 'tag': 'am-ET', 'primary': None, 'secondary': '00000409'},
- {'name': 'Arabic', 'tag': 'ar-SA', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Algeria)', 'tag': 'ar-DZ', 'primary': '00020401', 'secondary': '0000040C'},
- {'name': 'Arabic (Bahrain)', 'tag': 'ar-BH', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Egypt)', 'tag': 'ar-EG', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Iraq)', 'tag': 'ar-IQ', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Jordan)', 'tag': 'ar-JO', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Kuwait)', 'tag': 'ar-KW', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Lebanon)', 'tag': 'ar-LB', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Libya)', 'tag': 'ar-LY', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Morocco)', 'tag': 'ar-MA', 'primary': '00020401', 'secondary': '0000040C'},
- {'name': 'Arabic (Oman)', 'tag': 'ar-OM', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Qatar)', 'tag': 'ar-QA', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Syria)', 'tag': 'ar-SY', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (Tunisia)', 'tag': 'ar-TN', 'primary': '00020401', 'secondary': '0000040C'},
- {'name': 'Arabic (United Arab Emirates)', 'tag': 'ar-AE', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Arabic (World)', 'tag': None, 'primary': '00000409', 'secondary': None},
- {'name': 'Arabic (Yemen)', 'tag': 'ar-YE', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Armenian', 'tag': 'hy-AM', 'primary': '0002042B', 'secondary': '0003042B'},
- {'name': 'Assamese', 'tag': 'as-IN', 'primary': '0000044D', 'secondary': '00000409'},
- {'name': 'Asturian', 'tag': 'tradnl', 'primary': '0000040A', 'secondary': None},
- {'name': 'Azerbaijani', 'tag': 'az-Latn-AZ', 'primary': '0000042C', 'secondary': '0000082C'},
- {'name': 'Azerbaijani (Cyrillic)', 'tag': None, 'primary': '0000082C', 'secondary': '0000042C'},
- {'name': 'Bangla', 'tag': 'bn-BD', 'primary': '00000445', 'secondary': '00000409'},
- {'name': 'Bashkir', 'tag': 'ba-RU', 'primary': '0000046D', 'secondary': '00000419'},
- {'name': 'Basque', 'tag': 'eu-ES', 'primary': '0000040A', 'secondary': None},
- {'name': 'Belarusian', 'tag': 'be-BY', 'primary': '00000423', 'secondary': '00000409'},
- {'name': 'Bengali (India)', 'tag': 'bn-IN', 'primary': '00020445', 'secondary': '00000409'},
- {'name': 'Bodo', 'tag': 'hi-IN', 'primary': '00000439', 'secondary': '00000409'},
- {'name': 'Bosnian', 'tag': 'bs-Latn-BA', 'primary': '0000041A', 'secondary': None},
- {'name': 'Bosnian (Cyrillic)', 'tag': None, 'primary': '0000201A', 'secondary': '0000041A'},
- {'name': 'Breton', 'tag': 'br-FR', 'primary': '0000040C', 'secondary': None},
- {'name': 'Bulgarian', 'tag': 'bg-BG', 'primary': '00030402', 'secondary': '00020409'},
- {'name': 'Burmese', 'tag': 'my-MM', 'primary': '00130C00', 'secondary': '00000409'},
- {'name': 'Catalan', 'tag': 'ca-ES', 'primary': '0000040A', 'secondary': None},
- {'name': 'Catalan (Andorra)', 'tag': 'ca-AD', 'primary': '0000040C', 'secondary': None},
- {'name': 'Catalan (France)', 'tag': 'ca-FR', 'primary': '0000040C', 'secondary': None},
- {'name': 'Catalan (Italy)', 'tag': 'ca-IT', 'primary': '00000410', 'secondary': None},
- {'name': 'Central Atlas Tamazight', 'tag': 'tzm-Latn-DZ', 'primary': '0000085F', 'secondary': None},
- {'name': 'Central Atlas Tamazight (Arabic)', 'tag': None, 'primary': '00020401', 'secondary': '0000040C'},
- {'name': 'Central Atlas Tamazight (Tifinagh)', 'tag': None, 'primary': '0000105F', 'secondary': '0000040C'},
- {'name': 'Central Kurdish', 'tag': 'ku-Arab-IQ', 'primary': '00000492', 'secondary': '00000409'},
- {'name': 'Chechen', 'tag': 'ru-RU', 'primary': '00000419', 'secondary': '00000409'},
- {'name': 'Cherokee', 'tag': 'chr-Cher-US', 'primary': '0000045C', 'secondary': '0001045C'},
- {'name': 'Chinese', 'tag': 'zh-CN', 'primary': None, 'secondary': None},
- {'name': 'Chinese (Simplified, Hong Kong SAR)',
-  'tag': 'zh-Hans-HK',
-  'primary': '00000409',
-  'secondary': None},
- {'name': 'Chinese (Simplified, Macao SAR)', 'tag': 'zh-Hans-MO', 'primary': '00000409', 'secondary': None},
- {'name': 'Chinese (Traditional)', 'tag': None, 'primary': None, 'secondary': None},
- {'name': 'Chinese (Traditional, Taiwan)', 'tag': 'zh-TW', 'primary': None, 'secondary': None},
- {'name': 'Church Slavic', 'tag': 'ru-RU', 'primary': '00000419', 'secondary': '00000409'},
- {'name': 'Colognian', 'tag': 'de-DE', 'primary': '00000407', 'secondary': None},
- {'name': 'Cornish', 'tag': 'en-GB', 'primary': '00000809', 'secondary': None},
- {'name': 'Corsican', 'tag': 'co-FR', 'primary': '0000040C', 'secondary': None},
- {'name': 'Croatian', 'tag': 'hr-HR', 'primary': '0000041A', 'secondary': None},
- {'name': 'Croatian (Bosnia & Herzegovina)', 'tag': 'hr-BA', 'primary': '0000041A', 'secondary': None},
- {'name': 'Czech', 'tag': 'cs-CZ', 'primary': '00000405', 'secondary': None},
- {'name': 'Danish', 'tag': 'da-DK', 'primary': '00000406', 'secondary': '00000406'},
- {'name': 'Danish (Greenland)', 'tag': 'da-GL', 'primary': '00000406', 'secondary': None},
- {'name': 'Divehi', 'tag': 'dv-MV', 'primary': '00000465', 'secondary': '00000409'},
- {'name': 'Dutch', 'tag': 'nl-NL', 'primary': '00020409', 'secondary': None},
- {'name': 'Dutch (Aruba)', 'tag': 'nl-AW', 'primary': '00020409', 'secondary': None},
- {'name': 'Dutch (Belgium)', 'tag': 'nl-BE', 'primary': '00000813', 'secondary': None},
- {'name': 'Dutch (Bonaire, Sint Eustatius and Saba)',
-  'tag': 'nl-BQ',
-  'primary': '00020409',
-  'secondary': None},
- {'name': 'Dutch (Curaτao)', 'tag': None, 'primary': '00020409', 'secondary': None},
- {'name': 'Dutch (Sint Maarten)', 'tag': 'nl-SX', 'primary': '00020409', 'secondary': None},
- {'name': 'Dutch (Suriname)', 'tag': 'nl-SR', 'primary': '00020409', 'secondary': None},
- {'name': 'Dzongkha', 'tag': 'dz-BT', 'primary': '00000C51', 'secondary': '00000409'},
- {'name': 'English', 'tag': 'en-US', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Australia)', 'tag': 'en-AU', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Austria)', 'tag': 'en-AT', 'primary': '00000407', 'secondary': None},
- {'name': 'English (Belgium)', 'tag': 'en-BE', 'primary': '0000080C', 'secondary': None},
- {'name': 'English (Belize)', 'tag': 'en-BZ', 'primary': '00000409', 'secondary': None},
- {'name': 'English (British Virgin Islands)', 'tag': 'en-VG', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Burundi)', 'tag': 'en-BI', 'primary': '0000040C', 'secondary': None},
- {'name': 'English (Canada)', 'tag': 'en-CA', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Denmark)', 'tag': 'en-DK', 'primary': '00000406', 'secondary': None},
- {'name': 'English (Falkland Islands)', 'tag': 'en-FK', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Finland)', 'tag': 'en-FI', 'primary': '0000040B', 'secondary': None},
- {'name': 'English (Germany)', 'tag': 'en-DE', 'primary': '00000407', 'secondary': None},
- {'name': 'English (Gibraltar)', 'tag': 'en-GI', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Guernsey)', 'tag': 'en-GG', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Hong Kong SAR)', 'tag': 'en-HK', 'primary': '00000409', 'secondary': None},
- {'name': 'English (India)', 'tag': 'en-IN', 'primary': '00004009', 'secondary': None},
- {'name': 'English (Ireland)', 'tag': 'en-IE', 'primary': '00001809', 'secondary': None},
- {'name': 'English (Isle of Man)', 'tag': 'en-IM', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Israel)', 'tag': 'en-IL', 'primary': '00000409', 'secondary': '0002040D'},
- {'name': 'English (Jamaica)', 'tag': 'en-JM', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Jersey)', 'tag': 'en-JE', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Malaysia)', 'tag': 'en-MY', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Malta)', 'tag': 'en-MT', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Netherlands)', 'tag': 'en-NL', 'primary': '00020409', 'secondary': None},
- {'name': 'English (New Zealand)', 'tag': 'en-NZ', 'primary': '00001409', 'secondary': None},
- {'name': 'English (Philippines)', 'tag': 'en-PH', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Singapore)', 'tag': 'en-SG', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Slovenia)', 'tag': 'en-SI', 'primary': '00000424', 'secondary': None},
- {'name': 'English (South Africa)', 'tag': 'en-ZA', 'primary': '00000409', 'secondary': None},
- {'name': 'English (Sweden)', 'tag': 'en-SE', 'primary': '0000041D', 'secondary': None},
- {'name': 'English (Switzerland)', 'tag': 'en-CH', 'primary': '00000407', 'secondary': None},
- {'name': 'English (Trinidad & Tobago)', 'tag': 'en-TT', 'primary': '00000409', 'secondary': None},
- {'name': 'English (United Kingdom)', 'tag': 'en-GB', 'primary': '00000809', 'secondary': None},
- {'name': 'English (Zimbabwe)', 'tag': 'en-ZW', 'primary': '00000409', 'secondary': None},
- {'name': 'Estonian', 'tag': 'et-EE', 'primary': '00000425', 'secondary': None},
- {'name': 'Faroese', 'tag': 'fo-FO', 'primary': '00000406', 'secondary': None},
- {'name': 'Filipino', 'tag': 'fil-PH', 'primary': '00000409', 'secondary': None},
- {'name': 'Finnish', 'tag': 'fi-FI', 'primary': '0000040B', 'secondary': None},
- {'name': 'French', 'tag': 'fr-FR', 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Belgium)', 'tag': 'fr-BE', 'primary': '0000080C', 'secondary': None},
- {'name': 'French (Cameroon)', 'tag': 'fr-CM', 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Canada)', 'tag': 'fr-CA', 'primary': '00001009', 'secondary': '00001009'},
- {'name': "French (Côte d'Ivoire)", 'tag': None, 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Haiti)', 'tag': 'fr-HT', 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Luxembourg)', 'tag': 'fr-LU', 'primary': '0000100C', 'secondary': '0000040C'},
- {'name': 'French (Mali)', 'tag': 'fr-ML', 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Monaco)', 'tag': 'fr-MC', 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Morocco)', 'tag': 'fr-MA', 'primary': '0000040C', 'secondary': None},
- {'name': 'French (RΘunion)', 'tag': None, 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Senegal)', 'tag': 'fr-SN', 'primary': '0000040C', 'secondary': None},
- {'name': 'French (Switzerland)', 'tag': 'fr-CH', 'primary': '0000100C', 'secondary': '00000807'},
- {'name': 'French Congo (DRC)', 'tag': 'fr-CD', 'primary': '0000040C', 'secondary': None},
- {'name': 'Friulian', 'tag': 'it-IT', 'primary': '00000410', 'secondary': None},
- {'name': 'Fulah', 'tag': 'ff-Latn-SN', 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Adlam)', 'tag': None, 'primary': '00000409', 'secondary': None},
- {'name': 'Fulah (Latin, Burkina Faso)', 'tag': None, 'primary': '00000409', 'secondary': None},
- {'name': 'Fulah (Latin, Cameroon)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Gambia)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Ghana)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Guinea)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Guinea-Bissau)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Liberia)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Mauritania)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Niger)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Nigeria)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Fulah (Latin, Sierra Leone)', 'tag': None, 'primary': '00000488', 'secondary': None},
- {'name': 'Galician', 'tag': 'gl-ES', 'primary': '0000040A', 'secondary': None},
- {'name': 'Georgian', 'tag': 'ka-GE', 'primary': '00010437', 'secondary': '00000409'},
- {'name': 'German', 'tag': 'de-DE', 'primary': '00000407', 'secondary': None},
- {'name': 'German (Austria)', 'tag': 'de-AT', 'primary': '00000407', 'secondary': None},
- {'name': 'German (Belgium)', 'tag': 'de-BE', 'primary': '0000080C', 'secondary': None},
- {'name': 'German (Italy)', 'tag': 'de-IT', 'primary': '00000409', 'secondary': None},
- {'name': 'German (Liechtenstein)', 'tag': 'de-LI', 'primary': '00000807', 'secondary': None},
- {'name': 'German (Luxembourg)', 'tag': 'de-LU', 'primary': '00000407', 'secondary': None},
- {'name': 'German (Switzerland)', 'tag': 'de-CH', 'primary': '00000807', 'secondary': '0000100C'},
- {'name': 'Greek', 'tag': 'el-GR', 'primary': '00000408', 'secondary': '00000409'},
- {'name': 'Guarani', 'tag': 'gn-PY', 'primary': '00000474', 'secondary': None},
- {'name': 'Gujarati', 'tag': 'gu-IN', 'primary': '00000447', 'secondary': '00000409'},
- {'name': 'Hausa', 'tag': 'ha-Latn-NG', 'primary': '00000468', 'secondary': None},
- {'name': 'Hawaiian', 'tag': 'haw-US', 'primary': '00000475', 'secondary': '00000409'},
- {'name': 'Hebrew', 'tag': 'he-IL', 'primary': '0002040D', 'secondary': '00000409'},
- {'name': 'Hindi', 'tag': 'hi-IN', 'primary': '00010439', 'secondary': '00000409'},
- {'name': 'Hungarian', 'tag': 'hu-HU', 'primary': '0000040E', 'secondary': None},
- {'name': 'Icelandic', 'tag': 'is-IS', 'primary': '0000040F', 'secondary': None},
- {'name': 'Igbo', 'tag': 'ig-NG', 'primary': '00000470', 'secondary': None},
- {'name': 'Indonesian', 'tag': 'id-ID', 'primary': '00000409', 'secondary': None},
- {'name': 'Interlingua', 'tag': 'fr-FR', 'primary': '0000040C', 'secondary': None},
- {'name': 'Inuktitut', 'tag': 'iu-Latn-CA', 'primary': '0000085D', 'secondary': '00000409'},
- {'name': 'Inuktitut (Syllabics)', 'tag': None, 'primary': '0001045D', 'secondary': '00000409'},
- {'name': 'Irish', 'tag': 'ga-IE', 'primary': '00001809', 'secondary': None},
- {'name': 'Irish (United Kingdom)', 'tag': 'ga-GB', 'primary': '00000409', 'secondary': None},
- {'name': 'Italian', 'tag': 'it-IT', 'primary': '00000410', 'secondary': None},
- {'name': 'Italian (Switzerland)', 'tag': 'it-CH', 'primary': '0000100C', 'secondary': '00000410'},
- {'name': 'Italian (Vatican City)', 'tag': 'it-VA', 'primary': '00000409', 'secondary': None},
- {'name': 'Japanese', 'tag': 'ja-JP', 'primary': None, 'secondary': None},
- {'name': 'Javanese', 'tag': 'jv', 'primary': '00000409', 'secondary': None},
- {'name': 'Javanese (Javanese)', 'tag': None, 'primary': '00110C00', 'secondary': '00000409'},
- {'name': 'Kalaallisut', 'tag': 'kl-GL', 'primary': '00000406', 'secondary': None},
- {'name': 'Kannada', 'tag': 'kn-IN', 'primary': '0000044B', 'secondary': '00000409'},
- {'name': 'Kashmiri', 'tag': 'ur-PK', 'primary': '00000420', 'secondary': '00000409'},
- {'name': 'Kashmiri (Devanagari)', 'tag': 'ks-Deva-IN', 'primary': '00010439', 'secondary': '00000409'},
- {'name': 'Kazakh', 'tag': 'kk-KZ', 'primary': '0000043F', 'secondary': '00000409'},
- {'name': 'Khmer', 'tag': 'km-KH', 'primary': '00000453', 'secondary': '00000409'},
- {'name': 'Kinyarwanda', 'tag': 'rw-RW', 'primary': '00000409', 'secondary': None},
- {'name': 'Kiswahili', 'tag': 'sw-KE', 'primary': '00000409', 'secondary': None},
- {'name': 'Kiswahili (Congo DRC)', 'tag': 'sw-CD', 'primary': '00000409', 'secondary': None},
- {'name': 'Kiswahili (Tanzania)', 'tag': 'sw-TZ', 'primary': '00000409', 'secondary': None},
- {'name': 'Kiswahili (Uganda)', 'tag': 'sw-UG', 'primary': '00000409', 'secondary': None},
- {'name': 'Konkani', 'tag': 'kok-IN', 'primary': '00000439', 'secondary': '00000409'},
- {'name': 'Korean', 'tag': 'ko-KR', 'primary': None, 'secondary': None},
- {'name': 'Korean (North Korea)', 'tag': 'ko-KP', 'primary': '00000409', 'secondary': None},
- {'name': 'Kyrgyz', 'tag': 'ky-KG', 'primary': '00000440', 'secondary': '00000409'},
- {'name': "K'iche'", 'tag': 'quc-Latn-GT', 'primary': '0000080A', 'secondary': None},
- {'name': 'Lao', 'tag': 'lo-LA', 'primary': '00000454', 'secondary': '00000409'},
- {'name': 'Latvian', 'tag': 'lv-LV', 'primary': '00020426', 'secondary': None},
- {'name': 'Lithuanian', 'tag': 'lt-LT', 'primary': '00010427', 'secondary': None},
- {'name': 'Lower Sorbian', 'tag': 'dsb-DE', 'primary': '0002042E', 'secondary': None},
- {'name': 'Luxembourgish', 'tag': 'lb-LU', 'primary': '0000046E', 'secondary': None},
- {'name': 'Macedonian', 'tag': 'mk-MK', 'primary': '0001042F', 'secondary': '00000409'},
- {'name': 'Malagasy', 'tag': 'mg', 'primary': '0000040C', 'secondary': None},
- {'name': 'Malay', 'tag': 'ms-MY', 'primary': '00000409', 'secondary': None},
- {'name': 'Malay (Brunei)', 'tag': 'ms-BN', 'primary': '00000409', 'secondary': None},
- {'name': 'Malay (Indonesia)', 'tag': 'ms-ID', 'primary': '00000409', 'secondary': None},
- {'name': 'Malay (Singapore)', 'tag': 'ms-SG', 'primary': '00000409', 'secondary': None},
- {'name': 'Malayalam', 'tag': 'ml-IN', 'primary': '0000044C', 'secondary': '00000409'},
- {'name': 'Maltese', 'tag': 'mt-MT', 'primary': '0000043A', 'secondary': None},
- {'name': 'Manipuri', 'tag': 'en-IN', 'primary': '00004009', 'secondary': None},
- {'name': 'Manx', 'tag': 'en-GB', 'primary': '00000809', 'secondary': None},
- {'name': 'Maori', 'tag': 'mi-NZ', 'primary': '00000481', 'secondary': '00000481'},
- {'name': 'Mapuche', 'tag': 'arn-CL', 'primary': '0000080A', 'secondary': None},
- {'name': 'Marathi', 'tag': 'mr-IN', 'primary': '0000044E', 'secondary': '00000409'},
- {'name': 'Mazanderani', 'tag': 'fa-IR', 'primary': '00000429', 'secondary': '00050429'},
- {'name': 'Mohawk', 'tag': 'moh-CA', 'primary': '00000409', 'secondary': None},
- {'name': 'Mongolian', 'tag': 'mn-MN', 'primary': '00000450', 'secondary': '00000409'},
- {'name': 'Mongolian (Traditional Mongolian)', 'tag': None, 'primary': '00010850', 'secondary': '00000409'},
- {'name': 'Mongolian (Traditional Mongolian, Mongolia)',
-  'tag': 'mn-Mong-MN',
-  'primary': '00010850',
-  'secondary': '00000409'},
- {'name': "N'ko", 'tag': 'nqo', 'primary': '00090C00', 'secondary': '00000409'},
- {'name': 'Nepali', 'tag': 'ne-NP', 'primary': '00000461', 'secondary': '00000409'},
- {'name': 'Nepali (India)', 'tag': 'ne-IN', 'primary': '00000461', 'secondary': None},
- {'name': 'Northern Luri', 'tag': 'ar-IQ', 'primary': '00000401', 'secondary': '00000409'},
- {'name': 'Northern Sami', 'tag': 'se-NO', 'primary': '0000043B', 'secondary': None},
- {'name': 'Norwegian', 'tag': 'nb-NO', 'primary': '00000414', 'secondary': None},
- {'name': 'Norwegian Nynorsk', 'tag': 'nn-NO', 'primary': '00000414', 'secondary': None},
- {'name': 'Occitan', 'tag': 'oc-FR', 'primary': '0000040C', 'secondary': None},
- {'name': 'Odia', 'tag': 'or-IN', 'primary': '00000448', 'secondary': '00000409'},
- {'name': 'Oromo', 'tag': 'om-ET', 'primary': '00000409', 'secondary': None},
- {'name': 'Oromo (Kenya)', 'tag': 'om-KE', 'primary': '00000409', 'secondary': None},
- {'name': 'Ossetic', 'tag': 'ru-RU', 'primary': '00000419', 'secondary': '00000409'},
- {'name': 'Pashto', 'tag': 'ps-AF', 'primary': '00000463', 'secondary': '00000409'},
- {'name': 'Pashto (Pakistan)', 'tag': 'ps-PK', 'primary': '00000409', 'secondary': None},
- {'name': 'Persian', 'tag': 'fa-IR', 'primary': '00000429', 'secondary': '00050429'},
- {'name': 'Persian (Afghanistan)', 'tag': 'fa-AF', 'primary': '00050429', 'secondary': '00000409'},
- {'name': 'Polish', 'tag': 'pl-PL', 'primary': '00000415', 'secondary': None},
- {'name': 'Portuguese', 'tag': 'pt-BR', 'primary': '00000416', 'secondary': None},
- {'name': 'Portuguese (Angola)', 'tag': 'pt-AO', 'primary': '00000816', 'secondary': None},
- {'name': 'Portuguese (Cabo Verde)', 'tag': 'pt-CV', 'primary': '00000816', 'secondary': None},
- {'name': 'Portuguese (Equatorial Guinea)', 'tag': 'pt-GQ', 'primary': '00000409', 'secondary': None},
- {'name': 'Portuguese (Guinea-Bissau)', 'tag': 'pt-GW', 'primary': '00000816', 'secondary': None},
- {'name': 'Portuguese (Luxembourg)', 'tag': 'pt-LU', 'primary': '00000409', 'secondary': None},
- {'name': 'Portuguese (Macao SAR)', 'tag': 'pt-MO', 'primary': '00000816', 'secondary': None},
- {'name': 'Portuguese (Mozambique)', 'tag': 'pt-MZ', 'primary': '00000816', 'secondary': None},
- {'name': 'Portuguese (Portugal)', 'tag': 'pt-PT', 'primary': '00000816', 'secondary': None},
- {'name': 'Portuguese (Switzerland)', 'tag': 'pt-CH', 'primary': '00000409', 'secondary': None},
- {'name': 'Portuguese (Sπo TomΘ & Prφncipe)', 'tag': None, 'primary': '00000816', 'secondary': None},
- {'name': 'Portuguese (Timor-Leste)', 'tag': 'pt-TL', 'primary': '00000816', 'secondary': None},
- {'name': 'Prussian', 'tag': 'de-DE', 'primary': '00000407', 'secondary': None},
- {'name': 'Punjabi', 'tag': 'pa-IN', 'primary': '00000446', 'secondary': '00000409'},
- {'name': 'Punjabi', 'tag': 'pa-Arab-PK', 'primary': '00000420', 'secondary': '00000409'},
- {'name': 'Quechua', 'tag': 'quz-BO', 'primary': '0000080A', 'secondary': None},
- {'name': 'Quechua (Ecuador)', 'tag': 'quz-EC', 'primary': '0000080A', 'secondary': None},
- {'name': 'Quechua (Peru)', 'tag': 'quz-PE', 'primary': '0000080A', 'secondary': None},
- {'name': 'Romanian', 'tag': 'ro-RO', 'primary': '00010418', 'secondary': None},
- {'name': 'Romanian (Moldova)', 'tag': 'ro-MD', 'primary': '00010418', 'secondary': None},
- {'name': 'Romansh', 'tag': 'rm-CH', 'primary': '00000807', 'secondary': None},
- {'name': 'Russian', 'tag': 'ru-RU', 'primary': '00000419', 'secondary': '00000409'},
- {'name': 'Russian (Moldova)', 'tag': 'ru-MD', 'primary': '00000409', 'secondary': None},
- {'name': 'Sakha', 'tag': 'sah-RU', 'primary': '00000485', 'secondary': '00000419'},
- {'name': 'Sami (Inari)', 'tag': None, 'primary': '0001083B', 'secondary': None},
- {'name': 'Sami (Lule)', 'tag': None, 'primary': '0000083B', 'secondary': None},
- {'name': 'Sami (Skolt)', 'tag': None, 'primary': '0001083B', 'secondary': None},
- {'name': 'Sami (Southern)', 'tag': None, 'primary': '0000083B', 'secondary': None},
- {'name': 'Sami, Lule (Norway)', 'tag': 'smj-NO', 'primary': '0000043B', 'secondary': None},
- {'name': 'Sami, Northern (Finland)', 'tag': 'se-FI', 'primary': '0001083B', 'secondary': None},
- {'name': 'Sami, Northern (Sweden)', 'tag': 'se-SE', 'primary': '0000083B', 'secondary': None},
- {'name': 'Sami, Southern (Norway)', 'tag': 'sma-NO', 'primary': '0000043B', 'secondary': None},
- {'name': 'Sanskrit', 'tag': 'sa-IN', 'primary': '00000439', 'secondary': '00000409'},
- {'name': 'Scottish Gaelic', 'tag': 'gd-GB', 'primary': '00011809', 'secondary': None},
- {'name': 'Serbian', 'tag': 'sr-Latn-RS', 'primary': '0000081A', 'secondary': None},
- {'name': 'Serbian (Cyrillic)', 'tag': None, 'primary': '00000C1A', 'secondary': '00020409'},
- {'name': 'Serbian (Cyrillic, Bosnia and Herzegovina)',
-  'tag': 'sr-Cyrl-BA',
-  'primary': '00000C1A',
-  'secondary': '00000409'},
- {'name': 'Serbian (Cyrillic, Kosovo)', 'tag': 'sr-Cyrl-XK', 'primary': '00000409', 'secondary': None},
- {'name': 'Serbian (Cyrillic, Montenegro)',
-  'tag': 'sr-Cyrl-ME',
-  'primary': '00000C1A',
-  'secondary': '00020409'},
- {'name': 'Serbian (Latin, Bosnia & Herzegovina)',
-  'tag': 'sr-Latn-BA',
-  'primary': '0000081A',
-  'secondary': None},
- {'name': 'Serbian (Latin, Kosovo)', 'tag': 'sr-Latn-XK', 'primary': '00000409', 'secondary': None},
- {'name': 'Serbian (Latin, Montenegro)', 'tag': 'sr-Latn-ME', 'primary': '0000081A', 'secondary': None},
- {'name': 'Sesotho', 'tag': 'st-ZA', 'primary': '00000409', 'secondary': None},
- {'name': 'Sesotho (Lesotho)', 'tag': 'st-LS', 'primary': '00000409', 'secondary': None},
- {'name': 'Sesotho sa Leboa', 'tag': 'nso-ZA', 'primary': '0000046C', 'secondary': None},
- {'name': 'Setswana', 'tag': 'tn-ZA', 'primary': '00000432', 'secondary': None},
- {'name': 'Setswana (Botswana)', 'tag': 'tn-BW', 'primary': '00000432', 'secondary': None},
- {'name': 'Shona', 'tag': 'jv', 'primary': '00000409', 'secondary': None},
- {'name': 'Sindhi', 'tag': 'sd-Arab-PK', 'primary': '00000420', 'secondary': '00000409'},
- {'name': 'Sindhi (Devanagari)', 'tag': None, 'primary': '00010439', 'secondary': '00004009'},
- {'name': 'Sinhala', 'tag': 'si-LK', 'primary': '0000045B', 'secondary': '00000409'},
- {'name': 'Slovak', 'tag': 'sk-SK', 'primary': '0000041B', 'secondary': None},
- {'name': 'Slovenian', 'tag': 'sl-SI', 'primary': '00000424', 'secondary': None},
- {'name': 'Somali', 'tag': 'so-SO', 'primary': '00000409', 'secondary': None},
- {'name': 'Somali (Djibouti)', 'tag': 'so-DJ', 'primary': '00000409', 'secondary': None},
- {'name': 'Somali (Ethiopia)', 'tag': 'so-ET', 'primary': '00000409', 'secondary': None},
- {'name': 'Somali (Kenya)', 'tag': 'so-KE', 'primary': '00000409', 'secondary': None},
- {'name': 'Spanish', 'tag': 'es-ES', 'primary': '0000040A', 'secondary': None},
- {'name': 'Spanish (Argentina)', 'tag': 'es-AR', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Belize)', 'tag': 'es-BZ', 'primary': '00000409', 'secondary': None},
- {'name': 'Spanish (Bolivia)', 'tag': 'es-BO', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Brazil)', 'tag': 'es-BR', 'primary': '00000409', 'secondary': None},
- {'name': 'Spanish (Chile)', 'tag': 'es-CL', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Colombia)', 'tag': 'es-CO', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Costa Rica)', 'tag': 'es-CR', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Cuba)', 'tag': 'es-CU', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Dominican Republic)', 'tag': 'es-DO', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Ecuador)', 'tag': 'es-EC', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (El Salvador)', 'tag': 'es-SV', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Equatorial Guinea)', 'tag': 'es-GQ', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Guatemala)', 'tag': 'es-GT', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Honduras)', 'tag': 'es-HN', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Mexico)', 'tag': 'es-MX', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Nicaragua)', 'tag': 'es-NI', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Panama)', 'tag': 'es-PA', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Paraguay)', 'tag': 'es-PY', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Peru)', 'tag': 'es-PE', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Philippines)', 'tag': 'es-PH', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Puerto Rico)', 'tag': 'es-PR', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (United States)', 'tag': 'es-US', 'primary': '0000080A', 'secondary': '00000409'},
- {'name': 'Spanish (Uruguay)', 'tag': 'es-UY', 'primary': '0000080A', 'secondary': None},
- {'name': 'Spanish (Venezuela)', 'tag': 'es-VE', 'primary': '0000080A', 'secondary': None},
- {'name': 'Standard Moroccan Tamazight', 'tag': 'zgh', 'primary': '0000105F', 'secondary': '0000040C'},
- {'name': 'Swedish', 'tag': 'sv-SE', 'primary': '0000041D', 'secondary': None},
- {'name': 'Swedish (Finland)', 'tag': 'sv-FI', 'primary': '0000041D', 'secondary': None},
- {'name': 'Swiss German', 'tag': 'de-CH', 'primary': '00000807', 'secondary': None},
- {'name': 'Syriac', 'tag': 'syr-SY', 'primary': '0000045A', 'secondary': '00000409'},
- {'name': 'Tachelhit', 'tag': 'tzm-Tfng-MA', 'primary': '0000105F', 'secondary': '00000409'},
- {'name': 'Tachelhit (Latin)', 'tag': None, 'primary': '0000085F', 'secondary': None},
- {'name': 'Tajik', 'tag': 'tg-Cyrl-TJ', 'primary': '00000428', 'secondary': '00000409'},
- {'name': 'Tamil', 'tag': 'ta-IN', 'primary': '00020449', 'secondary': '00004009'},
- {'name': 'Tamil (Malaysia)', 'tag': 'ta-MY', 'primary': '00020449', 'secondary': '00000409'},
- {'name': 'Tamil (Singapore)', 'tag': 'ta-SG', 'primary': '00020449', 'secondary': '00000409'},
- {'name': 'Tamil (Sri Lanka)', 'tag': 'ta-LK', 'primary': '00020449', 'secondary': '00000409'},
- {'name': 'Tatar', 'tag': 'tt-RU', 'primary': '00010444', 'secondary': '00000409'},
- {'name': 'Telugu', 'tag': 'te-IN', 'primary': '0000044A', 'secondary': '00000409'},
- {'name': 'Thai', 'tag': 'th-TH', 'primary': '0000041E', 'secondary': '00000409'},
- {'name': 'Tibetan', 'tag': 'bo-CN', 'primary': '00010451', 'secondary': '00000409'},
- {'name': 'Tibetan (India)', 'tag': 'bo-IN', 'primary': '00000451', 'secondary': '00000409'},
- {'name': 'Tigrinya', 'tag': 'ti-ET', 'primary': None, 'secondary': '00000409'},
- {'name': 'Turkish', 'tag': 'tr-TR', 'primary': '0000041F', 'secondary': None},
- {'name': 'Turkmen', 'tag': 'tk-TM', 'primary': '00000442', 'secondary': '00000409'},
- {'name': 'Ukrainian', 'tag': 'uk-UA', 'primary': '00020422', 'secondary': '00000409'},
- {'name': 'Upper Sorbian', 'tag': 'hsb-DE', 'primary': '0002042E', 'secondary': None},
- {'name': 'Urdu', 'tag': 'ur-PK', 'primary': '00000420', 'secondary': '00000409'},
- {'name': 'Urdu (India)', 'tag': 'ur-IN', 'primary': '00000420', 'secondary': '00000409'},
- {'name': 'Uyghur', 'tag': 'ug-CN', 'primary': '00010480', 'secondary': '00000409'},
- {'name': 'Uzbek', 'tag': 'uz-Latn-UZ', 'primary': '00000409', 'secondary': None},
- {'name': 'Uzbek (Arabic)', 'tag': None, 'primary': '00000463', 'secondary': '00000409'},
- {'name': 'Uzbek (Cyrillic)', 'tag': None, 'primary': '00000843', 'secondary': '00000409'},
- {'name': 'Valencian (Spain)', 'tag': 'ca-ES-valencia', 'primary': '0000040A', 'secondary': None},
- {'name': 'Vietnamese', 'tag': 'vi-VN', 'primary': None, 'secondary': None},
- {'name': 'Walser', 'tag': 'de-CH', 'primary': '00000807', 'secondary': None},
- {'name': 'Welsh', 'tag': 'cy-GB', 'primary': '00000452', 'secondary': '00000809'},
- {'name': 'Western Frisian', 'tag': 'fy-NL', 'primary': '00020409', 'secondary': None},
- {'name': 'Wolof', 'tag': 'wo-SN', 'primary': '00000488', 'secondary': None},
- {'name': 'Xitsonga', 'tag': 'ts-ZA', 'primary': '00000409', 'secondary': None},
- {'name': 'Yi', 'tag': 'ii-CN', 'primary': None, 'secondary': None},
- {'name': 'Yoruba', 'tag': 'yo-NG', 'primary': '0000046A', 'secondary': None},
- {'name': 'isiXhosa', 'tag': 'xh-ZA', 'primary': '00000409', 'secondary': None},
- {'name': 'isiZulu', 'tag': 'zu-ZA', 'primary': '00000409', 'secondary': None}]
-
 #: KLID -> layout file name.
-FILES = {'00000401': 'KBDA1.DLL',
+FILES = {'0000040D': 'KBDHEB.DLL', '0000042A': 'KBDVNTC.DLL', '00000401': 'KBDA1.DLL',
  '00000405': 'KBDCZ.DLL',
  '00000406': 'KBDDA.DLL',
  '00000407': 'KBDGR.DLL',
@@ -569,7 +215,7 @@ FILES = {'00000401': 'KBDA1.DLL',
  '00130C00': 'KBDMYAN.DLL'}
 
 #: KLID -> Windows' display name of the keyboard.
-NAMES = {'00000401': 'Arabic (101)',
+NAMES = {'0000040D': 'Hebrew', '0000042A': 'Vietnamese', '00000401': 'Arabic (101)',
  '00000405': 'Czech',
  '00000406': 'Danish',
  '00000407': 'German',
@@ -689,8 +335,10 @@ NAMES = {'00000401': 'Arabic (101)',
  '00110C00': 'Javanese',
  '00130C00': 'Myanmar (Visual Order)'}
 
-#: Layout file -> SHA-256 of the Windows 11 (26100) file: anything else is refused.
-PINS = {'kbda1.dll': 'b34073feb06d17ea882fecf64abd9c2da922f16ab9f09327f40881d7391ef46f',
+#: Layout file -> SHA-256 of the reference build's file (see the top): anything else is refused.
+PINS = {'kbdheb.dll': '9987348eb6893f42d221c8eaf78014d43af8f249fac9b3cac488972ad97f926c',
+ 'kbdvntc.dll': 'd39f4cb20a107642f3a2bea47a4eb8c4f7945ef89808b438f0acf0cf7695df92',
+ 'kbda1.dll': 'b34073feb06d17ea882fecf64abd9c2da922f16ab9f09327f40881d7391ef46f',
  'kbda3.dll': 'd9eb5282d68cbefec76e3738a3ae93a2ccc63cf1bc579b240694802c4e3a8902',
  'kbdal.dll': 'ed647420167fa89432c12bea555826e8256ddcfef0bd8df401451f0f8ad5007d',
  'kbdarmph.dll': 'f14b11253e4bc867d0c81f3ddefa451ee22b8c09b25a99d15841f85880ec2141',
@@ -938,46 +586,55 @@ def layout_from_bytes(data: bytes) -> dict:
 
 # ── which keyboard for which language and region ───────────────────────────
 
-def locale_klids() -> dict:
-    """tag -> KLID, from Microsoft's table: the primary profile, or for an IME
-    the keyboard under it."""
+def locale_profiles(data: bytes) -> dict:
+    """locale name -> [[LANGID, KLID], ...]: the keyboards-to-install of every
+    locale in locale.nls, in Windows' order, IME profiles left out. A locale
+    whose first profile is an IME starts with the keyboard under it (IME_BASE)."""
+    import struct
+    h = struct.unpack_from("<I", data, 4 * 4)[0]          # the file's header: char types, 3 unknown, locales
+    if data[h + 0x0C:h + 0x10] != b"NSDS":
+        raise SystemExit("locale.nls: no NSDS locale table where its header points")
+    locale_size, locales_offset = struct.unpack_from("<HI", data, h + 0x22)
+    nb_lcnames = struct.unpack_from("<H", data, h + 0x28)[0]
+    lcnames_offset = struct.unpack_from("<I", data, h + 0x30)[0]
+    strings = h + struct.unpack_from("<I", data, h + 0x40)[0]
+
+    def string(pos):
+        n = struct.unpack_from("<H", data, strings + 2 * pos)[0]
+        return data[strings + 2 * pos + 2:strings + 2 * pos + 2 + 2 * n].decode("utf-16le")
+
     out = {}
-    for p in PROFILES:
-        tag = p["tag"]
-        if not tag or tag in out:
-            continue
-        klid = p["primary"] or IME_BASE.get(tag.split("-")[0]) or p["secondary"] or "00000409"
-        out[tag] = klid
+    for i in range(nb_lcnames):
+        name_pos, idx, _lcid = struct.unpack_from("<HHI", data, h + lcnames_offset + 8 * i)
+        record = h + locales_offset + idx * locale_size
+        field = struct.unpack_from("<I", data, record + 0x128)[0]   # skeyboardstoinstall
+        profiles, ime_lang = [], None
+        for item in string(field).split(";"):
+            if ":" not in item:
+                continue
+            lang, rest = item.split(":", 1)
+            if rest.startswith("{"):
+                ime_lang = ime_lang or lang.lower()
+            else:
+                profiles.append([lang.lower(), rest.upper()])
+        name = string(name_pos)
+        # An IME first stays first as the keyboard under it, the one Latin text
+        # is typed on (IME_BASE), as before: IMEs are not modelled here.
+        first_is_ime = string(field).split(";")[0].split(":", 1)[-1].startswith("{")
+        base = IME_BASE.get(name.split("-")[0].lower())
+        if first_is_ime and base:
+            profiles = [[ime_lang, base]] + [p for p in profiles if p != [ime_lang, base]]
+        if profiles:
+            out[name] = profiles
     return out
 
 
-def locale_secondaries() -> dict:
-    """tag -> the second keyboard Windows installs with the language, from the
-    same table: what a user of a language whose keyboard lacks a character (a
-    Latin letter on a Russian or Greek keyboard) switches to and types it on.
-    Only for a row whose primary is a keyboard; under an IME the keyboard is
-    already the one Latin text is typed on."""
-    out = {}
-    for p in PROFILES:
-        tag = p["tag"]
-        if not tag or tag in out or not p["primary"]:
-            continue
-        if p["secondary"] and p["secondary"] != p["primary"]:
-            out[tag] = p["secondary"]
-    return out
-
-
-def language_main_tags() -> dict:
-    """language -> the tag of Microsoft's row for the language itself (no region in its name)."""
-    out = {}
-    for p in PROFILES:
-        if p["tag"] and "(" not in p["name"]:
-            out.setdefault(p["tag"].split("-")[0], p["tag"])
-    return out
-
-
-def build(dll_dir: pathlib.Path) -> dict:
-    klids = sorted(set(locale_klids().values()) | set(locale_secondaries().values()))
+def build(dll_dir: pathlib.Path, nls: pathlib.Path) -> dict:
+    nls_data = nls.read_bytes()
+    if hashlib.sha256(nls_data).hexdigest() != NLS_PIN:
+        raise SystemExit("refused, not the pinned Windows locale.nls: %s" % nls)
+    profiles = locale_profiles(nls_data)
+    klids = sorted({klid for ps in profiles.values() for _lang, klid in ps})
     layouts, refused = {}, []
     for klid in klids:
         name = FILES[klid].lower()
@@ -989,8 +646,8 @@ def build(dll_dir: pathlib.Path) -> dict:
         layouts[klid] = layout_from_bytes(data)
     if refused:
         raise SystemExit("refused, not the pinned Windows files:\n  " + "\n  ".join(refused))
-    return {"layouts": layouts, "locale": locale_klids(), "secondary": locale_secondaries(),
-            "main": language_main_tags(),
+    return {"layouts": layouts, "profiles": profiles,
+            "first": {name: ps[0][1] for name, ps in profiles.items()},
             "names": {k: NAMES[k] for k in klids}}
 
 
@@ -1000,25 +657,27 @@ def render(b: dict) -> str:
     return (
         '"""Every keyboard a Windows persona can type on. GENERATED by\n'
         "`python scripts/gen_windows_keylayouts.py` from the bytes of the pinned\n"
-        "Windows 11 (26100) layout files; do not hand-edit.\n\n"
+        "layout files and locale.nls of Windows 11 26H2, build 26300.9711 (26100 base);\n"
+        "do not hand-edit.\n\n"
         "LAYOUTS: KLID -> {hasAltGr, keys: DOM code -> keyCode, key, shiftKey, altGrKey,\n"
-        "shiftAltGrKey, dead}. LOCALE_KLID: language tag -> KLID (Microsoft's default\n"
-        "input profiles). LOCALE_SECONDARY: language tag -> the second keyboard Windows\n"
-        "installs with it. LANGUAGE_MAIN_TAG: language -> the tag of its own row.\n"
+        "shiftAltGrKey, dead}. LOCALE_KEYBOARDS: locale name -> [[LANGID, KLID], ...], the\n"
+        "keyboards Windows installs with it, in its order. LOCALE_KLID: locale name -> the\n"
+        "first of them.\n"
         '"""\n'
         "from __future__ import annotations\n\n"
-        "#: %d layouts.\nLAYOUT_NAMES = %s\n\nLOCALE_KLID = %s\n\nLOCALE_SECONDARY = %s\n\n"
-        "LANGUAGE_MAIN_TAG = %s\n\nLAYOUTS = %s\n"
-        % (len(b["layouts"]), lit(b["names"]), lit(b["locale"]), lit(b["secondary"]),
-           lit(b["main"]), lit(b["layouts"])))
+        "#: %d layouts.\nLAYOUT_NAMES = %s\n\nLOCALE_KLID = %s\n\nLOCALE_KEYBOARDS = %s\n\n"
+        "LAYOUTS = %s\n"
+        % (len(b["layouts"]), lit(b["names"]), lit(b["first"]), lit(b["profiles"]),
+           lit(b["layouts"])))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dll-dir", type=pathlib.Path, default=DEFAULT_DLL_DIR)
+    ap.add_argument("--nls", type=pathlib.Path, default=DEFAULT_NLS)
     ap.add_argument("--check", action="store_true")
     a = ap.parse_args()
-    text = render(build(a.dll_dir))
+    text = render(build(a.dll_dir, a.nls))
     if a.check:
         same = OUT.exists() and OUT.read_text(encoding="utf-8") == text
         print(("fresh: " if same else "stale: ") + str(OUT))

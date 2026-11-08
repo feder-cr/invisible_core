@@ -58,12 +58,12 @@ def russian_browser(tmp_path, monkeypatch):
 def test_the_core_declares_the_keyboards_with_the_language_and_country():
     prefs = {}
     _apply_locale(prefs, SessionLocale(("de", "en-US", "en"), "CH"))
-    assert prefs[KEYBOARD_LAYOUT_PREF] == "00000807,0000100C"
+    assert prefs[KEYBOARD_LAYOUT_PREF] == "0807:00000807;100c:0000100C"
 
 
 def test_launch_takes_the_keyboards_out_of_the_profile(russian_browser):
     browser, _ = russian_browser
-    assert browser.layout == "00000419,00000409"
+    assert browser.layout == "0419:00000419;0409:00000409"
     user_js = pathlib.Path(browser._files.profile, "user.js").read_text(encoding="utf-8")
     assert KEYBOARD_LAYOUT_PREF not in user_js
 
