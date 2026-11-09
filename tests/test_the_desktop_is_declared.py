@@ -30,7 +30,7 @@ EXPECTED = {
     "ui.scrollToClick": 0,                                 # A5
     "browser.display.document_color_use": 0,               # A6
     "dom.forms.select.customstyling": True,                # A6
-    "gfx.color_management.force_srgb": True,               # A8
+    "gfx.color_management.force_srgb": "<absent>",         # A8: the engine declares the output profile itself
     "security.osclientcerts.autoload": False,              # A11
     "layout.word_select.eat_space_to_next_word": True,     # A13
     "ui.textScaleFactor": 100,                             # A17
@@ -58,7 +58,7 @@ def test_the_two_builds_declare_the_same_desktop(monkeypatch):
     for seed in (0, 42, 1561645783):
         win = _prefs(monkeypatch, "win32", seed)
         lin = _prefs(monkeypatch, "linux", seed)
-        assert {k: win[k] for k in EXPECTED} == {k: lin[k] for k in EXPECTED}, seed
+        assert {k: win.get(k, "<absent>") for k in EXPECTED} == {k: lin.get(k, "<absent>") for k in EXPECTED}, seed
 
 
 def test_the_three_form_control_fonts_are_the_dialog_font(monkeypatch):
@@ -137,3 +137,14 @@ def test_the_dialog_colour_is_retail_159_s(monkeypatch, platform):
     rgb(240,240,240). Declaring 151's on a 159 engine was a fixed value that
     differed from retail on every host."""
     assert _prefs(monkeypatch, platform)["ui.-moz-dialog"] == "#FFFFFF"
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_the_output_profile_is_the_engines_own_never_forced_to_srgb(monkeypatch, platform):
+    """The engine declares Windows' default display profile itself (the profile of a
+    Windows with no monitor profile of its own), so the launch must not force sRGB:
+    force_srgb skips the conversion of tagged images that retail does, and a canvas
+    reads the difference back. 27 of 72 probes of the measured page differed."""
+    for pref in ("gfx.color_management.force_srgb", "gfx.color_management.native_srgb",
+                 "gfx.color_management.display_profile"):
+        assert pref not in _prefs(monkeypatch, platform)

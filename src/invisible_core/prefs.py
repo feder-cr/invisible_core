@@ -1776,7 +1776,6 @@ def _apply_desktop(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["browser.display.document_color_use"] = int(d.document_colors)    # A6
     prefs["dom.forms.select.customstyling"] = bool(d.select_styling)
     prefs["layout.word_select.eat_space_to_next_word"] = bool(d.word_select_eats_space)  # A13
-    prefs["gfx.color_management.force_srgb"] = bool(d.srgb_output)          # A8
     prefs["security.osclientcerts.autoload"] = bool(d.os_client_certs)      # A11
 
 

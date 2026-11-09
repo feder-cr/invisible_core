@@ -389,10 +389,6 @@ class DesktopProfile:
     #: (layout.word_select.eat_space_to_next_word): Windows, not Linux. A page
     #: reads it with getSelection() after a real double click.
     word_select_eats_space: bool = True
-    #: Tagged images are converted to sRGB (gfx.color_management.force_srgb)
-    #: instead of the HOST's monitor profile (GetICMProfileW, _ICC_PROFILE),
-    #: which a canvas below the 64x64 substitution floor reads back.
-    srgb_output: bool = True
     #: The OS client-certificate module (security.osclientcerts.autoload):
     #: with it the machine's personal certificates answer a server that asks
     #: for one. Off: the persona has none.
