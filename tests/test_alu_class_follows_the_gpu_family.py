@@ -32,12 +32,31 @@ _ALL = [d for devs in _DEVICES.values() for d in devs]
 #: every NVIDIA device of the pool, by the GPU it is (chip in the comment).
 _NVIDIA = {
     "gtx980_58278": 1,       # GM204, Maxwell
+    "gtx1060_58278": 1,      # GP106, Pascal
+    "gtx1050ti_58278": 1,    # GP107, Pascal
+    "gtx1070_58278": 1,      # GP104, Pascal
     "gtx1650_62101": 2,      # TU117, Turing
+    "rtx2060_62101": 2,      # TU106, Turing
+    "gtx1660s_62101": 2,     # TU116, Turing
+    "gtx1660ti_62101": 2,    # TU116, Turing
     "rtx3060_62101": 2,      # GA106, Ampere
+    "rtx3050_62101": 2,      # GA106, Ampere
+    "rtx3060ti_62101": 2,    # GA104, Ampere
+    "rtx3070_62101": 2,      # GA104, Ampere
+    "rtx3060l_62101": 2,     # GA106M, Ampere
+    "rtx3080_62101": 2,      # GA102, Ampere
     "rtx4060_62101": 2,      # AD107, Ada
+    "rtx4060l_62101": 2,     # AD107M, Ada
+    "rtx4060ti_62101": 2,    # AD106, Ada
+    "rtx4050l_62101": 2,     # AD107M, Ada
+    "rtx4070_62101": 2,      # AD104, Ada
+    "rtx4070s_62101": 2,     # AD104, Ada
     "rtx5060_62101": 2,      # Blackwell
     "rtx5060ti_62101": 2,    # Blackwell
+    "rtx5060l_62101": 2,     # Blackwell
     "rtx5070_62101": 2,      # Blackwell
+    "rtx5070ti_62101": 2,    # Blackwell
+    "rtx5080_62101": 2,      # Blackwell
     "rtx5080l_61742": 2,     # Blackwell
 }
 
