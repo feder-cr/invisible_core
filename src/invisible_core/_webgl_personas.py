@@ -377,6 +377,35 @@ def gfx_device_for(renderer: str, label: str) -> Optional[Dict]:
     return None
 
 
+#: zoom.stealth.webgl.alu_class: which of the GPU's arithmetic behaviours the engine
+#: reproduces for the declared device. Measured, per GPU family, on real captures
+#: (C:/ff/invisible_D3D11Core/notes/what-changes-the-bits.md, 70 CUDA captures):
+#: cos and sin return other bits on Volta and later than on Maxwell and Pascal, every
+#: other function is one pattern across all families, and no driver or model inside a
+#: family moves a bit. Intel and AMD are 0: the engine's own computation, not an NVIDIA one.
+_NVIDIA_VENDOR_ID = "0x10de"
+_ALU_CLASS_BY_FAMILY = {
+    "nv_maxwell": 1, "nv_pascal": 1,
+    "nv_volta": 2, "nv_turing": 2, "nv_ampere": 2, "nv_ada": 2, "nv_blackwell": 2,
+}
+
+
+def alu_class_for(device: Dict) -> int:
+    """The `zoom.stealth.webgl.alu_class` of a gfx device (a `win_gfx_devices.json` entry).
+
+    0 for any device that is not NVIDIA; for an NVIDIA device the class of its
+    `alu_family`. An NVIDIA device with no family, or a family this table does not
+    know, RAISES: a guess would declare the wrong arithmetic for a real GPU, and
+    leaving it out would let the engine pick one."""
+    if device["vendor_id"] != _NVIDIA_VENDOR_ID:
+        return 0
+    family = device.get("alu_family")
+    if family not in _ALU_CLASS_BY_FAMILY:
+        raise ValueError("the NVIDIA device %r has no known GPU family (alu_family=%r): "
+                         "its alu_class cannot be declared" % (device["label"], family))
+    return _ALU_CLASS_BY_FAMILY[family]
+
+
 def forced_gpu_class(seed: int) -> Optional[str]:
     """The gpu_class of the persona this seed presents. A QUERY, not a knob.
 

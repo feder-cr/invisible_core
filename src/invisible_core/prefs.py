@@ -32,8 +32,8 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
-from ._webgl_personas import (choose_cpu_vendor, choose_gfx_device, gfx_device_for, persona_for,
-                              render_noise_seed)
+from ._webgl_personas import (alu_class_for, choose_cpu_vendor, choose_gfx_device, gfx_device_for,
+                              persona_for, render_noise_seed)
 from ._proxy import configure_proxy
 
 
@@ -1242,6 +1242,10 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
         if not _device:
             raise ValueError("the persona %r has no real device to declare" % profile.gpu.renderer)
         prefs["zoom.stealth.gfx.feature_status"] = _device["feature_status"]
+        # The arithmetic class of that same device's GPU family (0 not NVIDIA, 1 Maxwell
+        # and Pascal, 2 Volta and later): declared here, once, beside the device it
+        # follows. Source: _webgl_personas._ALU_CLASS_BY_FAMILY.
+        prefs["zoom.stealth.webgl.alu_class"] = alu_class_for(_device)
         # The CPU vendor, which decides the reciprocal and reciprocal square root tables of Skia's
         # highp blending in the engine (RCPPS/RSQRTPS differ between Intel and AMD, and an AVX2
         # host would otherwise answer with its own): Intel for an Intel GPU, AMD for an AMD APU,

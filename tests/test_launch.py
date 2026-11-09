@@ -227,6 +227,22 @@ def test_the_machine_s_font_library_and_proxy_settings_stay_behind():
         assert name not in env, name
 
 
+def test_no_angle_variable_reaches_the_browser():
+    # ANGLE reads ANGLE_FEATURE_OVERRIDES_ENABLED / _DISABLED and ANGLE_DEFAULT_PLATFORM
+    # from the environment: a machine's value would change what the graphics stack
+    # does, and a page can measure it. The allowlist names no ANGLE_ variable, so the
+    # whole prefix stays behind, whatever its case and whatever its name.
+    from invisible_core.launch import _HOST_ENV_ALLOWED
+    angle = {"ANGLE_FEATURE_OVERRIDES_ENABLED": "allowCompressedFormats",
+             "ANGLE_FEATURE_OVERRIDES_DISABLED": "enableMultisampling",
+             "ANGLE_DEFAULT_PLATFORM": "swiftshader", "angle_default_platform": "vulkan",
+             "ANGLE_SOMETHING_NEW": "1", "ANGLE_": "1"}
+    env = build_launch_env({}, base_env={**HOST, **angle})
+    assert not [k for k in env if k.upper().startswith("ANGLE_")]
+    assert env["PATH"] == "/usr/bin"          # the rest of the allowlist still goes in
+    assert not [n for n in _HOST_ENV_ALLOWED if n.startswith("ANGLE_")]
+
+
 def test_the_c_library_s_locale_is_declared_the_same_on_every_machine():
     # The machine's Italian locale stays behind, and an empty one would leave the
     # C library in ASCII: the browser sees C.UTF-8 on every machine.
