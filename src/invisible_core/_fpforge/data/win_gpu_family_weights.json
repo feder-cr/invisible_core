@@ -15,9 +15,9 @@
   },
   "uncovered": {
    "intel_other_older_or_small": "the report's 'Other' Intel rows: no model and no device id; nothing to declare",
-   "intel_gen7.5": "Haswell: a CPU Windows 11 does not support; no measured device (no Windows 11 driver data)",
-   "intel_gen7": "Ivy Bridge: a CPU Windows 11 does not support (HD 4000 measured, left out of a Windows 11 persona)",
-   "intel_gen6": "Sandy Bridge: a CPU Windows 11 does not support; no measured device",
+   "intel_gen7.5": "Haswell: a CPU Windows 11 does not support; no measured device (no Windows 11 driver data). Left out of the pool because a Windows 10 persona is not built yet: its system fonts are not the measured Windows 10 ones, so it would show Windows 11 fonts on a Windows 10 machine.",
+   "intel_gen7": "Ivy Bridge: a CPU Windows 11 does not support (HD 4000 measured, left out of a Windows 11 persona). Left out of the pool because a Windows 10 persona is not built yet: its system fonts are not the measured Windows 10 ones, so it would show Windows 11 fonts on a Windows 10 machine.",
+   "intel_gen6": "Sandy Bridge: a CPU Windows 11 does not support; no measured device. Left out of the pool because a Windows 10 persona is not built yet: its system fonts are not the measured Windows 10 ones, so it would show Windows 11 fonts on a Windows 10 machine.",
    "amd_other": "the report's and Steam's remaining AMD rows: no model, no device id",
    "nv_other": "NVIDIA rows outside the generations of the table: no model, no device id",
    "nv_kepler_maxwell": "Kepler: sanitizes to the GeForce GTX 480 bucket, which the pool has no WebGL parameters for",
