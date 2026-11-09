@@ -1,0 +1,55 @@
+{
+ "_meta": {
+  "what": "the share of each GPU family among Windows personas: the Windows pool is made of the devices of win_gfx_devices.json (their `pool_family`, `weight`), and the weights of the devices of a family add up to the family's weight here",
+  "method": "vendor split: Firefox Public Data Report week 2026-11-02 (all desktop; Apple and 'Other' vendors dropped, renormalised over Intel/AMD/NVIDIA); Intel families: the report's codenames; AMD Vega iGPU: the report's GFX9 rows, rest of AMD split by Steam Oct 2026 rows; NVIDIA split by Steam Oct 2026 rows (DX12 table). Inside a family each device weighs the share of the models it covers (Steam) or of its codename (report), scaled to the family's weight",
+  "sources": {
+   "firefox": "https://analysis-output.telemetry.mozilla.org/public-data-report/hardware/hwsurvey-weekly.json (retrieved 2026-11-09, row 2026-11-02)",
+   "steam": "https://store.steampowered.com/hwsurvey/directx/ (October 2026, retrieved 2026-11-09)",
+   "pci_ids": "https://pci-ids.ucw.cz/v2.2/pci.ids version 2026.11.09, sha256 78ad8a9c006924ea1ec7932e481eaa4c85ceb7fd59b8722c8a08e2f24fadf90e",
+   "weights_file_sha256": "5d7fb61f976a47ea7ac4f8ceb786ff05706ebd11dcff01827076d5c68d4f0b46"
+  },
+  "windows_persona": "Windows 11 24H2: a family whose CPUs Windows 11 does not support has no device",
+  "absorbed": {
+   "intel_gen9": "Skylake GT2 3.91, Kaby Lake GT1.5 1.94 and Gemini Lake 1.14 (report rows, CPUs Windows 11 does not support) are not devices: their share goes to the Coffee Lake and Kaby Lake R devices",
+   "intel_gen12": "Meteor Lake 1.36 (its adapter name sanitizes to the Arc A750 bucket, which the pool has no WebGL parameters for) is not a device: its share goes to the other gen12 devices"
+  },
+  "uncovered": {
+   "intel_other_older_or_small": "the report's 'Other' Intel rows: no model and no device id; nothing to declare",
+   "intel_gen7.5": "Haswell: a CPU Windows 11 does not support; no measured device (no Windows 11 driver data). Left out of the pool because a Windows 10 persona is not built yet: its system fonts are not the measured Windows 10 ones, so it would show Windows 11 fonts on a Windows 10 machine.",
+   "intel_gen7": "Ivy Bridge: a CPU Windows 11 does not support (HD 4000 measured, left out of a Windows 11 persona). Left out of the pool because a Windows 10 persona is not built yet: its system fonts are not the measured Windows 10 ones, so it would show Windows 11 fonts on a Windows 10 machine.",
+   "intel_gen6": "Sandy Bridge: a CPU Windows 11 does not support; no measured device. Left out of the pool because a Windows 10 persona is not built yet: its system fonts are not the measured Windows 10 ones, so it would show Windows 11 fonts on a Windows 10 machine.",
+   "amd_other": "the report's and Steam's remaining AMD rows: no model, no device id",
+   "nv_other": "NVIDIA rows outside the generations of the table: no model, no device id",
+   "nv_kepler_maxwell": "Kepler: sanitizes to the GeForce GTX 480 bucket, which the pool has no WebGL parameters for",
+   "nv_older": "pre-Kepler: sanitizes to a bucket the pool has no WebGL parameters for",
+   "nv_other_pro": "workstation cards: no model, no device id"
+  }
+ },
+ "weights_pct": {
+  "intel_gen9": 24.15,
+  "intel_gen12": 23.03,
+  "intel_other_older_or_small": 11.74,
+  "amd_vega_igpu": 7.0,
+  "intel_gen7.5": 4.47,
+  "nv_ada": 3.77,
+  "nv_ampere": 3.71,
+  "intel_gen7": 3.57,
+  "nv_blackwell": 3.44,
+  "nv_turing": 2.08,
+  "amd_rdna2": 1.91,
+  "intel_gen6": 1.67,
+  "amd_rdna4": 1.56,
+  "amd_igpu_graphics": 1.54,
+  "intel_gen11": 1.42,
+  "amd_rdna3": 1.38,
+  "amd_polaris": 1.17,
+  "nv_pascal": 0.92,
+  "amd_rdna1": 0.54,
+  "amd_other": 0.5,
+  "nv_other": 0.25,
+  "nv_maxwell": 0.12,
+  "nv_kepler_maxwell": 0.05,
+  "nv_older": 0.02,
+  "nv_other_pro": 0.01
+ }
+}
