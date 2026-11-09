@@ -961,9 +961,8 @@ _BASELINE: Dict[str, Any] = {
     # demands that NO `zoom.stealth.font.` pref is emitted, because the binary
     # is self-sufficient for fonts and their configuration lives in the
     # manifest. These two do not configure a font: they say how it is
-    # RASTERISED, and that namespace already exists - `zoom.stealth.text.
-    # coverage_ladder` lives there. The test caught it the same day they had
-    # been put in the wrong namespace, before they shipped.
+    # RASTERISED. The test caught it the same day they had been put in the
+    # wrong namespace, before they shipped.
     # How FreeType loads a glyph: the hinting style, and whether antialiasing
     # is on. DECLARED, never asked of the host.
     #
@@ -1589,15 +1588,9 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     # 10 is the Windows value, which is what the persona claims. Declared for
     # both platforms, so the correction lands on Linux (rule 4).
     prefs["font.minimum-size.th"] = 10
-    # The glyph-edge coverage ladder. It used to live in the binary's font
-    # manifest, which was the wrong home twice over: it is not a property of any
-    # font FILE (it is what the rasteriser does to an edge), and putting it
-    # there meant changing it required a Firefox rebuild. Empty string disables
-    # the snap, which is what a caller wants when measuring the tell itself.
-    # The profile looks it up from the declared ClearType gamma and contrast
-    # ([B361]), so the two cannot describe different machines.
-    prefs["zoom.stealth.text.coverage_ladder"] = ",".join(
-        str(int(v)) for v in profile.font.alpha_ladder)
+    # No glyph-edge coverage ladder is declared: the engine's text is drawn by
+    # idwr, which reads the ClearType gamma and enhanced contrast declared above
+    # and carries the edge itself, so the text is the retail's.
     # The whole font manifest - families, per-face vertical metrics, the alias
     # table and the per-script fallback lists - carried by this package and
     # handed to the binary, which prefers it over the copy in its own
