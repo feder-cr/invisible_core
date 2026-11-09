@@ -50,7 +50,7 @@ def test_the_vendor_follows_the_integrated_graphics(monkeypatch):
 def test_a_discrete_card_draws_by_the_steam_shares(monkeypatch):
     drawn = collections.Counter()
     for seed in range(4000):
-        drawn[choose_cpu_vendor({"vendor_id": "0x10de", "family": None}, seed)] += 1
+        drawn[choose_cpu_vendor({"vendor_id": "0x10de", "pool_family": "nvidia_turing"}, seed)] += 1
     total = sum(w for _, w in CPU_VENDOR_SHARES)
     for vendor, weight in CPU_VENDOR_SHARES:
         assert abs(drawn[vendor] / 4000 - weight / total) < 0.03, (vendor, drawn)
@@ -58,10 +58,26 @@ def test_a_discrete_card_draws_by_the_steam_shares(monkeypatch):
 
 def test_an_amd_apu_is_an_amd_cpu_and_an_intel_device_an_intel_one():
     for seed in range(200):
-        assert choose_cpu_vendor({"vendor_id": "0x1002", "family": "GFX9-RENOIR"}, seed) == "amd"
-        assert choose_cpu_vendor({"vendor_id": "0x8086", "family": "gen12-alderlake-gt2"}, seed) == "intel"
+        assert choose_cpu_vendor({"vendor_id": "0x1002", "pool_family": "amd_vega_igpu"}, seed) == "amd"
+        assert choose_cpu_vendor({"vendor_id": "0x1002", "pool_family": "amd_igpu_graphics"}, seed) == "amd"
+        assert choose_cpu_vendor({"vendor_id": "0x8086", "pool_family": "intel_gen9"}, seed) == "intel"
 
 
 def test_the_vendor_is_the_seed_s_and_nothing_else(monkeypatch):
     first = _declared(7, monkeypatch)[1]["zoom.stealth.cpu.vendor"]
     assert all(_declared(7, monkeypatch)[1]["zoom.stealth.cpu.vendor"] == first for _ in range(3))
+
+def test_every_device_of_the_pool_gets_the_vendor_its_graphics_imply():
+    """The rule is read against the real devices of win_gfx_devices.json, so a device added to the
+    pool with another name for its family cannot slip into the draw as a discrete card."""
+    from invisible_core._webgl_personas import _gfx_devices
+    apus = []
+    for devices in _gfx_devices().values():
+        for device in devices:
+            vendor = choose_cpu_vendor(device, 123)
+            if device["vendor_id"] == "0x8086":
+                assert vendor == "intel", device["label"]
+            elif "igpu" in (device.get("pool_family") or ""):
+                assert vendor == "amd", device["label"]
+                apus.append(device["label"])
+    assert {"renoir_21925", "raven_21925", "raphael_32015"} <= set(apus), apus

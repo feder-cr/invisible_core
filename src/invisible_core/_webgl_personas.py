@@ -348,14 +348,15 @@ def choose_cpu_vendor(device: Optional[Dict], seed: int) -> str:
     the page's canvas sees (Skia's non-separable blends, colour dodge, bicubic images), and
     a page can read the vendor of the GPU, so the two must agree where they cannot differ.
 
-    An Intel device is an Intel CPU's integrated graphics; the AMD APU device (a family is
-    declared only for integrated parts) is an AMD CPU's; a discrete card (NVIDIA, or AMD
-    without a family) goes with either vendor and the seed draws it, from its own stream
-    (a hash of the seed, like `choose_gfx_device`), by the shares above."""
+    An Intel device is an Intel CPU's integrated graphics; an AMD integrated device (its
+    `pool_family` in win_gfx_devices.json says `igpu`: the Vega and Radeon Graphics APUs) is an
+    AMD CPU's; a discrete card (NVIDIA, or AMD Polaris and later) goes with either vendor and
+    the seed draws it, from its own stream (a hash of the seed, like `choose_gfx_device`), by
+    the shares above."""
     if device:
         if device.get("vendor_id") == "0x8086":
             return "intel"
-        if device.get("vendor_id") == "0x1002" and device.get("family"):
+        if device.get("vendor_id") == "0x1002" and "igpu" in (device.get("pool_family") or ""):
             return "amd"
     import hashlib
     h = int.from_bytes(hashlib.sha256(b"cpu-vendor:%d" % int(seed)).digest()[:8], "big")
