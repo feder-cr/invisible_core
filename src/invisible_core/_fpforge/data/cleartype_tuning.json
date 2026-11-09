@@ -14,10 +14,10 @@
     "Windows machine to the next, with the same fonts, is how the text edge is",
     "drawn, and that is the user's ClearType tuning.",
     "",
-    "Every key is a row of coverage_ladders.json, measured on retail Firefox",
-    "151; profile.coverage_ladder refuses any other. The 12 renders are real",
-    "and different (12 text hashes, random-pixel readback 0/64 on each, geometry",
-    "unchanged, 2026-10-24).",
+    "Every key is one of the 12 (gamma x contrast) pairs measured on retail",
+    "Firefox 151: gamma in {1000, 1400, 1800, 2200} x contrast in {0, 50, 100}.",
+    "The 12 renders are real and different (12 text hashes, random-pixel",
+    "readback 0/64 on each, geometry unchanged, 2026-10-24).",
     "",
     "ALL THE MASS IS ON 1800/100, THE UNTUNED MACHINE, DELIBERATELY. That is a",
     "data statement, not a placeholder: there is no measured share of Windows",
@@ -29,8 +29,8 @@
     "canvas."
   ],
   "source": {
-    "keys": "data/coverage_ladders.json (retail Firefox 151.0 for Windows, BuildID 20260516144017)",
-    "untuned": "retail 151.0 on a machine with HKCU\\Software\\Microsoft\\Avalon.Graphics absent draws the 1800/100 ladder (coverage_ladders.json source; re-measured 2026-10-24)",
+    "keys": "12 renders on retail Firefox 151.0 for Windows, BuildID 20260516144017",
+    "untuned": "retail 151.0 on a machine with HKCU\\Software\\Microsoft\\Avalon.Graphics absent draws the 1800/100 edge (re-measured 2026-10-24)",
     "frequencies": "not measured"
   },
   "entries": [

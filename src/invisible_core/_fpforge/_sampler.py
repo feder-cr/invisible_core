@@ -367,8 +367,8 @@ def derive_cleartype_tuning(seed: int) -> Tuple[int, int]:
     drawn from `cleartype_tuning.json`.
 
     The one thing that makes canvas text differ between Windows machines with
-    the same fonts: the edge DirectWrite draws, which the Linux build follows
-    through the coverage ladder of the same key. Declared, never read from the
+    the same fonts: the edge DirectWrite draws, which the engine's idwr text
+    reads from the declared gamma and contrast. Declared, never read from the
     host. Its own stream, like `derive_max_touch_points`, so it moves no other
     field; the table says why all its mass is on the untuned machine.
     """
