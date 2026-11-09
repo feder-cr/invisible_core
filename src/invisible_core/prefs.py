@@ -339,13 +339,11 @@ _WIN_WEBGPU_LIMITS = chr(10).join([
 # ──────────────────────────────────────────────────────────────────────
 #  Windows system-font surface
 #
-#  The 20 `ui.font.*` also live in the binary's all.js. That copy was kept
-#  as a floor for a binary launched WITHOUT this package, because Gecko's own
-#  Linux default names "Sans" at 13.3333px, a family that does not exist on
-#  Windows (the studied system tampering=True on 2026-08-07). It is a second source of
-#  truth all the same, and it was wrong on the three form-control fonts
-#  (see `_apply_fonts`): it goes with the next engine, and this is the one
-#  source (28-valori-dell-host.md A7).
+#  The 20 `ui.font.*` are declared here and nowhere else: the engine carries
+#  no copy of them (StealthPrefs.js has no floor), and it refuses to start
+#  without them, as it does without the palette. Gecko's own Linux default
+#  would name "Sans" at 13.3333px, a family that does not exist on Windows
+#  (28-valori-dell-host.md A7).
 #
 #  THE SIZES ARE STRINGS ON PURPOSE. nsXPLookAndFeel reads them through
 #  Preferences::GetFloat, which in Gecko parses float prefs from their
@@ -1551,15 +1549,11 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     disagreement is what drove the studied system to tampering=True on Linux with
     Windows clean, same seed and same IP.
 
-    ⛔ The 20 `ui.font.*` prefs also ship compiled into the binary's all.js,
-    and that copy is a SECOND SOURCE OF TRUTH, which engine rule 7 refuses
-    even as a floor: it went wrong exactly the way rule 7 says it will. Its
-    comment declared the three form-control fonts "Segoe UI" on the belief
-    that a real Windows Firefox draws its controls in the shell font; retail
-    says "MS Shell Dlg 2", and this layer copied the floor instead of
-    measuring. From 49.46.0 the three come from `font.dialog_family`, and a
-    user pref beats an all.js default, so this layer wins on both builds. The
-    all.js block is removed with the next engine (28-valori-dell-host.md A7).
+    The 20 `ui.font.*` prefs are the only source: the engine has no copy
+    of them (StealthPrefs.js carries no floor) and refuses to start without
+    them. The three form-control fonts come from `font.dialog_family`
+    (retail answers "MS Shell Dlg 2"), the other seventeen from
+    `font.ui_family`.
     """
     for element in _UI_FONT_ELEMENTS:
         prefs[f"ui.font.{element}"] = (
