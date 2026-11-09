@@ -32,7 +32,8 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
-from ._webgl_personas import alu_class_for, choose_gfx_device, gfx_device_for, persona_for, render_noise_seed
+from ._webgl_personas import (alu_class_for, choose_cpu_vendor, choose_gfx_device, gfx_device_for,
+                              persona_for, render_noise_seed)
 from ._proxy import configure_proxy
 
 
@@ -1245,6 +1246,11 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
         # and Pascal, 2 Volta and later): declared here, once, beside the device it
         # follows. Source: _webgl_personas._ALU_CLASS_BY_FAMILY.
         prefs["zoom.stealth.webgl.alu_class"] = alu_class_for(_device)
+        # The CPU vendor, which decides the reciprocal and reciprocal square root tables of Skia's
+        # highp blending in the engine (RCPPS/RSQRTPS differ between Intel and AMD, and an AVX2
+        # host would otherwise answer with its own): Intel for an Intel GPU, AMD for an AMD APU,
+        # drawn by the Steam survey shares for a discrete card.
+        prefs["zoom.stealth.cpu.vendor"] = choose_cpu_vendor(_device, profile.seed)
     else:
         # ⛔ This emitted empty renderer and vendor until 2026-11-01, which left
         # WebGL to the host and its blocklist. The engine refuses to start on an
