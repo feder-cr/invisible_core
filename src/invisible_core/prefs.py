@@ -32,8 +32,7 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
-from ._webgl_personas import (alu_class_for, choose_cpu_vendor, choose_gfx_device, gfx_device_for,
-                              persona_for, render_noise_seed)
+from ._webgl_personas import choose_gfx_device, gfx_device_for, persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
 
@@ -340,11 +339,13 @@ _WIN_WEBGPU_LIMITS = chr(10).join([
 # ──────────────────────────────────────────────────────────────────────
 #  Windows system-font surface
 #
-#  The 20 `ui.font.*` are declared here and nowhere else: the engine carries
-#  no copy of them (StealthPrefs.js has no floor), and it refuses to start
-#  without them, as it does without the palette. Gecko's own Linux default
-#  would name "Sans" at 13.3333px, a family that does not exist on Windows
-#  (28-valori-dell-host.md A7).
+#  The 20 `ui.font.*` also live in the binary's all.js. That copy was kept
+#  as a floor for a binary launched WITHOUT this package, because Gecko's own
+#  Linux default names "Sans" at 13.3333px, a family that does not exist on
+#  Windows (the studied system tampering=True on 2026-08-07). It is a second source of
+#  truth all the same, and it was wrong on the three form-control fonts
+#  (see `_apply_fonts`): it goes with the next engine, and this is the one
+#  source (28-valori-dell-host.md A7).
 #
 #  THE SIZES ARE STRINGS ON PURPOSE. nsXPLookAndFeel reads them through
 #  Preferences::GetFloat, which in Gecko parses float prefs from their
@@ -961,8 +962,9 @@ _BASELINE: Dict[str, Any] = {
     # demands that NO `zoom.stealth.font.` pref is emitted, because the binary
     # is self-sufficient for fonts and their configuration lives in the
     # manifest. These two do not configure a font: they say how it is
-    # RASTERISED. The test caught it the same day they had been put in the
-    # wrong namespace, before they shipped.
+    # RASTERISED, and that namespace already exists - `zoom.stealth.text.
+    # coverage_ladder` lives there. The test caught it the same day they had
+    # been put in the wrong namespace, before they shipped.
     # How FreeType loads a glyph: the hinting style, and whether antialiasing
     # is on. DECLARED, never asked of the host.
     #
@@ -1241,15 +1243,6 @@ def _apply_gpu_persona(prefs: Dict[str, Any], profile: Profile):
         if not _device:
             raise ValueError("the persona %r has no real device to declare" % profile.gpu.renderer)
         prefs["zoom.stealth.gfx.feature_status"] = _device["feature_status"]
-        # The arithmetic class of that same device's GPU family (0 not NVIDIA, 1 Maxwell
-        # and Pascal, 2 Volta and later): declared here, once, beside the device it
-        # follows. Source: _webgl_personas._ALU_CLASS_BY_FAMILY.
-        prefs["zoom.stealth.webgl.alu_class"] = alu_class_for(_device)
-        # The CPU vendor, which decides the reciprocal and reciprocal square root tables of Skia's
-        # highp blending in the engine (RCPPS/RSQRTPS differ between Intel and AMD, and an AVX2
-        # host would otherwise answer with its own): Intel for an Intel GPU, AMD for an AMD APU,
-        # drawn by the Steam survey shares for a discrete card.
-        prefs["zoom.stealth.cpu.vendor"] = choose_cpu_vendor(_device, profile.seed)
     else:
         # ⛔ This emitted empty renderer and vendor until 2026-11-01, which left
         # WebGL to the host and its blocklist. The engine refuses to start on an
@@ -1558,11 +1551,15 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     disagreement is what drove the studied system to tampering=True on Linux with
     Windows clean, same seed and same IP.
 
-    The 20 `ui.font.*` prefs are the only source: the engine has no copy
-    of them (StealthPrefs.js carries no floor) and refuses to start without
-    them. The three form-control fonts come from `font.dialog_family`
-    (retail answers "MS Shell Dlg 2"), the other seventeen from
-    `font.ui_family`.
+    ⛔ The 20 `ui.font.*` prefs also ship compiled into the binary's all.js,
+    and that copy is a SECOND SOURCE OF TRUTH, which engine rule 7 refuses
+    even as a floor: it went wrong exactly the way rule 7 says it will. Its
+    comment declared the three form-control fonts "Segoe UI" on the belief
+    that a real Windows Firefox draws its controls in the shell font; retail
+    says "MS Shell Dlg 2", and this layer copied the floor instead of
+    measuring. From 49.46.0 the three come from `font.dialog_family`, and a
+    user pref beats an all.js default, so this layer wins on both builds. The
+    all.js block is removed with the next engine (28-valori-dell-host.md A7).
     """
     for element in _UI_FONT_ELEMENTS:
         prefs[f"ui.font.{element}"] = (
@@ -1588,9 +1585,15 @@ def _apply_fonts(prefs: Dict[str, Any], profile: Profile) -> None:
     # 10 is the Windows value, which is what the persona claims. Declared for
     # both platforms, so the correction lands on Linux (rule 4).
     prefs["font.minimum-size.th"] = 10
-    # No glyph-edge coverage ladder is declared: the engine's text is drawn by
-    # idwr, which reads the ClearType gamma and enhanced contrast declared above
-    # and carries the edge itself, so the text is the retail's.
+    # The glyph-edge coverage ladder. It used to live in the binary's font
+    # manifest, which was the wrong home twice over: it is not a property of any
+    # font FILE (it is what the rasteriser does to an edge), and putting it
+    # there meant changing it required a Firefox rebuild. Empty string disables
+    # the snap, which is what a caller wants when measuring the tell itself.
+    # The profile looks it up from the declared ClearType gamma and contrast
+    # ([B361]), so the two cannot describe different machines.
+    prefs["zoom.stealth.text.coverage_ladder"] = ",".join(
+        str(int(v)) for v in profile.font.alpha_ladder)
     # The whole font manifest - families, per-face vertical metrics, the alias
     # table and the per-script fallback lists - carried by this package and
     # handed to the binary, which prefers it over the copy in its own
@@ -1779,6 +1782,7 @@ def _apply_desktop(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["browser.display.document_color_use"] = int(d.document_colors)    # A6
     prefs["dom.forms.select.customstyling"] = bool(d.select_styling)
     prefs["layout.word_select.eat_space_to_next_word"] = bool(d.word_select_eats_space)  # A13
+    prefs["gfx.color_management.force_srgb"] = bool(d.srgb_output)          # A8
     prefs["security.osclientcerts.autoload"] = bool(d.os_client_certs)      # A11
 
 

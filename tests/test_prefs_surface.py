@@ -434,7 +434,7 @@ def test_a_caller_override_still_wins_over_the_font_layer():
 
 
 def test_the_font_manifest_travels_with_the_profile():
-    """Families, per-face metrics, aliases and the per-script fallback
+    """Families, per-face metrics, aliases, ladder and the per-script fallback
     lists all live in one field, so the profile is the single object that says
     what Windows looks like."""
     from invisible_core._fpforge import generate_profile
@@ -444,8 +444,8 @@ def test_the_font_manifest_travels_with_the_profile():
     assert manifest.count("\nS|") >= 100, "the per-script fallback table is missing"
     #: ⛔ The `L|` row is NOT asserted any more, and it was taken out of the
     #: manifest on 2026-08-17. It was dead data protected by a test: the
-    #: engine's parser dropped that branch when the coverage ladder moved out of
-    #: the manifest, and the PACKAGED manifest did not
+    #: engine's parser dropped that branch when the coverage ladder moved to
+    #: `zoom.stealth.canvas.alpha_ladder`, and the PACKAGED manifest did not
     #: carry it already - so every bare launch was already running without it.
     #: Keeping it here made the two copies differ by one single row, which is
     #: to say it prevented the flat comparison that now watches them
@@ -606,3 +606,31 @@ def test_the_cleartype_rendering_mode_stays_DEFAULT():
         f"measured 0 matches out of 10 against retail. If the change is wanted, "
         f"re-measure against a retail of the major we declare and rewrite this "
         f"test with the new numbers.")
+
+
+def test_the_coverage_ladder_is_still_declared_and_has_its_endpoints():
+    """The ladder stays, and 2026-08-17 measured WHY it must not be touched.
+
+    Turning it off improved the level COUNT - 9 matches out of 10 against 6 - and
+    ruined the values: 17 greys out of 20 that a real Firefox never produces,
+    against 2. Optimising the count would have destroyed the thing the count
+    measures, and that is why this test sits beside the one above.
+
+    The endpoints are untouchable: 0 and 255 are fully transparent and fully
+    opaque, and moving them would move the ground and the ink instead of the
+    edges.
+    """
+    for seed in (0xB005, 0xC0FFEE, 42):
+        prefs = translate_profile_to_prefs(generate_profile(seed), timezone="America/New_York")
+        ladder = prefs.get("zoom.stealth.text.coverage_ladder")
+        assert ladder, (
+            "the coverage ladder is no longer declared. On Linux FreeType "
+            "produces 193-256 levels where DirectWrite makes 9-19: without the "
+            "ladder the level count becomes a cross-OS tell you read by "
+            "counting, with no hash needed at all")
+        v = [int(x) for x in ladder.split(",")]
+        assert v[0] == 0 and v[-1] == 255, (
+            f"the ladder's endpoints are {v[0]} and {v[-1]}, not 0 and 255. "
+            f"Moving them moves the ground and the ink, not the edges")
+        assert v == sorted(v), f"the ladder is not monotonic: {v}"
+        assert len(set(v)) == len(v), f"la scala ha pioli ripetuti: {v}"

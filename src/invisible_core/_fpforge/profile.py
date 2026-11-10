@@ -280,8 +280,22 @@ class FontProfile:
     #: on every platform.
     dialog_family: str
     monospace_size: int
+    #: The grayscale coverage levels a Windows glyph edge produces, ascending,
+    #: first 0 and last 255 so a snap never moves a fully transparent or fully
+    #: opaque pixel. Measured 2026-08-07 over 48 family/size/weight combos:
+    #: Windows produces 9-19 distinct alpha levels per render, FreeType 193-256.
+    #: A detector does not have to compare a hash to tell those apart, it can
+    #: COUNT - prod on Linux renders "A" with 149 levels against Windows' 16.
+    #: Empty tuple disables the snap.
+    #:
+    #: Looked up from (cleartype_gamma, cleartype_contrast) in
+    #: `data/coverage_ladders.json`, after the pins: the ladder is what those
+    #: two do to a glyph edge, so it is not a value of its own ([B361]). A pin
+    #: of this field still wins, which is how a caller measures the unsnapped
+    #: edge (an empty tuple).
+    alpha_ladder: tuple
     #: The whole font manifest the binary parses: families, per-face vertical
-    #: metrics, the alias table and the per-script
+    #: metrics, the alias table, the coverage ladder and the per-script
     #: fallback lists. A field rather than a side file so that everything the
     #: profile declares about fonts is in one object, pinnable and inspectable
     #: like every other surface. Empty string tells the binary to use the copy
@@ -375,6 +389,10 @@ class DesktopProfile:
     #: (layout.word_select.eat_space_to_next_word): Windows, not Linux. A page
     #: reads it with getSelection() after a real double click.
     word_select_eats_space: bool = True
+    #: Tagged images are converted to sRGB (gfx.color_management.force_srgb)
+    #: instead of the HOST's monitor profile (GetICMProfileW, _ICC_PROFILE),
+    #: which a canvas below the 64x64 substitution floor reads back.
+    srgb_output: bool = True
     #: The OS client-certificate module (security.osclientcerts.autoload):
     #: with it the machine's personal certificates answer a server that asks
     #: for one. Off: the persona has none.
@@ -447,6 +465,7 @@ _PIN_GROUPS = {
     # were added to FontProfile on 2026-08-08 and left out of this table, and
     # the test below is what said so.
     "font": {"ui_family", "ui_size", "dialog_family", "monospace_size",
+             "alpha_ladder",
              "manifest",
              "cleartype_gamma", "cleartype_contrast", "cleartype_level",
              "cleartype_pixel_structure", "cleartype_rendering_mode",
@@ -543,6 +562,7 @@ _PIN_TO_RAW = {
     "font.ui_size": "font_ui_size",
     "font.dialog_family": "font_dialog_family",
     "font.monospace_size": "font_monospace_size",
+    "font.alpha_ladder": "font_alpha_ladder",
     "font.manifest": "font_manifest",
     # The rasterisation parameters travel the same way for the same reason:
     # invariant, so not sampled, but seeded into the raw dict below so a pin
@@ -578,10 +598,10 @@ _PIN_TO_RAW = {
 #: drawn from data/cleartype_tuning.json; the rest are constants.
 #:
 #: ⛔ 1800, not 2200 ([B361]). 2200 is DirectWrite's API default, and it was
-#: declared as "Windows' own", while the text edge the core drew beside it was
+#: declared as "Windows' own", while the coverage ladder declared beside it was
 #: the one 1800 draws: measured on retail Firefox 151 with the machine's
-#: ClearType untuned, 1800/100 is the edge the core had always shipped, byte for
-#: byte, and 2200/100 is another. One key now decides it.
+#: ClearType untuned, the 1800/100 ladder is the one the core had always
+#: shipped, byte for byte, and 2200/100 is another. One key now decides both.
 #:
 #: Gamma and contrast are the UNTUNED machine's key, not a floor: the profile
 #: draws them from data/cleartype_tuning.json, whose untuned row must be this
@@ -763,6 +783,32 @@ FONT_MONOSPACE_SIZE = 13     # Firefox ships 13 on Windows, 12 in its Unix block
 FONT_SYSTEM_TEXT_QUALITY = 5
 #: The values the engine accepts for it; anything else is refused at its read.
 SYSTEM_TEXT_QUALITIES = (0, 4, 5)
+
+#: DirectWrite's grayscale coverage ladder, 17 levels, per (gamma, contrast).
+#: Lives here rather than in the binary's font manifest because it is not a
+#: property of any font file: it is what the Windows rasteriser does to a glyph
+#: edge. MEASURED, not computed: no formula reproduces these bytes (the closest
+#: model misses by 1 on a quarter of the values), so the file is generated from
+#: captures of retail Firefox and never edited by hand ([B361]).
+COVERAGE_LADDERS = {
+    (int(row["gamma"]), int(row["contrast"])): tuple(int(v) for v in row["ladder"])
+    for row in _load_data("coverage_ladders.json")["ladders"]
+}
+
+
+def coverage_ladder(gamma: int, contrast: int) -> tuple:
+    """The ladder (gamma, contrast) draws, refused when it was never measured.
+
+    The domain is finite and known: a key without a measured row has no ladder
+    to send, and inventing one would be the second source this replaced.
+    """
+    key = (int(gamma), int(contrast))
+    if key not in COVERAGE_LADDERS:
+        raise ValueError(
+            "no measured coverage ladder for ClearType gamma %d, contrast %d; "
+            "the measured keys are %s" % (key[0], key[1], sorted(COVERAGE_LADDERS)))
+    return COVERAGE_LADDERS[key]
+
 
 def branding_archive(branding: str) -> Path:
     """The zip archive holding the files of a declared branding."""
@@ -983,6 +1029,11 @@ def generate_profile(
         # "screen.avail_height": 888}` changes ZERO emitted preferences.
         if "screen.taskbar_px" in pin:
             raw["screen_avail_h"] = int(raw["screen_h"]) - int(raw["taskbar_px"])
+    # After the pins, from the gamma and contrast that are actually declared:
+    # a pinned gamma takes its own ladder with it ([B361]).
+    if "font_alpha_ladder" not in raw:
+        raw["font_alpha_ladder"] = coverage_ladder(raw["font_cleartype_gamma"],
+                                                   raw["font_cleartype_contrast"])
     if int(raw["font_system_text_quality"]) not in SYSTEM_TEXT_QUALITIES:
         raise ValueError("font.system_text_quality must be one of %s, not %r"
                          % (SYSTEM_TEXT_QUALITIES, raw["font_system_text_quality"]))
@@ -1036,6 +1087,7 @@ def generate_profile(
             ui_size=str(raw["font_ui_size"]),
             dialog_family=str(raw["font_dialog_family"]),
             monospace_size=int(raw["font_monospace_size"]),
+            alpha_ladder=tuple(int(v) for v in raw["font_alpha_ladder"]),
             manifest=str(raw["font_manifest"]),
             cleartype_gamma=int(raw["font_cleartype_gamma"]),
             cleartype_contrast=int(raw["font_cleartype_contrast"]),
