@@ -71,6 +71,7 @@ import random
 from bisect import bisect_left
 from dataclasses import dataclass
 
+from .._floats import exact_sum, log2 as exact_log2
 from ..seedmix import fnv1a
 
 __all__ = [
@@ -525,7 +526,7 @@ def _movement_duration(rng: random.Random, axis: _Axis, st: MotionStyle,
     fact, not taking over its pacing.
     """
     w = float(target_w) if target_w and target_w > 0 else st.target_w_px
-    bits = math.log2(axis.dist / w + 1.0)
+    bits = exact_log2(axis.dist / w + 1.0)
     # Log-normal spread, not Gaussian-with-a-floor: strictly positive so it
     # needs no clamp (a clamp piles probability mass on one exact value), and
     # measured human movement times are right-skewed anyway.
@@ -556,7 +557,7 @@ def _sample_times(rng: random.Random, duration: float,
 
     # Strictly positive increments -> strictly increasing times.
     incs = [math.exp(rng.gauss(0.0, st.step_jitter)) for _ in range(n_steps)]
-    total_inc = sum(incs)
+    total_inc = exact_sum(incs)
     times = [0.0]
     acc = 0.0
     for c in incs:

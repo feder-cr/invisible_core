@@ -28,6 +28,8 @@ import ipaddress
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from ._floats import exact_sum
+
 #: What "no language asked" means. A requested value of None or "" lands here,
 #: and so does the warned fallback of a failed "auto": Firefox's own default
 #: build is en-US.
@@ -369,7 +371,7 @@ def _country_build(country: str, egress_ip: str) -> str:
         return DEFAULT_LOCALE
     ip = ipaddress.ip_address(egress_ip.strip()).compressed
     digest = int.from_bytes(hashlib.sha256(ip.encode("ascii")).digest()[:8], "big")
-    point = digest / 2 ** 64 * sum(weight for _, weight in shares)
+    point = digest / 2 ** 64 * exact_sum(weight for _, weight in shares)
     for build, weight in shares:
         point -= weight
         if point < 0:

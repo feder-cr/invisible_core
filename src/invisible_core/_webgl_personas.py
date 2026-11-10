@@ -64,6 +64,8 @@ from __future__ import annotations
 import sys
 from typing import Dict, List, Optional
 
+from ._floats import exact_sum
+
 # Vendor-independent ext lists (native order, Arc host capture). Identical for every persona
 # because the set+order is fixed by Firefox+ANGLE on D3D11 FL11_0, not by the GPU vendor.
 _EXT1 = (
@@ -153,7 +155,7 @@ def _draw(pool: List[Dict], seed: int) -> Dict:
     SAME cumulative arithmetic instead of a second copy of it. It must stay the
     only place that walks a cumulative weight: two copies of this loop is how a
     seed starts landing on one entry here and another one there."""
-    total = sum(p["weight"] for p in pool) or 1.0
+    total = exact_sum(p["weight"] for p in pool) or 1.0
     h = (((int(seed) * _IDENTITY_MULTIPLIER) % _IDENTITY_MODULUS)
          / float(_IDENTITY_MODULUS) * total)
     cum = 0.0
@@ -323,7 +325,7 @@ def choose_gfx_device(persona: Optional[Dict], seed: int) -> Optional[Dict]:
         return next(d for d in devs if d["label"] == persona["device"])
     import hashlib
     h = int.from_bytes(hashlib.sha256(b"gfx-device:%d" % int(seed)).digest()[:8], "big")
-    total = sum(d["weight"] for d in devs)
+    total = exact_sum(d["weight"] for d in devs)
     x = h / float(1 << 64) * total
     cum = 0.0
     for d in devs:
@@ -360,7 +362,7 @@ def choose_cpu_vendor(device: Optional[Dict], seed: int) -> str:
             return "amd"
     import hashlib
     h = int.from_bytes(hashlib.sha256(b"cpu-vendor:%d" % int(seed)).digest()[:8], "big")
-    total = sum(w for _, w in CPU_VENDOR_SHARES)
+    total = exact_sum(w for _, w in CPU_VENDOR_SHARES)
     x = h / float(1 << 64) * total
     cum = 0.0
     for vendor, weight in CPU_VENDOR_SHARES:

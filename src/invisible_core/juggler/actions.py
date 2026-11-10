@@ -29,6 +29,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
+from .. import _floats
 from . import _pacing
 from .connection import ReplyTimeout
 from .deadline import Deadline
@@ -269,8 +270,8 @@ class Actions:
         if isinstance(position, dict) and "x" in position and "y" in position:
             return (min(p["x"] for p in points) + float(position["x"]),
                     min(p["y"] for p in points) + float(position["y"]))
-        return (sum(p["x"] for p in points) / 4.0,
-                sum(p["y"] for p in points) / 4.0)
+        return (_floats.exact_sum(p["x"] for p in points) / 4.0,
+                _floats.exact_sum(p["y"] for p in points) / 4.0)
 
     # ── the loop ────────────────────────────────────────────────────────────
     def _retry(self, selector: str, run, *, states=None,
