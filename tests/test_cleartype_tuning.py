@@ -36,8 +36,7 @@ def _prefs(seed=42, pin=None):
 def test_every_key_in_the_table_was_measured_on_retail():
     keys = [tuple(r["value"]) for r in _rows()]
     assert len(keys) == len(set(keys)), keys
-    grid = {(g, c) for g in (1000, 1400, 1800, 2200) for c in (0, 50, 100)}
-    assert set(keys) <= grid, sorted(set(keys) - grid)
+    assert set(keys) <= set(P.COVERAGE_LADDERS), sorted(set(keys) - set(P.COVERAGE_LADDERS))
 
 
 def test_the_table_is_a_probability_distribution():
@@ -72,11 +71,13 @@ def test_the_draw_follows_the_table(monkeypatch):
     assert drawn == {(1800, 100), (2200, 50)}
 
 
-def test_a_sampled_key_reaches_the_prefs(monkeypatch):
+def test_a_sampled_key_reaches_the_prefs_with_its_own_ladder(monkeypatch):
     monkeypatch.setattr(_sampler, "_CLEARTYPE_TUNING", [{"value": [1400, 50], "prob": 1.0}])
     prefs = _prefs()
     assert prefs["gfx.font_rendering.cleartype_params.gamma"] == 1400
     assert prefs["gfx.font_rendering.cleartype_params.enhanced_contrast"] == 50
+    ladder = tuple(int(v) for v in prefs["zoom.stealth.text.coverage_ladder"].split(","))
+    assert ladder == P.COVERAGE_LADDERS[(1400, 50)]
 
 
 def test_a_pin_still_beats_the_draw(monkeypatch):
@@ -84,6 +85,7 @@ def test_a_pin_still_beats_the_draw(monkeypatch):
     font = generate_profile(42, pin={"font.cleartype_gamma": 2200,
                                      "font.cleartype_contrast": 0}).font
     assert (font.cleartype_gamma, font.cleartype_contrast) == (2200, 0)
+    assert font.alpha_ladder == P.COVERAGE_LADDERS[(2200, 0)]
 
 
 def test_no_floor_shadows_the_draw(monkeypatch):

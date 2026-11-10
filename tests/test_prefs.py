@@ -314,7 +314,7 @@ def test_extra_prefs_empty_dict_is_no_op():
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  System colors / dark theme (platform-agnostic - palette is Windows 11 retail)
+#  System colors / dark theme (platform-agnostic - palette is Win10)
 # ──────────────────────────────────────────────────────────────────────
 
 

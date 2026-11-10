@@ -335,78 +335,12 @@ def choose_gfx_device(persona: Optional[Dict], seed: int) -> Optional[Dict]:
     return devs[-1]
 
 
-#: The CPU vendor of a Windows PC, as the share of each among the Windows machines of the Steam
-#: Hardware & Software Survey, October 2026 (store.steampowered.com/hwsurvey/processormfg/): Intel
-#: 53.48%, AMD 46.51%. The survey is of gamers, so AMD is likelier here than among all Windows
-#: users (Mercury Research, client units in Q2 2026: AMD 30.3%, Intel 69.7%, shipments and not
-#: the installed base); the survey is what has the installed base for Windows alone, and is the
-#: one the project uses. No source crosses the CPU vendor with the GPU: the weights are not
-#: conditional on it, which is why the integrated parts below decide it before the draw.
-CPU_VENDOR_SHARES = (("intel", 5348), ("amd", 4651))
-
-
-def choose_cpu_vendor(device: Optional[Dict], seed: int) -> str:
-    """The CPU vendor this seed's PC has, "intel" or "amd": it picks which RCPPS/RSQRTPS
-    the page's canvas sees (Skia's non-separable blends, colour dodge, bicubic images), and
-    a page can read the vendor of the GPU, so the two must agree where they cannot differ.
-
-    An Intel device is an Intel CPU's integrated graphics; an AMD integrated device (its
-    `pool_family` in win_gfx_devices.json says `igpu`: the Vega and Radeon Graphics APUs) is an
-    AMD CPU's; a discrete card (NVIDIA, or AMD Polaris and later) goes with either vendor and
-    the seed draws it, from its own stream (a hash of the seed, like `choose_gfx_device`), by
-    the shares above."""
-    if device:
-        if device.get("vendor_id") == "0x8086":
-            return "intel"
-        if device.get("vendor_id") == "0x1002" and "igpu" in (device.get("pool_family") or ""):
-            return "amd"
-    import hashlib
-    h = int.from_bytes(hashlib.sha256(b"cpu-vendor:%d" % int(seed)).digest()[:8], "big")
-    total = exact_sum(w for _, w in CPU_VENDOR_SHARES)
-    x = h / float(1 << 64) * total
-    cum = 0.0
-    for vendor, weight in CPU_VENDOR_SHARES:
-        cum += weight
-        if x < cum:
-            return vendor
-    return CPU_VENDOR_SHARES[-1][0]
-
-
 def gfx_device_for(renderer: str, label: str) -> Optional[Dict]:
     """The device a Profile declares - a READ of `Profile.gpu.device`, like `persona_for`."""
     for d in _gfx_devices().get(renderer, []):
         if d["label"] == label:
             return d
     return None
-
-
-#: zoom.stealth.webgl.alu_class: which of the GPU's arithmetic behaviours the engine
-#: reproduces for the declared device. Measured, per GPU family, on real captures
-#: (C:/ff/invisible_D3D11Core/notes/what-changes-the-bits.md, 70 CUDA captures):
-#: cos and sin return other bits on Volta and later than on Maxwell and Pascal, every
-#: other function is one pattern across all families, and no driver or model inside a
-#: family moves a bit. Intel and AMD are 0: the engine's own computation, not an NVIDIA one.
-_NVIDIA_VENDOR_ID = "0x10de"
-_ALU_CLASS_BY_FAMILY = {
-    "nv_maxwell": 1, "nv_pascal": 1,
-    "nv_volta": 2, "nv_turing": 2, "nv_ampere": 2, "nv_ada": 2, "nv_blackwell": 2,
-}
-
-
-def alu_class_for(device: Dict) -> int:
-    """The `zoom.stealth.webgl.alu_class` of a gfx device (a `win_gfx_devices.json` entry).
-
-    0 for any device that is not NVIDIA; for an NVIDIA device the class of its
-    `alu_family`. An NVIDIA device with no family, or a family this table does not
-    know, RAISES: a guess would declare the wrong arithmetic for a real GPU, and
-    leaving it out would let the engine pick one."""
-    if device["vendor_id"] != _NVIDIA_VENDOR_ID:
-        return 0
-    family = device.get("alu_family")
-    if family not in _ALU_CLASS_BY_FAMILY:
-        raise ValueError("the NVIDIA device %r has no known GPU family (alu_family=%r): "
-                         "its alu_class cannot be declared" % (device["label"], family))
-    return _ALU_CLASS_BY_FAMILY[family]
 
 
 def forced_gpu_class(seed: int) -> Optional[str]:

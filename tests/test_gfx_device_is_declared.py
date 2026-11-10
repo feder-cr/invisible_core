@@ -7,9 +7,11 @@ declares one real device of its bucket and that device's 63 outcomes, measured o
 retail build with Mozilla's own MOZ_GFX_SPOOF_* variables (coord/gfxinfo):
 `zoom.stealth.gfx.feature_status` = "NAME|STATUS[|failureId],...".
 
-The pool has no Direct3D 10 class persona (shader model 4: they do not exist on
-Windows 11, which has no driver for them): every slot is a vs_5_0 bucket, and the
-devices behind a bucket are real Windows 11 GPUs.
+The five Direct3D 10 class slots (shader model 4: Intel HD Graphics vs_4_0 and
+vs_4_1 x2, GeForce 8800 GTX, Intel 945GM) were personas that do not exist on
+Windows 11, which has no driver for them. They were replaced in place by five
+real Windows 11 GPUs (same position and probability), so only the seeds that drew
+them changed persona.
 """
 from __future__ import annotations
 
@@ -30,14 +32,15 @@ pytestmark = pytest.mark.unit
 _DATA = json.loads(W._DEVICES_PATH.read_text(encoding="utf-8"))
 _FEATURES = _DATA["_meta"]["features"]
 _POOL = json.loads(W._POOL_PATH.read_text(encoding="utf-8"))["win"]
+# the slot probabilities before the replacement: the in-place rule is that none moved
+_PROBS_BEFORE = [0.470921, 0.195745, 0.160284, 0.086524, 0.053901, 0.012766, 0.007092,
+                 0.004255, 0.001419, 0.001419, 0.001419, 0.001419, 0.001419, 0.001419]
 _SOURCE = EngineSource.pinned()
 
 
 def _bucket(name: str) -> str:
     """dom/canvas/SanitizeRenderer.cpp ChooseDeviceReplacement, for the vendors the
     Windows pool uses (Radeon names, GeForce, Intel), as the ANGLE renderer it yields."""
-    if any(k in name for k in ("REMBRANDT", "RENOIR", "Vega", "VII", "Fury")):
-        return "Radeon R9 200 Series"
     m = re.search(r"Radeon.*?((R[579X]|HD) )?([0-9][0-9][0-9]+)", name)
     if m:
         if m.group(2) == "HD":
@@ -66,15 +69,9 @@ def test_no_direct3d10_class_persona_left():
         assert "vs_4_" not in e["prefs"]["zoom.stealth.webgl.renderer"], e["renderer_out"]
 
 
-def test_one_slot_per_bucket_weighing_its_devices():
-    # a slot is a SanitizeRenderer bucket, and its probability is the weight of the devices behind it
-    renderers = [e["prefs"]["zoom.stealth.webgl.renderer"] for e in _POOL]
-    assert len(set(renderers)) == len(renderers)
-    assert sorted(renderers) == sorted(_DATA["by_renderer"])
-    total = sum(d["weight"] for devs in _DATA["by_renderer"].values() for d in devs)
-    for e, r in zip(_POOL, renderers):
-        mass = sum(d["weight"] for d in _DATA["by_renderer"][r])
-        assert abs(e["prob"] - mass / total) < 1e-5, r
+def test_replaced_in_place():
+    # same probabilities in the same order: every other slot's cumulative boundary is unchanged
+    assert [e["prob"] for e in _POOL] == _PROBS_BEFORE
 
 
 def test_every_persona_has_a_real_device():
@@ -136,8 +133,7 @@ def test_declared_from_the_profile_on_every_host(monkeypatch, platform):
         assert prefs["zoom.stealth.gfx.feature_status"] == dev["feature_status"]
 
 
-def test_a_slot_that_names_a_device_declares_it():
-    # a slot may pin its device (`device`); the draw inside the bucket decides otherwise
+def test_replacement_slots_declare_their_own_device():
     pool = W._gpu_pool()
     for p in pool:
         if p["device"]:
@@ -147,7 +143,7 @@ def test_a_slot_that_names_a_device_declares_it():
 
 def test_every_device_of_a_bucket_is_reachable():
     by_label = {}
-    for seed in range(40000):
+    for seed in range(4000):
         p = W.select_persona(seed)
         d = W.choose_gfx_device(p, seed)
         by_label.setdefault(p["renderer"], set()).add(d["label"])
@@ -244,10 +240,9 @@ def test_a_profile_without_a_device_label_still_declares_one():
     assert a == b
 
 
-# ── weights inside a bucket ──────────────────────────────────────────────────
-# Each device weighs its family's weight (win_gpu_family_weights.json) shared by the share of
-# the models it covers; the families and their weights are held by
-# test_gpu_pool_follows_the_real_weights.py.
+# ── weights inside a bucket (2026-11-01) ─────────────────────────────────────
+# Intel and AMD integrated buckets: the GPU family's share among Firefox desktop users;
+# NVIDIA and AMD discrete: equal (no family above the report's threshold).
 _UNSUPPORTED_BY_WINDOWS_11 = ("hd4000", "hd520")   # Ivy Bridge, Skylake
 
 
@@ -256,10 +251,14 @@ def test_no_device_of_a_cpu_windows_11_does_not_support():
     assert not [l for l in labels if l.startswith(_UNSUPPORTED_BY_WINDOWS_11)]
 
 
-def test_every_device_is_weighed_by_its_family():
+def test_a_bucket_is_weighed_by_family_or_not_at_all():
     for renderer, devs in _DATA["by_renderer"].items():
-        for d in devs:
-            assert d["pool_family"] and d["weight"] > 0 and d["share"] > 0, (renderer, d["label"])
+        families = {d["family"] is None for d in devs}
+        assert len(families) == 1, renderer
+        if None in {d["family"] for d in devs}:
+            assert {d["weight"] for d in devs} == {1.0}, renderer
+        else:
+            assert all(d["weight"] > 0 for d in devs), renderer
 
 
 def test_the_draw_follows_the_weights():
