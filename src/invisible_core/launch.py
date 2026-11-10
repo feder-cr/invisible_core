@@ -112,6 +112,16 @@ def tz_env(timezone: str) -> str:
 #: one environment for both builds is the thing that cannot drift.
 _DISPLAY_BACKEND = {"MOZ_ENABLE_WAYLAND": "0", "GDK_BACKEND": "x11"}
 
+#: The browser never opens its crash reporter. The engine refuses a launch whose declarations
+#: are incomplete (StealthRefuse), and that refusal ends in an abort on purpose: with the reporter
+#: on, Windows starts crashreporter.exe, which shows a "Crash Reporter" window on the desktop of
+#: whoever runs the browser and waits there for a click (313 windows in one e2e run of the wrapper).
+#: A crash of a headless session has no one to read the dialog and nothing to send, and the
+#: reason of a refusal is in the browser's output, which the launcher already reads. Written
+#: here, in the one place the environment is composed, so every launch carries it, and over
+#: whatever the caller's environment says: a session that opens a dialog is not a session.
+_NO_CRASH_REPORTER = {"MOZ_CRASHREPORTER_DISABLE": "1"}
+
 
 def build_launch_env(
     prefs: Dict[str, Any],
@@ -186,6 +196,7 @@ def build_launch_env(
         # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
         env[environment.WEBRTC_DISABLE_IPV6] = "1"
     env.update(_DISPLAY_BACKEND)
+    env.update(_NO_CRASH_REPORTER)
     env.pop(DESKTOP_ENV, None)
     for k, v in (display_env or {}).items():
         if v is None:
