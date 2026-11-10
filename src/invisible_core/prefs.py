@@ -384,6 +384,15 @@ _MONOSPACE_LANG_GROUPS = (
 USAGE_PING_URL = ("https://github.com/feder-cr/firefox_antidetect_patch"
                   "/releases/download/usage-counter/launch.txt")
 
+#: The capacity of the HTTP disk cache, in KB (the unit of browser.cache.disk.capacity), declared once, here: 100 MB.
+#: Without a declaration the engine sizes the cache with "smart size" from the FREE SPACE of the host's disk
+#: (netwerk/cache2/CacheFileIOManager.cpp, SmartCacheSize): 1 GB with more than 25 GB free, 30% of the free space
+#: (at least 50 MB) under 500 MB, recomputed every 60 s: a value of the host, which decides what stays in the cache.
+#: 100 MB is a value a retail Firefox uses on a machine with little free disk (smart size: a minimum of 50 MB,
+#: about 30% of the free space under 500 MB), and it removes the dependency on the host's free space: the same
+#: seed gets the same cache on every machine.
+CACHE_DISK_CAPACITY_KB = 102400
+
 _BASELINE: Dict[str, Any] = {
     # Turn off Firefox's own resistFingerprinting; we do our own via patches.
     # The CSS property set a page enumerates has to match retail, and ours was
@@ -778,6 +787,12 @@ _BASELINE: Dict[str, Any] = {
     # gone from Firefox 151, so the line looked like this remedy and was not.
     "network.dns.disablePrefetch":                        True,
     "network.dns.disablePrefetchFromHTTPS":               True,
+
+    # The disk cache's size is declared, never derived from the host's free disk space: smart size off, and
+    # the capacity one constant (CACHE_DISK_CAPACITY_KB above). The capacity pref is read only when smart size is off
+    # (CacheObserver::DiskCacheCapacity), so the two are one declaration.
+    "browser.cache.disk.smart_size.enabled":              False,
+    "browser.cache.disk.capacity":                        CACHE_DISK_CAPACITY_KB,
 
     # === Fission / site-isolation disabled (FF146 Playwright parity) ===
     # Force a single content-process model. Three knobs are required in FF150:
