@@ -1753,12 +1753,15 @@ def test_module_imports_nothing_but_stdlib_arithmetic():
     Checked on the source rather than at runtime, so a lazily imported module
     inside a function body is caught too.
 
-    ⛔ ONE RELATIVE IMPORT IS ALLOWED, `..seedmix`, since 38.34.0: the module
+    ⛔ TWO RELATIVE IMPORTS ARE ALLOWED. `..seedmix`, since 38.34.0: the module
     used to keep its own copy of the seed mixer to stand alone, and that copy
-    was one of three (`invisible_core/seedmix.py`). What standing alone was
-    protecting is purity, so `seedmix` is held to the same rule below.
+    was one of three (`invisible_core/seedmix.py`). And `.._floats`: the sum
+    and the base-2 logarithm that are the same on every Python (`sum()` and
+    `math.log2()` are not), kept in one place for every seeded module rather
+    than copied into each. What standing alone was protecting is purity, so
+    both are held to the same rule below.
     """
-    from invisible_core import seedmix
+    from invisible_core import _floats, seedmix
 
     src = Path(_motion_module.__file__)
     tree = ast.parse(src.read_text(encoding="utf-8"))
@@ -1768,7 +1771,7 @@ def test_module_imports_nothing_but_stdlib_arithmetic():
             mods.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom):
             if node.level:
-                if (node.level, node.module) != (2, "seedmix"):
+                if (node.level, node.module) not in {(2, "seedmix"), (2, "_floats")}:
                     pytest.fail(f"relative import of {node.module!r} - the module must stand alone")
                 continue
             mods.add((node.module or "").split(".")[0])
@@ -1777,8 +1780,12 @@ def test_module_imports_nothing_but_stdlib_arithmetic():
     mixer_mods = {(n.module or "") for n in ast.walk(mixer) if isinstance(n, ast.ImportFrom)}
     mixer_mods |= {a.name for n in ast.walk(mixer) if isinstance(n, ast.Import) for a in n.names}
     assert mixer_mods <= {"__future__"}, mixer_mods
+    floats = ast.parse(Path(_floats.__file__).read_text(encoding="utf-8"))
+    floats_mods = {(n.module or "").split(".")[0] for n in ast.walk(floats) if isinstance(n, ast.ImportFrom)}
+    floats_mods |= {a.name.split(".")[0] for n in ast.walk(floats) if isinstance(n, ast.Import) for a in n.names}
+    assert floats_mods <= {"__future__", "math", "decimal", "typing"}, floats_mods
     forbidden = ("open(", "socket", "requests", "urllib", "time.", "os.", "subprocess")
-    for path in (src, Path(seedmix.__file__)):
+    for path in (src, Path(seedmix.__file__), Path(_floats.__file__)):
         text = path.read_text(encoding="utf-8")
         body = "\n".join(
             line for line in text.splitlines() if not line.lstrip().startswith(("#", "*"))

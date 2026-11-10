@@ -23,6 +23,8 @@ import json
 import random
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from .._floats import exact_sum
+
 
 class Node:
     """Single Bayesian node."""
@@ -103,7 +105,7 @@ def _weighted_pick(table: List[Dict[str, Any]], rng: random.Random) -> Any:
     probs = [float(e["prob"]) for e in table]
     if not values:
         raise ValueError("Empty CPT entry")
-    total = sum(probs)
+    total = exact_sum(probs)
     if total <= 0:
         return rng.choice(values)
     # Normalize to be safe (CPTs can be unnormalized)

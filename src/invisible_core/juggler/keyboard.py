@@ -34,6 +34,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
+from .. import _floats
 from .keylayout import LAYOUT
 from .keylayouts_windows import LOCALE_KEYBOARDS, LOCALE_KLID
 from .keylayouts_windows import LAYOUTS as WINDOWS_LAYOUTS
@@ -677,7 +678,7 @@ class Keyboard:
         ends = [s and (i == len(text) - 1 or not shifted[i + 1]
                        or boards[i + 1] != boards[i])
                 for i, s in enumerate(shifted)]
-        timing = iter(self._plan_shift(sum(starts)))
+        timing = iter(self._plan_shift(_floats.exact_sum(starts)))
         lead_at, lag_at = {}, {}
         for i in range(len(text)):
             if starts[i]:
