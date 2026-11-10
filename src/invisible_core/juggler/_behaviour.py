@@ -87,6 +87,7 @@ from dataclasses import dataclass
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Sequence,
                     Tuple)
 
+from .._floats import exact_sum, log2 as exact_log2
 from ..seedmix import sub_seed
 
 __all__ = [
@@ -721,7 +722,7 @@ def plan_hesitation(persona: TypingPersona, act: str, nonce: int = 0,
     of the same kind in one session two different pauses.
     """
     r = _rng(persona.seed, act, nonce)
-    return sum(persona.hesitation_ms(r) for _ in range(max(1, times)))
+    return exact_sum(persona.hesitation_ms(r) for _ in range(max(1, times)))
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -738,7 +739,7 @@ def _fitts_ms(persona: PointerPersona, rng: random.Random,
     button is slow - the property a fixed ~1 s duration cannot express.
     """
     w = max(4.0, target_w)
-    idx = math.log2(max(distance, 1.0) / w + 1.0)
+    idx = exact_log2(max(distance, 1.0) / w + 1.0)
     mt = persona.fitts_a_ms + persona.fitts_b_ms * idx
     mt *= math.exp(rng.gauss(0.0, persona.mt_sigma))
     # Floor: no aimed hand movement completes in under ~60 ms. [lit] simple
@@ -1121,7 +1122,7 @@ def plan_idle(
         pos = (seg[-1].x, seg[-1].y)
         # The pause is carried as the lead delay of the segment's first step,
         # so summing the segment counts it exactly once.
-        elapsed += sum(s.delay_ms for s in seg)
+        elapsed += exact_sum(s.delay_ms for s in seg)
 
     while True:
         pause = _pause_ms(persona, r)
@@ -1152,7 +1153,7 @@ def plan_idle(
     # Measured against what the steps actually carry, not against `elapsed`:
     # an episode that produced no event still consumed its pause, and that
     # time has to end up somewhere or the plan under-reports its duration.
-    residual = duration_ms - sum(s.delay_ms for s in steps)
+    residual = duration_ms - exact_sum(s.delay_ms for s in steps)
     if residual >= 5.0:
         steps.append(Step(x=pos[0], y=pos[1], delay_ms=residual,
                           kind=_WAIT_KIND))
@@ -1274,7 +1275,7 @@ def overshoot_probability(persona: PointerPersona, distance: float,
     move (ID ~ 1) corrects rarely and a hard one (ID ~ 6) corrects most of the
     time.
     """
-    idx = math.log2(max(distance, 1.0) / max(width, 4.0) + 1.0)
+    idx = exact_log2(max(distance, 1.0) / max(width, 4.0) + 1.0)
     p = (0.10 + 0.085 * idx) * persona.overshoot_bias
     return _clamp(p, 0.03, 0.88)
 
