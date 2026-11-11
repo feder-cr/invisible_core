@@ -249,11 +249,9 @@ def test_the_webrtc_host_ip_is_seed_derived_and_looks_like_a_home_router(profile
         P._apply_webrtc_host_ip(prefs, generate_profile(seed))
         ip = prefs["zoom.stealth.webrtc.host_ip"]
         addr = ipaddress.IPv4Address(ip)
-        assert addr in ipaddress.IPv4Network("192.168.0.0/16"), ip
-        # Neither octet may be 0 or 255: a synthetic candidate on a network or
-        # broadcast address is not a host address a real router hands out.
-        a, b = ip.split(".")[2:]
-        assert 1 <= int(a) <= 254 and 1 <= int(b) <= 254, ip
+        assert addr.is_private, ip
+        # The host octet is never .0, .1 (the gateway) or .255: not a host address a real router hands out.
+        assert 2 <= int(ip.split(".")[3]) <= 254, ip
         seen.add(ip)
     assert len(seen) > 150, f"only {len(seen)} distinct LAN IPs across 200 seeds"
 

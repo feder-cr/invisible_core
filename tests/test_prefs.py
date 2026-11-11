@@ -463,16 +463,15 @@ def test_virtual_display_workaround_absent_when_disabled(monkeypatch):
 
 
 @pytest.mark.unit
-def test_lan_ip_matches_192_168_pattern():
-    # LI1
+def test_lan_ip_is_a_private_home_address():
+    # LI1: one private address, from the declared network (`_webrtc_network`), not a rule of the pref any more.
+    import ipaddress
+
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     ip = prefs["zoom.stealth.webrtc.host_ip"]
-    m = re.match(r"^192\.168\.(\d+)\.(\d+)$", ip)
-    assert m, f"unexpected LAN IP format: {ip!r}"
-    o3, o4 = int(m.group(1)), int(m.group(2))
-    assert 1 <= o3 <= 254
-    assert 1 <= o4 <= 254
+    assert ipaddress.IPv4Address(ip).is_private, ip
+    assert 2 <= int(ip.split(".")[3]) <= 254
 
 
 @pytest.mark.unit
@@ -484,16 +483,12 @@ def test_lan_ip_deterministic_per_seed():
 
 
 @pytest.mark.unit
-def test_lan_ip_seed_zero_has_no_zero_octets():
-    # LI3: code adds +1 so neither dynamic octet should ever be 0.
+def test_lan_ip_seed_zero_is_a_host_address():
+    # LI3: the host octet is never the network (.0), the gateway (.1) or the broadcast (.255).
     p = generate_profile(seed=0)
     prefs = translate_profile_to_prefs(p, timezone="America/New_York")
     ip = prefs["zoom.stealth.webrtc.host_ip"]
-    octets = ip.split(".")
-    assert octets[0] == "192"
-    assert octets[1] == "168"
-    assert int(octets[2]) >= 1
-    assert int(octets[3]) >= 1
+    assert 2 <= int(ip.split(".")[3]) <= 254, ip
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -50,6 +50,8 @@ GEOIP_MMDB = "STEALTHFOX_GEOIP_MMDB"
 FONT_MANIFEST = "STEALTHFOX_FONT_MANIFEST"
 #: The IP WebRTC announces; a value already set wins (`launch`).
 WEBRTC_PUBLIC_IP = "STEALTHFOX_WEBRTC_PUBLIC_IP"
+#: The host network a proxied session declares, `v4=<address>;v6=<0|1>`; a value already set wins (`launch`).
+WEBRTC_NETWORK = "STEALTHFOX_WEBRTC_NETWORK"
 #: "off" leaves the system timer resolution alone (`juggler._pacing`).
 CURSOR_TIMER = "INVPW_CURSOR_TIMER"
 
@@ -67,7 +69,7 @@ WEBRTC_DISABLE_IPV6 = "STEALTHFOX_WEBRTC_DISABLE_IPV6"
 SETTINGS = (ENGINE_DIR, CACHE_DIR, DOWNLOAD_DEADLINE, GITHUB_TOKEN_OWN,
             GITHUB_TOKEN, SEAL_FILE, CORE_PIN, CORE_AUTOFIX,
             CORE_AUTOFIX_TIMEOUT, UV, GEOIP_MMDB, FONT_MANIFEST,
-            WEBRTC_PUBLIC_IP, CURSOR_TIMER)
+            WEBRTC_PUBLIC_IP, WEBRTC_NETWORK, CURSOR_TIMER)
 HANDOFFS = (CORE_AUTOFIX_ATTEMPTED, SESSION_TOKEN, DESKTOP, WEBRTC_DISABLE_IPV6)
 #: Everything the library reads from the environment.
 READ = SETTINGS + HANDOFFS

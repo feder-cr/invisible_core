@@ -32,6 +32,7 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
+from ._webrtc_network import declared_network
 from ._webgl_personas import choose_gfx_device, gfx_device_for, persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
@@ -1900,12 +1901,13 @@ def _apply_render_seed(prefs: Dict[str, Any], profile: Profile) -> None:
 
 
 def _apply_webrtc_host_ip(prefs: Dict[str, Any], profile: Profile) -> None:
-    # Synthetic host ICE candidate - injected by C++ when addr_ct==0 (SOCKS5
-    # proxy suppresses all local addresses so Firefox can't gather host cands).
-    # LAN IP is seed-derived so it's consistent per session and looks like a
-    # real home router assignment (192.168.x.x range).
-    _s = profile.seed
-    prefs["zoom.stealth.webrtc.host_ip"] = f"192.168.{(_s >> 8) % 254 + 1}.{_s % 254 + 1}"
+    # The engine tests this pref for emptiness only (`StealthIceGathering.cpp`): a content
+    # process that got no addresses from the parent gathers anyway. It never uses the value
+    # as an address. The address of the persona is declared ONCE, by
+    # `_webrtc_network.declared_network`, which also fills STEALTHFOX_WEBRTC_NETWORK for a
+    # proxied session; the pref carries the same value so the two cannot disagree. It goes
+    # when the engine stops reading the host (design: declared-interfaces-design.md).
+    prefs["zoom.stealth.webrtc.host_ip"] = declared_network(profile.seed).v4
 
 
 def _apply_extension_lists(prefs: Dict[str, Any], persona) -> None:

@@ -134,6 +134,10 @@ def build_launch_env(
     #: the same name on purpose: there were already two landing points, and two
     #: different names would have hidden that they are the same thing.
     srflx_declared: Optional[str] = None,
+    #: The host network to DECLARE (`_webrtc_network.network_to_declare`), or None
+    #: to declare nothing (a session without a proxy: its network is the real one).
+    #: Same rule as the WebRTC IP: a value already in base_env wins.
+    network_declared: Optional[str] = None,
     manifest_path: "Optional[str | os.PathLike[str]]" = None,
     base_env: Optional[Dict[str, str]] = None,
     #: What the session's hidden surface wants in the browser's environment
@@ -195,6 +199,8 @@ def build_launch_env(
         # without a proxy it is simply what an ordinary browser does. Measured
         # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
         env[environment.WEBRTC_DISABLE_IPV6] = "1"
+    if network_declared:
+        env.setdefault(environment.WEBRTC_NETWORK, network_declared)
     env.update(_DISPLAY_BACKEND)
     env.update(_NO_CRASH_REPORTER)
     env.pop(DESKTOP_ENV, None)
