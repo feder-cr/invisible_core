@@ -77,7 +77,7 @@ def test_ipv6_needs_the_exit_and_the_relay_both():
     assert on.v4 == declared_network(42).v4, "IPv6 must not move the address"
 
 
-# Copied from the engine, series worktree C:\ff\wt\doh-engine at commit e403bd08bb:
+# Copied from the engine (the declared-network feature of the series), at engine commit e403bd08bb:
 #   dom/media/webrtc/transport/test/gtest/TestStealthDeclaredNetwork.cpp  (tests IPv6IsTheExitPrefixAndATemporaryIdentifierOnTheSameAdapter
 #   and APrefixMustBeGlobalUnicast) and the parser it exercises, dom/media/webrtc/transport/nr_stealth_network.cpp (PrefixOf:
 #   "<address>/64" or "<address>", global unicast 2000::/3, not Teredo, 6to4 nor documentation).
