@@ -59,7 +59,7 @@ class _Injected:
         self.log.append("check")
         return self.verdicts.pop(0) if self.verdicts else "done"
 
-    def content_origin(self, frame):
+    def frame_origin(self, frame):
         self.origin_reads += 1
         return self.origins[frame]
 
@@ -205,22 +205,21 @@ def test_a_nested_frame_is_asked_about_ITS_OWN_coordinates():
     To watch this fail, return `point` unchanged from `_hit_point`.
     """
     log: list = []
-    actions = _actions(origins={MAIN: {"x": 100.0, "y": 200.0},
-                                CHILD: {"x": 130.0, "y": 260.0}}, log=log)
+    actions = _actions(origins={CHILD: {"x": 30.0, "y": 60.0}}, log=log)
     approach, commit = _halves(log, actions)
     actions._act_on_target(CHILD, "element", (10.0, 20.0),
                            approach=approach, commit=commit)
 
-    # the child's content starts 30 right and 60 down from the main frame's, so
-    # the same screen point is 30 left and 60 up in the child's own space
+    # the child's viewport starts 30 right and 60 down from the main frame's,
+    # so the same point is 30 left and 60 up in the child's own space
     assert actions.inj.points == [(-20.0, -40.0)]
     assert actions.inj.frames == [CHILD]
 
 
 def test_the_main_frame_pays_for_no_conversion_at_all():
-    """The shift costs two extra round trips. The frame that never needs them
-    must not make them: `origins` is deliberately empty here, so a lookup would
-    raise instead of quietly returning something."""
+    """The shift costs an extra round trip. The frame that never needs it must
+    not make it: `origins` is deliberately empty here, so a lookup would raise
+    instead of quietly returning something."""
     log: list = []
     actions = _actions(origins={}, log=log)
     approach, commit = _halves(log, actions)
@@ -228,3 +227,33 @@ def test_the_main_frame_pays_for_no_conversion_at_all():
                            approach=approach, commit=commit)
     assert actions.inj.origin_reads == 0
     assert actions.inj.points == [(7.0, 8.0)]
+
+
+def test_the_origin_of_a_frame_is_the_engines_not_the_pages():
+    """⛔ A FRAME OF ANOTHER PROCESS HAS NO `mozInnerScreen` OF ITS OWN TO READ.
+
+    Each process has a widget of its own, at the origin of the window like the
+    top's, so `window.mozInnerScreenX/Y` read the same in the main frame and in
+    an `<iframe>` of another site. The shift taken from their difference was
+    zero, the child was asked about the main frame's coordinate and answered
+    `<html>`: "the event would have landed elsewhere", on every click on an
+    element of such a frame, and nothing was ever sent. The origin is a question
+    for the engine, which carries it up the `<iframe>`s' boxes.
+
+    To watch this fail, read `window.mozInnerScreenX` again in `frame_origin`.
+    """
+    from invisible_core.juggler.injected import InjectedScript as Injected
+
+    class Conn:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, method, params=None, **kw):
+            self.sent.append((method, params, kw.get("session")))
+            return {"x": 68.0, "y": 68.0}
+
+    inj = Injected.__new__(Injected)
+    inj.c = Conn()
+    inj.session = "s"
+    assert inj.frame_origin(CHILD) == {"x": 68.0, "y": 68.0}
+    assert inj.c.sent == [("Page.getFrameOrigin", {"frameId": CHILD}, "s")]

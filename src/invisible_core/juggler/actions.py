@@ -524,15 +524,15 @@ class Actions:
         answers `<html>` - which is how a covered element used to be reported
         for something sitting right under the pointer.
 
-        The shift is the difference between the two content origins, read from
-        the engine rather than recomputed here.
+        The shift is where the frame's viewport starts in the main frame's,
+        read from the engine rather than recomputed here: the page's own
+        `mozInnerScreen*` is the same in every process of the window, so a
+        frame of another process cannot be placed with it.
         """
         if f == self.lifecycle.main_frame:
             return point
-        main = self.inj.content_origin(self.lifecycle.main_frame)
-        here = self.inj.content_origin(f)
-        return (point[0] + main["x"] - here["x"],
-                point[1] + main["y"] - here["y"])
+        here = self.inj.frame_origin(f)
+        return (point[0] - here["x"], point[1] - here["y"])
 
     def _act_on_target(self, f, element, point, *, approach, commit,
                        force: bool = False,

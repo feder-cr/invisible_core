@@ -674,21 +674,28 @@ class InjectedScript:
         self.c.send("Page.scrollIntoViewIfNeeded", params,
                     session=self.session)
 
-    def content_origin(self, frame_id: str) -> dict:
-        """Where this frame's content area starts, in SCREEN css pixels.
+    def frame_origin(self, frame_id: str) -> dict:
+        """Where this frame's viewport starts, in the css pixels of the MAIN
+        frame's viewport: `{"x": ..., "y": ...}`.
 
-        ⛔ IT COMES FROM THE ENGINE, and that is the whole point. The hit
-        point a caller has is in the MAIN frame's space, because that is what
-        `Page.getContentQuads` answers and what `dispatchMouseEvent` wants. To
-        check it inside a nested frame it has to be expressed in THAT frame's
-        space, and the difference between the two origins is exactly the shift.
-        Reading it from `mozInnerScreen*` keeps one source: this project already
-        owns that value in C++ (`StealthDeclaredContentOrigin`), so a second
-        arithmetic here would be the duplicate that rule 16 is about.
+        ⛔ IT COMES FROM THE ENGINE, and from its boxes, not from the page.
+        The hit point a caller has is in the MAIN frame's space, because that
+        is what `Page.getContentQuads` answers and what `dispatchMouseEvent`
+        wants. To check it inside a nested frame it has to be expressed in THAT
+        frame's space, and the shift is where the frame starts.
+
+        It used to be the difference of `window.mozInnerScreenX/Y` of the main
+        frame and of the frame. That is only true inside one process. A frame
+        in another process (Fission) has a widget of its own, at the origin of
+        the window like the top's, so both read the same, the difference was
+        zero and the child was asked about the main frame's coordinate: it
+        answered `<html>`, for every click on an element of such a frame. The
+        engine carries the origin up one `<iframe>` at a time, the way it
+        carries the quads of a node, so the shift is right at any depth and
+        across any number of processes.
         """
-        return self.evaluate(
-            frame_id,
-            "({x: window.mozInnerScreenX, y: window.mozInnerScreenY})")
+        return self.c.send("Page.getFrameOrigin", {"frameId": frame_id},
+                           session=self.session, timeout=None)
 
     def check_hit_target(self, frame_id: str, element: str, point) -> str:
         """Does `point` still belong to `element`? `"done"`, or what is there.
