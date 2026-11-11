@@ -21,6 +21,8 @@ import sys
 import types
 
 import pytest
+import requests
+import requests.adapters
 
 from invisible_core import _geo
 from invisible_core._geo import (
@@ -71,9 +73,34 @@ def test_proxies_socks5_uses_socks5h_remote_dns():
 
 
 @pytest.mark.unit
-def test_proxies_socks4_scheme():
+def test_proxies_socks4_uses_socks4a_remote_dns():
+    """``socks4`` in requests/urllib3 resolves the target name on THIS host (rdns False): the echo hostnames would go to the
+    host's resolver before the browser exists. ``socks4a`` hands the name to the proxy."""
     out = _proxies_for_requests({"server": "socks4://gw:1080"})
-    assert out["http"] == "socks4://gw:1080"
+    assert out["http"] == "socks4a://gw:1080"
+    assert out["https"] == out["http"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("server,expected,remote_dns", [
+    ("socks4://gw:1080", "socks4a://gw:1080", True),
+    ("socks4a://gw:1080", "socks4a://gw:1080", True),
+    ("socks5://gw:1080", "socks5h://gw:1080", True),
+    ("socks5h://gw:1080", "socks5h://gw:1080", True),
+    ("socks://gw:1080", "socks5h://gw:1080", True),
+    ("http://gw:8080", "http://gw:8080", None),
+    ("https://gw:8443", "https://gw:8443", None),
+])
+def test_every_proxy_scheme_resolves_the_target_name_at_the_proxy(server, expected, remote_dns):
+    """The mapping built for each scheme, read back through the library that consumes it (no network: building the pool
+    manager opens no socket). A SOCKS scheme must be one whose ``rdns`` is on; an HTTP proxy gets the name in CONNECT."""
+    out = _proxies_for_requests({"server": server})
+    assert out == {"http": expected, "https": expected}
+    manager = requests.adapters.HTTPAdapter().proxy_manager_for(out["http"])
+    if remote_dns is None:
+        assert "_socks_options" not in manager.connection_pool_kw
+    else:
+        assert manager.connection_pool_kw["_socks_options"]["rdns"] is remote_dns
 
 
 @pytest.mark.unit

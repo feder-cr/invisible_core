@@ -348,17 +348,21 @@ def _proxy_is_set(proxy: Optional[Dict[str, str]]) -> bool:
 def _proxies_for_requests(proxy: Dict[str, str]) -> Dict[str, str]:
     """Translate our proxy dict into a ``requests`` proxies mapping.
 
-    SOCKS5 uses the ``socks5h`` scheme so DNS is resolved proxy-side (matches
-    ``network.proxy.socks_remote_dns=True`` in the Firefox path). HTTP/HTTPS
-    pass through unchanged. Credentials are URL-encoded.
+    Every SOCKS scheme maps to the spelling of the library that sends the NAME to
+    the proxy: ``socks5h`` for SOCKS5 and ``socks4a`` for SOCKS4 (urllib3 /
+    PySocks ``rdns=True``). The plain ``socks5`` and ``socks4`` spellings resolve
+    the target on THIS host, which would put the echo hostnames on the host's
+    resolver before the browser exists. HTTP/HTTPS pass through unchanged.
+    Credentials are URL-encoded.
     """
     server = (proxy.get("server") or "").strip()
     low = server.lower()
-    if low.startswith("socks5://") or low.startswith("socks://"):
+    given = low.split("://", 1)[0] if "://" in low else ""
+    if given in ("socks5", "socks5h", "socks"):
         scheme = "socks5h"
-    elif low.startswith("socks4://"):
-        scheme = "socks4"
-    elif low.startswith("https://"):
+    elif given in ("socks4", "socks4a"):
+        scheme = "socks4a"
+    elif given == "https":
         scheme = "https"
     else:
         scheme = "http"
