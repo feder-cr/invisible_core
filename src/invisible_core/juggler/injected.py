@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import pathlib
 import threading
+from collections import OrderedDict
 from typing import Any, Optional
 
 from .connection import ProtocolError, ReplyTimeout
@@ -64,6 +65,22 @@ _SOURCE = pathlib.Path(__file__).with_name("injected.js")
 
 class EvaluationError(RuntimeError):
     """The JavaScript raised. Carries the PAGE's text and stack."""
+
+
+class FrameDetached(RuntimeError):
+    """The frame a command was aimed at left the page: its iframe element was removed, or its process ended.
+
+    The text is Playwright's own, "Frame was detached", and so is the way it ends a call: at once. A frame that
+    left has no next world, so a wait for one can only run out its bound; this ends it at the detach instead.
+
+    ⛔ NOT A `ContextDestroyed`, AND THAT IS THE POINT. `ContextDestroyed` says the frame's world went and the
+    frame's NEXT world is worth waiting for (`in_current_world` asks again); a detached frame has none, so this one
+    is final and nothing asks again."""
+
+
+#: How many detached frame ids are remembered. A frame id is unique for the life of the page, so the set only
+#: has to hold the ids a call can still be aimed at; the oldest go first.
+_GONE_LIMIT = 4096
 
 
 class ContextDestroyed(RuntimeError):
@@ -173,6 +190,10 @@ class InjectedScript:
         #: Notified when a context is born: a wait for a frame's world sleeps
         #: on it until the event that makes the world, not in turns.
         self._contexts_changed = threading.Condition()
+        #: The frames the engine said are detached (`Page.frameDetached`), oldest first, until announced again.
+        #: Guarded by `_contexts_changed`, which a detach notifies: a wait for a world of a frame that left ends
+        #: on it (`_world`).
+        self._gone: "OrderedDict[str, None]" = OrderedDict()
         #: frameId -> (executionContextId it was built in, objectId)
         #:
         #: ⛔ THE CONTEXT IS PART OF THE KEY, AND IT IS NOT BOOKKEEPING: it is
@@ -223,6 +244,20 @@ class InjectedScript:
         """Stop listening. Called when the page this belongs to goes away."""
         self.c.remove_listener(self._route)
 
+    def _on_frame_detached(self, frame_id: Optional[str]) -> None:
+        """The frame left: what this holds of it goes, and every wait for one of its worlds ends."""
+        if frame_id is None:
+            return
+        with self._contexts_changed:
+            self._gone[frame_id] = None
+            self._gone.move_to_end(frame_id)
+            while len(self._gone) > _GONE_LIMIT:
+                self._gone.popitem(last=False)
+            for key in [k for k in self.contexts if k[0] == frame_id]:
+                self.contexts.pop(key, None)
+            self._contexts_changed.notify_all()
+        self._handle.pop(frame_id, None)
+
     def _on_event(self, method: str, p: dict) -> None:
         if method == "Runtime.executionContextCreated":
             aux = p.get("auxData") or {}
@@ -230,6 +265,12 @@ class InjectedScript:
                 self.contexts[(aux.get("frameId"), aux.get("name") or "")] = \
                     p["executionContextId"]
                 self._contexts_changed.notify_all()
+        elif method == "Page.frameAttached":
+            # The same id announced again (the iframe of a crashed process navigates anew) is a frame again.
+            with self._contexts_changed:
+                self._gone.pop(p.get("frameId"), None)
+        elif method == "Page.frameDetached":
+            self._on_frame_detached(p.get("frameId"))
         elif method == "Runtime.executionContextDestroyed":
             dead = p["executionContextId"]
             for k in [k for k, v in self.contexts.items() if v == dead]:
@@ -389,14 +430,25 @@ class InjectedScript:
     def _world(self, frame_id: str, world: str, deadline: Deadline) -> Any:
         """The context of `world` in `frame_id`, once the engine has made it;
         None when the deadline passes first. Woken by the creation event, not
-        polled."""
+        polled.
+
+        ⛔ A FRAME THAT LEFT HAS NO WORLD COMING, so the wait ends with
+        `FrameDetached` at the detach, whether the detach came before the wait
+        began or while it slept. It used to run out its whole bound (10 s) and
+        answer "has not been born ... Worlds seen for that frame: none": a click
+        aimed at an iframe that its page removed a moment later read the world,
+        found it destroyed and waited for the next one of a frame that was gone."""
         key = (frame_id, world)
         with self._contexts_changed:
-            while key not in self.contexts:
+            while True:
+                if frame_id in self._gone:
+                    raise FrameDetached("Frame was detached: %s is not attached "
+                                        "to the page" % frame_id)
+                if key in self.contexts:
+                    return self.contexts[key]
                 if deadline.passed():
                     return None
                 self._contexts_changed.wait(deadline.left())
-            return self.contexts[key]
 
     # ── evaluation ──────────────────────────────────────────────────────────
     def _result(self, response: dict) -> dict:
