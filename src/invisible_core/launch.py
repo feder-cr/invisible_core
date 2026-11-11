@@ -383,6 +383,9 @@ def build_launch_plan(
     # exists only for whoever comes through the wrapper. The default is False as
     # it is over there: the point is the default, not the switch.
     show_cursor: Optional[bool] = None,
+    # Where a SOCKS5 proxy's UDP exit is measured from (`"ip:port"` IPv4 literals; None = the two public defaults).
+    # Python only: nothing of it reaches the browser. (This path takes no proxy; the keyword is validated all the same.)
+    udp_stun_servers: Optional[List[str]] = None,
 ) -> LaunchPlan:
     """The single direct-launch entry point (no Playwright, no Qt).
 
@@ -434,7 +437,8 @@ def build_launch_plan(
     # decides the language, in one call; raises behind a dead proxy
     # (fail-early, by design). No "auto" branch of its own here: the language
     # is the geo decision's, like the timezone.
-    geo = prepare_session_geo(timezone, proxy, locale, seed=seed)
+    geo = prepare_session_geo(timezone, proxy, locale, seed=seed,
+                               udp_stun_servers=udp_stun_servers)
     fp = generate_profile(seed=seed, pin=pin)
     # One composition for all three entry points (prefs.py). This path takes the
     # proxy layer and the hard-kill layer; it does NOT write the humanize prefs,

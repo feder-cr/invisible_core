@@ -29,7 +29,7 @@ import re
 import socket
 import threading
 import time
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional, Sequence
 from urllib.parse import quote
 # At import, as in prefs.py: zoneinfo resolves its search path from the real
 # platform the first time it is imported.
@@ -877,7 +877,7 @@ def _geoip_database(ip: str, proxied: bool) -> Any:
 
 def prepare_session_geo(
     timezone: str, proxy: Optional[Dict[str, str]], locale: Optional[str] = "auto",
-    *, seed: Optional[int] = None,
+    *, seed: Optional[int] = None, udp_stun_servers: Optional[Sequence[str]] = None,
 ) -> SessionGeo:
     """Resolve the session timezone, egress IP AND language in ONE round-trip.
 
@@ -902,9 +902,15 @@ def prepare_session_geo(
     there is no machine to place, so NOTHING is declared (``latitude``,
     ``longitude`` and ``accuracy`` stay ``None``); the same when the exit has
     no point.
+
+    ``udp_stun_servers`` is where a SOCKS5 proxy's UDP exit is measured from: a list of ``"ip:port"`` IPv4
+    literals, ``None`` for the two public defaults (:data:`invisible_core._udp_exit.DEFAULT_STUN_SERVERS`). A name or
+    a bad port raises ``ValueError`` naming the parameter, with or without a proxy. It is a parameter of the Python
+    launch alone: it goes nowhere near the browser's environment, argv, prefs or pipe.
     """
     from .download import ensure_geoip_mmdb
 
+    stun_servers = _udp_exit.stun_servers(udp_stun_servers)
     tz = (timezone or "").strip()
     proxy_set = _proxy_is_set(proxy)
 
@@ -921,7 +927,7 @@ def prepare_session_geo(
     egress_err: Optional[Exception] = None
     # ⛔ THE UDP EXIT IS MEASURED BESIDE THE TCP EXIT, through the same proxy, on a thread: the two are independent
     # until they are compared, so a launch pays the longer of the two and not their sum. SOCKS5 only; None otherwise.
-    pending = _udp_exit.start_measurement(proxy) if proxy_set else None
+    pending = _udp_exit.start_measurement(proxy, stun_servers) if proxy_set else None
     try:
         egress_ip = discover_egress_ip(proxy if proxy_set else None)
     except GeoTimezoneError as exc:
@@ -932,7 +938,7 @@ def prepare_session_geo(
         egress_err = exc
     udp_exit = pending.result(egress_ip) if pending is not None else None
     if egress_ip is not None:
-        _udp_exit.remember(proxy, udp_exit)   # a context given this proxy later does not measure it again
+        _udp_exit.remember(proxy, udp_exit, stun_servers)   # a context given this proxy later does not measure it again
 
     # Timezone resolution - same precedence as resolve_session_timezone.
     def _coordinate(ip: "Optional[str]") -> "Optional[DeclaredPosition]":

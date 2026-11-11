@@ -39,10 +39,14 @@ harmless. The whole exchange (connect, handshake, ASSOCIATE, the three rounds, t
 The comparison is on the address after ``ipaddress`` normalisation. IPv4 STUN only: when the TCP exit is IPv6 the
 mapped IPv4 address differs from it and the answer is ``no`` (an IPv4-mapped IPv6 result never equals either).
 
-THE SERVERS ARE A DECLARATION. :data:`STUN_SERVERS` are the defaults; the environment variable
-``STEALTHFOX_UDP_STUN_SERVERS`` (``invisible_core.environment.UDP_STUN_SERVERS``) overrides them with a
-comma-separated list of ``ip:port`` IP literals, which is how a hermetic test points the measurement at a fake STUN
-only the relay can reach. A value that is not an IP literal with a port is refused with an error naming the variable.
+THE SERVERS ARE AN EXPLICIT PARAMETER OF THE LAUNCH, never an environment variable and never a browser declaration.
+:data:`DEFAULT_STUN_SERVERS` are the defaults; ``udp_stun_servers`` (a list of ``"ip:port"`` IPv4 literals) overrides them, and
+is how a hermetic test points the measurement at a fake STUN only the relay can reach. It is a keyword of
+``prepare_session_geo``, ``build_launch_plan``, ``get_default_stealth_prefs``, ``invisible_core.juggler.launch`` and, in the
+Playwright wrapper, of ``InvisiblePlaywright(...)`` and ``launch_server(...)``, which keep it on the session so the
+launch and every later ``new_context(proxy=...)`` measure with the SAME list. A name, an IPv6 literal or a bad port
+raises ``ValueError`` naming ``udp_stun_servers``. The list is used by the Python process alone: it is not written
+to the browser's environment, argv, prefs or pipe.
 """
 from __future__ import annotations
 
@@ -56,22 +60,17 @@ import threading
 import time
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
-from . import environment
 from ._proxy import UDP_EXIT_VALUES, ProxyEndpoint, parse_proxy
 
 log = logging.getLogger(__name__)
 
-#: The two STUN servers asked, as IP literals. Source, read on 2026-11-11: Cloudflare Realtime TURN FAQ,
-#: https://developers.cloudflare.com/realtime/turn/faq/ (page "Last updated Jul 14, 2026"), which lists the anycast
-#: addresses 141.101.90.1 and 162.159.207.1 (IPv4) and says: "TURN service at turn.cloudflare.com will also respond
-#: to binding requests ("STUN requests")"; the port is the one the same documentation gives for STUN,
-#: https://developers.cloudflare.com/realtime/turn/ (STUN over UDP, 3478/udp). Two different anycast prefixes of the
-#: same operator: a lost datagram, a slow site or one prefix refused by the proxy's network does not make the
-#: measurement blind. The documentation does not guarantee the addresses ("tries to, but cannot guarantee"); a change
-#: makes the answer ``unmeasured``, never a wrong ``coherent``, and the declaration below overrides them.
-#: Google's STUN (stun.l.google.com:19302) is NOT used: Google publishes a name, no address, and an address that
-#: cannot be confirmed from a primary source is not written here.
-STUN_SERVERS: Tuple[Tuple[str, int], ...] = (("141.101.90.1", 3478), ("162.159.207.1", 3478))
+#: The two STUN servers asked when the launch names none: two public anycast STUN addresses, in the form the
+#: ``udp_stun_servers`` parameter takes (``"ip:port"``, an IPv4 literal and a port: the core never resolves a name).
+#: Two different anycast prefixes, so a lost datagram, a slow site or one prefix refused by the proxy's network does
+#: not make the measurement blind. Source and date of verification are recorded in the study notes
+#: (invisible_WebRTC/notes), not here. The addresses are not guaranteed by their operator: a change makes the answer
+#: ``unmeasured``, never a wrong ``coherent``.
+DEFAULT_STUN_SERVERS: Tuple[str, ...] = ("141.101.90.1:3478", "162.159.207.1:3478")
 
 #: The whole measurement is bounded by this, in seconds.
 BUDGET = 3.0
@@ -84,8 +83,9 @@ UNMEASURED = "unmeasured"
 #: The values of the ``udp`` field.
 VALUES = UDP_EXIT_VALUES
 
-#: How long a proxy's measurement is kept, for a context that gives the proxy again (seconds).
-CACHE_SECONDS = 600.0
+#: How long a proxy's measurement is kept (seconds): for a context that gives the proxy again, and for the launch that
+#: measured it to reach the engine's first command even after a first-run download.
+CACHE_SECONDS = 1800.0
 
 _MAGIC = b"\x21\x12\xa4\x42"
 _BINDING_REQUEST = b"\x00\x01\x00\x00" + _MAGIC
@@ -97,30 +97,41 @@ Server = Tuple[str, int]
 
 
 # ── the servers ─────────────────────────────────────────────────────────────
-def _server(text: str) -> Server:
-    host, sep, port_text = text.strip().rpartition(":")
+def _server(entry: Any) -> Server:
+    """One server, from ``"ip:port"`` or from an ``(ip, port)`` pair; an IPv4 literal and a port, or ValueError."""
     try:
-        if not sep:
-            raise ValueError("no port")
+        if isinstance(entry, str):
+            host, sep, port_text = entry.strip().rpartition(":")
+            if not sep:
+                raise ValueError("no port")
+            port = int(port_text)
+        else:
+            host, port = entry
+            port = int(port)
         address = ipaddress.ip_address(host)
         if address.version != 4:
             raise ValueError("IPv4 only")
-        port = int(port_text)
         if not 1 <= port <= 65535:
             raise ValueError("port outside 1-65535")
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise ValueError(
-            "%s: %r is not an IPv4 literal with a port (ip:port), the form the STUN servers are declared in: %s"
-            % (environment.UDP_STUN_SERVERS, text, exc))
+            "udp_stun_servers: %r is not an IPv4 literal with a port (\"ip:port\"), the form the STUN servers "
+            "are given in: %s" % (entry, exc))
     return str(address), port
 
 
-def declared_stun_servers() -> Tuple[Server, ...]:
-    """The STUN servers the measurement asks: the declaration in the environment, else :data:`STUN_SERVERS`."""
-    value = os.environ.get(environment.UDP_STUN_SERVERS)
-    if value is None or not value.strip():
-        return STUN_SERVERS
-    return tuple(_server(part) for part in value.split(",") if part.strip())
+def stun_servers(udp_stun_servers: Optional[Sequence[Any]] = None) -> Tuple[Server, ...]:
+    """The STUN servers the measurement asks: the ``udp_stun_servers`` parameter of the launch (``"ip:port"`` IPv4
+    literals, validated: a name or a bad port raises ValueError naming the parameter), else :data:`DEFAULT_STUN_SERVERS`.
+    ``None`` means the defaults; an EMPTY list is refused (it would measure nothing and say so late)."""
+    if udp_stun_servers is None:
+        return tuple(_server(entry) for entry in DEFAULT_STUN_SERVERS)
+    if isinstance(udp_stun_servers, str):
+        raise ValueError("udp_stun_servers: give a list of \"ip:port\" strings, not one string")
+    servers = tuple(_server(entry) for entry in udp_stun_servers)
+    if not servers:
+        raise ValueError("udp_stun_servers: the list is empty; pass None for the defaults")
+    return servers
 
 
 # ── the exchange ────────────────────────────────────────────────────────────
@@ -331,18 +342,18 @@ def _endpoint_to_measure(proxy: Optional[Dict[str, Any]]) -> Optional[ProxyEndpo
 
 
 def measure_udp_exit(proxy: Optional[Dict[str, Any]], tcp_exit_ip: Optional[str], *,
-                     servers: Optional[Sequence[Server]] = None, budget: float = BUDGET,
+                     udp_stun_servers: Optional[Sequence[Any]] = None, budget: float = BUDGET,
                      schedule: Optional[Sequence[float]] = None) -> Optional[str]:
     """``coherent`` / ``no`` / ``unmeasured`` for a SOCKS5 ``proxy`` (``{"server", "username", "password"}``) whose
     TCP exit is ``tcp_exit_ip``; None for any other proxy (nothing is measured and no field is declared).
 
-    ``servers`` defaults to :func:`declared_stun_servers`; ``budget`` and ``schedule`` default to :data:`BUDGET` and
-    :data:`SCHEDULE`. Blocks for at most ``budget`` seconds."""
+    ``udp_stun_servers`` (``"ip:port"`` IPv4 literals) defaults to :data:`DEFAULT_STUN_SERVERS`; ``budget`` and ``schedule``
+    default to :data:`BUDGET` and :data:`SCHEDULE`. Blocks for at most ``budget`` seconds."""
+    servers = stun_servers(udp_stun_servers)
     endpoint = _endpoint_to_measure(proxy)
     if endpoint is None:
         return None
-    probe = probe_udp_exit(endpoint, servers if servers is not None else declared_stun_servers(),
-                           budget, SCHEDULE if schedule is None else schedule)
+    probe = probe_udp_exit(endpoint, servers, budget, SCHEDULE if schedule is None else schedule)
     verdict = judge(probe, tcp_exit_ip)
     log.debug("the UDP exit through the proxy: %s", verdict)
     return verdict
@@ -369,35 +380,40 @@ class PendingMeasurement:
         return verdict
 
 
-def start_measurement(proxy: Optional[Dict[str, Any]]) -> Optional[PendingMeasurement]:
+def start_measurement(proxy: Optional[Dict[str, Any]],
+                      udp_stun_servers: Optional[Sequence[Any]] = None) -> Optional[PendingMeasurement]:
     """Start measuring a SOCKS5 proxy's UDP exit on a thread, to be joined with the TCP exit once it is known;
     None when the proxy is not SOCKS5."""
+    servers = stun_servers(udp_stun_servers)
     endpoint = _endpoint_to_measure(proxy)
     if endpoint is None:
         return None
-    return PendingMeasurement(endpoint, declared_stun_servers(), BUDGET, SCHEDULE)
+    return PendingMeasurement(endpoint, servers, BUDGET, SCHEDULE)
 
 
 # ── once per proxy ──────────────────────────────────────────────────────────
-def cache_key(endpoint: ProxyEndpoint) -> Tuple[Any, ...]:
-    """The endpoint and a hash of the credentials: never the secret itself."""
+def cache_key(endpoint: ProxyEndpoint, servers: Tuple[Server, ...] = ()) -> Tuple[Any, ...]:
+    """The endpoint, a hash of the credentials (never the secret itself) and the servers asked."""
     secret = hashlib.sha256(("%s\0%s" % (endpoint.username, endpoint.password)).encode("utf-8")).hexdigest()
-    return (endpoint.type, endpoint.host, endpoint.port, secret)
+    return (endpoint.type, endpoint.host, endpoint.port, secret, tuple(servers))
 
 
 _cache: Dict[Tuple[Any, ...], Tuple[float, Optional[str]]] = {}
 _cache_lock = threading.Lock()
 
 
-def remember(proxy: Optional[Dict[str, Any]], verdict: Optional[str]) -> None:
+def remember(proxy: Optional[Dict[str, Any]], verdict: Optional[str],
+             udp_stun_servers: Optional[Sequence[Any]] = None) -> None:
     """Keep a measurement the launch already made, so a context given the same proxy does not repeat it."""
+    servers = stun_servers(udp_stun_servers)
     endpoint = _endpoint_to_measure(proxy)
     if endpoint is not None and verdict is not None:
         with _cache_lock:
-            _cache[cache_key(endpoint)] = (time.monotonic(), verdict)
+            _cache[cache_key(endpoint, servers)] = (time.monotonic(), verdict)
 
 
-def measure_proxy_udp(proxy: Optional[Dict[str, Any]]) -> Optional[str]:
+def measure_proxy_udp(proxy: Optional[Dict[str, Any]],
+                      udp_stun_servers: Optional[Sequence[Any]] = None) -> Optional[str]:
     """The ``udp`` field to declare for ``proxy``, discovering what it needs: the TCP exit through the proxy (the
     core's own discovery) and, beside it, the UDP exit. ONCE per proxy (endpoint and a hash of the credentials) for
     :data:`CACHE_SECONDS`. None for a proxy that is not SOCKS5.
@@ -405,16 +421,17 @@ def measure_proxy_udp(proxy: Optional[Dict[str, Any]]) -> Optional[str]:
     For a proxy given to a context (``new_context(proxy=...)``): called BEFORE ``Browser.setContextProxy`` is sent. It
     costs the TCP discovery (one to three round trips through the proxy) with the UDP measurement beside it, so
     about the time of the longer of the two; nothing at all the second time."""
+    servers = stun_servers(udp_stun_servers)
     endpoint = _endpoint_to_measure(proxy)
     if endpoint is None:
         return None
-    key = cache_key(endpoint)
+    key = cache_key(endpoint, servers)
     with _cache_lock:
         hit = _cache.get(key)
     if hit is not None and time.monotonic() - hit[0] < CACHE_SECONDS:
         return hit[1]
     from . import _geo
-    pending = start_measurement(proxy)
+    pending = start_measurement(proxy, servers)
     exit_ip: Optional[str] = None
     try:
         exit_ip = _geo.discover_egress_ip(proxy)
@@ -422,37 +439,46 @@ def measure_proxy_udp(proxy: Optional[Dict[str, Any]]) -> Optional[str]:
         exit_ip = None
     verdict = pending.result(exit_ip) if pending is not None else None
     if exit_ip is not None:          # a comparison that could not be made is not kept
-        remember(proxy, verdict)
+        remember(proxy, verdict, servers)
     return verdict
 
 
-def declare_context_proxy(proxy: Dict[str, Any]) -> Dict[str, Any]:
-    """``proxy`` as a context is to be given it: the same dict with the ``udp`` slot holding what was MEASURED
-    (:func:`measure_proxy_udp`), whatever the caller wrote there replaced, and removed for a proxy that is not
-    SOCKS5. Call it BEFORE ``Browser.setContextProxy`` is sent; ``parse_proxy(...).as_engine_command()`` then carries
-    the field."""
-    declared = dict(proxy)
-    declared.pop("udp", None)
-    verdict = measure_proxy_udp(proxy)
-    if verdict is not None:
-        declared["udp"] = verdict
-    return declared
-
-
-def declare_launch_proxy(proxy: Dict[str, Any]) -> Dict[str, Any]:
-    """The session proxy as ``Browser.setBrowserProxy`` is to be given it, WITHOUT touching the network.
-
-    The measurement belongs to the launch's geo step (`prepare_session_geo`, beside the TCP discovery), which hands it
-    on through ``configure_proxy(..., udp=)`` into the ``udp`` key of the dict: a proxy that carries it is kept as it
-    is. A SOCKS5 proxy that does not (a client that composed no session itself, whose server composed one) gets what
-    that geo step remembered for the same endpoint, and ``unmeasured`` when nothing was: it is never claimed
-    ``coherent`` without a measurement. Any other proxy carries no field."""
-    endpoint = _endpoint_to_measure(proxy)
+def _command(proxy: Dict[str, Any], udp: Any) -> Optional[Dict[str, Any]]:
+    """The engine command of ``proxy`` with ``udp`` as the measurement says. ``parse_proxy`` is the ONE reader of
+    what the caller wrote and it never reads a ``udp`` key: the field comes from here and from nowhere else."""
+    endpoint = parse_proxy(proxy)
     if endpoint is None:
-        return proxy
-    if proxy.get("udp") not in (None, ""):
-        return proxy
+        return None
+    if endpoint.type == "socks":
+        endpoint = endpoint._replace(udp=udp)
+    return endpoint.as_engine_command()
+
+
+def context_proxy_command(proxy: Dict[str, Any],
+                          udp_stun_servers: Optional[Sequence[Any]] = None) -> Optional[Dict[str, Any]]:
+    """The params of ``Browser.setContextProxy`` (without the context id) for ``proxy``: the proxy as
+    ``parse_proxy(...).as_engine_command()`` renders it, and for a SOCKS5 one the ``udp`` MEASURED now by
+    :func:`measure_proxy_udp` (``unmeasured`` when the measurement could not run). Call it BEFORE the command is sent.
+    Whatever the caller wrote under ``udp`` is not read. ValueError for a proxy that cannot be read."""
+    endpoint = parse_proxy(proxy)
+    if endpoint is None or endpoint.type != "socks":
+        return _command(proxy, None)
+    return _command(proxy, measure_proxy_udp(proxy, udp_stun_servers) or UNMEASURED)
+
+
+def launch_proxy_command(proxy: Dict[str, Any],
+                         udp_stun_servers: Optional[Sequence[Any]] = None) -> Optional[Dict[str, Any]]:
+    """The params of ``Browser.setBrowserProxy`` for ``proxy``, WITHOUT touching the network.
+
+    The measurement belongs to the launch's geo step (``prepare_session_geo``, beside the TCP discovery), which
+    remembers it for the proxy and the servers it asked; this renders the command with what was remembered, and
+    ``unmeasured`` when nothing was (a client that composed no session, an entry that expired): never ``coherent``
+    without a measurement. Whatever the caller wrote under ``udp`` is not read."""
+    endpoint = parse_proxy(proxy)
+    if endpoint is None or endpoint.type != "socks":
+        return _command(proxy, None)
+    servers = stun_servers(udp_stun_servers)
     with _cache_lock:
-        hit = _cache.get(cache_key(endpoint))
-    verdict = hit[1] if hit is not None and time.monotonic() - hit[0] < CACHE_SECONDS else UNMEASURED
-    return dict(proxy, udp=verdict or UNMEASURED)
+        hit = _cache.get(cache_key(endpoint, servers))
+    fresh = hit is not None and time.monotonic() - hit[0] < CACHE_SECONDS
+    return _command(proxy, (hit[1] if fresh else None) or UNMEASURED)

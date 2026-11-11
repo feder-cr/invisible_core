@@ -53,6 +53,7 @@ def get_default_stealth_prefs(
     virtual_display: bool = False,
     proxy: Optional[Dict[str, str]] = None,
     show_cursor: Optional[bool] = None,
+    udp_stun_servers: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Build a complete ``firefox_user_prefs`` dict for ``firefox.launch()``.
 
@@ -121,6 +122,10 @@ def get_default_stealth_prefs(
             ``launch(proxy=...)`` yourself. Added 2026-08-01: before it,
             this function returned a prefs dict with no proxy configuration
             whatever endpoint you were about to use.
+        udp_stun_servers: Where a SOCKS5 proxy's UDP exit is measured from: a
+            list of ``"ip:port"`` IPv4 literals, ``None`` for the two public
+            defaults. A name or a bad port raises ``ValueError`` naming the
+            parameter. Python only: nothing of it is put in the prefs.
         show_cursor: Draw the pointer where the automation is, in the
             browser's own chrome window: the Windows arrow with the package
             logo's green halo around it. None means "not specified" and
@@ -149,7 +154,8 @@ def get_default_stealth_prefs(
     profile = generate_profile(resolved_seed, pin=pin)
     # The same decision a launch makes, from the same exit: one call for the
     # zone, the language and the address, so the three cannot disagree.
-    geo = prepare_session_geo(timezone, proxy, locale, seed=resolved_seed)
+    geo = prepare_session_geo(timezone, proxy, locale, seed=resolved_seed,
+                               udp_stun_servers=udp_stun_servers)
     # One composition for all three entry points (prefs.py). Two things this
     # function did NOT do before 2026-08-01 and now does, both by taking the
     # shared layers rather than rebuilding them:

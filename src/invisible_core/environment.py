@@ -52,10 +52,6 @@ FONT_MANIFEST = "STEALTHFOX_FONT_MANIFEST"
 WEBRTC_NETWORK = "STEALTHFOX_WEBRTC_NETWORK"
 #: "off" leaves the system timer resolution alone (`juggler._pacing`).
 CURSOR_TIMER = "INVPW_CURSOR_TIMER"
-#: The STUN servers the UDP-exit measurement asks through a SOCKS5 proxy, as a comma-separated list of ``ip:port``
-#: IP literals (never names); unset means the two the module declares (`_udp_exit`). For a test that points the
-#: measurement at a fake STUN only the relay can reach.
-UDP_STUN_SERVERS = "STEALTHFOX_UDP_STUN_SERVERS"
 
 # --- handoffs: what the library sets for a process it starts ----------------
 
@@ -69,7 +65,7 @@ DESKTOP = "INVPW_DESKTOP"
 SETTINGS = (ENGINE_DIR, CACHE_DIR, DOWNLOAD_DEADLINE, GITHUB_TOKEN_OWN,
             GITHUB_TOKEN, SEAL_FILE, CORE_PIN, CORE_AUTOFIX,
             CORE_AUTOFIX_TIMEOUT, UV, GEOIP_MMDB, FONT_MANIFEST,
-            WEBRTC_NETWORK, CURSOR_TIMER, UDP_STUN_SERVERS)
+            WEBRTC_NETWORK, CURSOR_TIMER)
 HANDOFFS = (CORE_AUTOFIX_ATTEMPTED, SESSION_TOKEN, DESKTOP)
 #: Everything the library reads from the environment.
 READ = SETTINGS + HANDOFFS

@@ -167,7 +167,7 @@ def test_the_launch_plan_carries_the_override_of_its_seed(monkeypatch, tmp_path)
     monkeypatch.delenv("STEALTHFOX_WEBRTC_NETWORK", raising=False)
     seen = {}
 
-    def fake_geo(tz, proxy, locale="auto", *, seed=None):
+    def fake_geo(tz, proxy, locale="auto", *, seed=None, udp_stun_servers=None):
         seen["seed"] = seed
         p = declared_position(seed, *BASE)
         return SessionGeo("Europe/Rome", "203.0.113.7", p.latitude, p.longitude, None, p.accuracy)
@@ -184,7 +184,7 @@ def test_the_public_config_path_hands_its_seed_to_the_geo_step(monkeypatch):
     from invisible_core import config
     seen = {}
 
-    def fake_geo(tz, proxy, locale="auto", *, seed=None):
+    def fake_geo(tz, proxy, locale="auto", *, seed=None, udp_stun_servers=None):
         seen["seed"] = seed
         return SessionGeo("Europe/Rome", "203.0.113.7")
 
