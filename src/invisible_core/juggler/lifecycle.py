@@ -515,7 +515,9 @@ class Lifecycle:
                 if old and not frame_id:
                     frame_id = old[0]
             rid = p.get("requestId")
-            if rid is not None:
+            # Playwright drops a request whose frame it does not have: a beacon sent at `pagehide` is announced after
+            # its frame left, no end ever comes for it, and held here it would keep `networkidle` away for good.
+            if rid is not None and frame_id not in self._left_frames:
                 self._open[rid] = (frame_id, nav)
             self._last_activity = time.monotonic()
             if len(self._open) > 2:
@@ -536,7 +538,10 @@ class Lifecycle:
         document and when frames leave: the requests of a document that is gone cannot hold the next one."""
         ids = set(frame_ids)
         for rid, (owner, nav) in list(self._open.items()):
-            if (owner or self.main_frame) in ids and not (keep_navigation and nav == keep_navigation):
+            # A request of a frame this page does not have (its attach never reached us, or it left) can only be held
+            # by a request whose end we will never see: it goes with the next document, as Playwright's never counted it.
+            orphan = owner is not None and owner not in self.frames
+            if orphan or ((owner or self.main_frame) in ids and not (keep_navigation and nav == keep_navigation)):
                 del self._open[rid]
 
     def _tell(self, what: str, frame_id: str, url: Optional[str] = None,

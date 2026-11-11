@@ -168,3 +168,35 @@ def test_inflight_is_the_number_of_open_requests():
     assert v.inflight == 2
     c.dispatch_event("Network.requestFinished", {"requestId": "a"}, S)
     assert v.inflight == 1
+
+
+def test_a_request_that_arrives_after_its_frame_left_is_not_held():
+    """A beacon sent at `pagehide` is announced after the frame is gone (measured on a real news page through the
+    served browser: `TYPE_BEACON` requests of a subframe that no longer existed, route answered, no end for 60 s, and every
+    `networkidle` of the page after it timed out). Playwright drops a request whose frame it does not have."""
+    c, v = _page()
+    _document(c, "N1")
+    c.dispatch_event("Page.frameAttached", {"frameId": "F2", "parentFrameId": "F1"}, S)
+    c.dispatch_event("Page.frameDetached", {"frameId": "F2"}, S)
+    _sub(c, "late-beacon", frame="F2")        # the beacon of the document that was leaving
+    assert v.inflight == 0
+    _idle(v)
+
+
+def test_a_request_of_a_frame_the_page_never_heard_of_does_not_outlive_the_next_document():
+    c, v = _page()
+    _document(c, "N1")
+    _sub(c, "orphan", frame="F9")              # a frame whose attach never reached us, and whose requests never end
+    _document(c, "N2", "http://b.test/")
+    assert v.inflight == 0
+    _idle(v)
+
+
+def test_a_known_frame_keeps_its_requests_when_the_sweep_runs():
+    c, v = _page()
+    _document(c, "N1")
+    c.dispatch_event("Page.frameAttached", {"frameId": "F2", "parentFrameId": "F1"}, S)
+    _sub(c, "ad-1", frame="F2")
+    c.dispatch_event("Page.navigationCommitted", {"frameId": "F1", "navigationId": "N2", "url": "http://a.test/2", "name": ""}, S)
+    # F2 was a child of F1's old document: gone with it, so its request goes too (the existing rule)
+    assert v.inflight == 0
