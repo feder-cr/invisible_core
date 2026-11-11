@@ -374,20 +374,20 @@ def test_resolve_proxy_failure_raises(monkeypatch):
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  prepare_session_geo - one round-trip for BOTH timezone + the WebRTC
-#  egress IP. The egress feeds the srflx override (only behind a proxy).
+#  prepare_session_geo - one round-trip for the timezone, the language and
+#  the position: all three come from the egress IP.
 # ──────────────────────────────────────────────────────────────────────
 @pytest.mark.unit
 def test_prepare_geo_egress_present_behind_proxy(stub_egress):
     geo = prepare_session_geo("auto", SOCKS)
     assert geo.timezone == "America/New_York"
-    assert geo.egress_ip == "203.0.113.7"  # discovered for WebRTC
+    assert geo.egress_ip == "203.0.113.7"  # discovered once
     assert stub_egress["proxy_arg"] == SOCKS
 
 
 @pytest.mark.unit
 def test_prepare_geo_egress_present_even_with_explicit_tz(stub_egress):
-    # explicit IANA zone still needs the egress for WebRTC behind a proxy.
+    # explicit IANA zone still needs the egress for the language and position.
     geo = prepare_session_geo("Asia/Tokyo", SOCKS)
     assert geo.timezone == "Asia/Tokyo"
     assert geo.egress_ip == "203.0.113.7"
@@ -395,27 +395,15 @@ def test_prepare_geo_egress_present_even_with_explicit_tz(stub_egress):
 
 
 @pytest.mark.unit
-def test_prepare_geo_no_webrtc_override_without_proxy(stub_egress):
-    """With no proxy no srflx is declared - but the fact is carried anyway.
+def test_prepare_geo_carries_the_exit_without_proxy(stub_egress):
+    """With no proxy the exit is the host's public address, and the fact is carried.
 
-    ⛔ THIS TEST ASSERTED THE MECHANISM, NOT THE REQUIREMENT. The comment said
-    "no WebRTC override (real STUN already tells the truth)", which is the
-    requirement and still holds; the assertion was `geo.egress_ip is None`,
-    which was only the WAY that requirement was obtained until 2026-08-26. That
-    way cost a second discovery of the address, because the fact was thrown away
-    in order to be able to say "do not declare".
-
-    Now the requirement is asserted directly, and the fact is asserted as a
-    fact. Two lines where there used to be one ambiguous one.
+    The round trip was paid for the timezone: throwing its result away makes the
+    language lookup pay it again.
     """
     geo = prepare_session_geo("auto", None)
     assert geo.timezone == "America/New_York"
-    assert geo.srflx_to_declare() is None, (
-        "with no proxy the engine must receive no srflx to declare: the real "
-        "one is born with the right address and with its own allocation")
-    assert geo.egress_ip == "203.0.113.7", (
-        "the round trip was paid for the timezone: throwing its result away "
-        "makes the language lookup pay it again")
+    assert geo.egress_ip == "203.0.113.7"
 
 
 @pytest.mark.unit
@@ -510,200 +498,6 @@ def test_a_single_endpoint_cannot_eat_the_whole_budget(monkeypatch):
     )
 
 
-# ---------------------------------------------------------------------------
-# The srflx decision comes from the exit's CAPABILITIES, not from the scheme.
-# ---------------------------------------------------------------------------
-
-class _FakeCapability:
-    """Replaces the network probe. No proxy, no socket, no waiting."""
-
-    def __init__(self, answer):
-        self.answer = answer
-        self.calls = []
-
-    def __call__(self, proxy, **kw):
-        self.calls.append(kw)
-        if isinstance(self.answer, Exception):
-            raise self.answer
-        return self.answer
-
-
-def _decide(monkeypatch, answer, egress="203.0.113.7"):
-    from invisible_core import _capability, _geo
-    fake = _FakeCapability(answer)
-    monkeypatch.setattr(_capability, "capability", fake)
-    return _geo._srflx_suppressed({"server": "socks5://gw:1080"}, egress), fake
-
-
-def test_the_fields_DEFAULT_is_the_cautious_one():
-    """THE DEFECT THIS TEST EXISTS TO KEEP CLOSED.
-
-    The first draft carried the ADDRESS to declare, defaulting to ``None``.
-    `SessionGeo` is built positionally in six places across code and tests, and
-    every one of them that did not know about the new field stopped declaring
-    the srflx by accident: the default fell on the side leading to the message
-    peggiore che un rilevatore possa scrivere. Invertito in un interruttore, il
-    silenzio va chiesto.
-    """
-    from invisible_core._geo import SessionGeo
-    g = SessionGeo("America/New_York", "198.51.100.4")
-    assert g.srflx_suppressed is False, "il default deve DICHIARARE"
-    assert g.srflx_to_declare() == "198.51.100.4"
-
-
-def test_with_coherent_udp_the_srflx_is_SUPPRESSED(monkeypatch):
-    """The only case where staying silent beats declaring.
-
-    The real srflx will be born with the right address already, because UDP
-    leaves from where TCP leaves. Declaring one would add a candidate with no
-    matching allocation, which is exactly the signal a detector with a TURN of
-    its own knows how to read.
-    """
-    from invisible_core._geo import SessionGeo
-    from invisible_core import _proxy
-    # ⛔ TWO CONDITIONS ARE NEEDED, not one: that the exit carries coherent UDP
-    # AND that the browser sends that UDP inside the proxy. This test exercised
-    # one only, and for an hour the function checked one only.
-    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
-    suppressed, _ = _decide(monkeypatch, {"udp": True, "udp_matches_tcp": True})
-    assert suppressed is True
-    assert SessionGeo("tz", "203.0.113.7", None, None, True).srflx_to_declare() is None
-
-
-def test_with_INCOHERENT_udp_it_declares(monkeypatch):
-    """UDP is there but leaves from another address: the real srflx would carry it."""
-    suppressed, _ = _decide(monkeypatch, {"udp": True, "udp_matches_tcp": False})
-    assert suppressed is False
-
-
-def test_without_udp_it_declares(monkeypatch):
-    suppressed, _ = _decide(monkeypatch, {"udp": False, "udp_matches_tcp": None})
-    assert suppressed is False
-
-
-def test_a_SILENT_probe_is_not_a_licence_to_stay_quiet(monkeypatch):
-    """Missing fields are not a demonstration of coherence."""
-    suppressed, _ = _decide(monkeypatch, {})
-    assert suppressed is False
-
-
-def test_a_probe_that_BLOWS_UP_cannot_fail_the_launch(monkeypatch):
-    """Qualunque errore cade dal lato prudente, e il lancio prosegue."""
-    suppressed, _ = _decide(monkeypatch, OSError("rete giu'"))
-    assert suppressed is False
-
-
-def test_the_exit_already_discovered_is_REUSED_not_remeasured(monkeypatch):
-    """One fact, one round-trip. `prepare_session_geo` has already paid for it.
-
-    ⛔ Routing has to be turned on, because with it off the probe is not called
-    AT ALL - and rightly so: if the browser does not send UDP inside the proxy,
-    knowing that the proxy would carry it changes no decision, and those 4-19
-    seconds would be spent for nothing.
-    """
-    from invisible_core import _proxy
-    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
-    _, fake = _decide(monkeypatch, {"udp": False, "udp_matches_tcp": None})
-    assert fake.calls, "la sonda non e' stata chiamata affatto"
-    assert fake.calls[0].get("known_tcp_exit") == "203.0.113.7"
-
-
-def test_without_a_proxy_the_probe_is_NOT_even_called(monkeypatch):
-    """On a direct connection the real STUN already tells the truth.
-
-    ⛔ AND THAT SENTENCE IS THE REQUIREMENT, so the answer is `True` - do not
-    declare. Until 2026-08-26 this assertion said `False`, and the "do not
-    declare" arrived anyway because `egress_ip` was `None` without a proxy.
-    Docstring and assertion said opposite things about what to do with an
-    address in hand, and it was the absence of the fact, not the rule, that
-    decided.
-    """
-    from invisible_core import _capability, _geo
-    fake = _FakeCapability({"udp": True, "udp_matches_tcp": True})
-    monkeypatch.setattr(_capability, "capability", fake)
-    assert _geo._srflx_suppressed(None, "203.0.113.7") is True
-    assert fake.calls == [], "probing without a proxy is a wasted round-trip"
-
-
-def test_the_question_is_answered_in_ONE_place_only():
-    """I due costruttori di env chiamano il metodo, non ricalcolano la regola."""
-    import inspect
-    from invisible_core import launch
-    src = inspect.getsource(launch.build_launch_env)
-    assert "srflx_suppressed" not in src, (
-        "build_launch_env is re-reading the switch: the rule would go back to "
-        "being written in two places, which is how they diverge")
-
-
-def test_stickiness_no_longer_enters_any_decision():
-    """Owner decision 2026-08-25, plus the fact that the field was lying.
-
-    ⛔ THE NAME THIS ASSERTS ON IS THE LIVE ONE, AND IT WAS NOT, FOR A WHILE.
-    The helper was called `e_sticky` until the core was translated on
-    2026-09-15; the assertion kept naming the old spelling, so it looked for a
-    string that no longer exists anywhere and could never fail again. A rename
-    disarmed a gate and nothing said so, because a test that cannot fail is
-    green exactly like one that passes.
-    """
-    import inspect
-    from invisible_core import _capability
-    body = inspect.getsource(_capability.measure)
-    body = body.split('"""')[2] if body.count('"""') >= 2 else body
-    assert "is_sticky" not in body, (
-        "stickiness is back inside measure(): it cost six network round-trips "
-        "out of eight and answered 'yes' for an endpoint measured rotating 8 "
-        "times in 25 minutes")
-
-
-def test_coherent_udp_is_NOT_enough_if_the_browser_does_not_route_udp_through_the_proxy(monkeypatch):
-    """⛔ THE DEFECT IN THE FIRST DRAFT, from 2026-08-25.
-
-    That the EXIT carries coherent UDP is not enough: the BROWSER also has to be
-    the one sending us the UDP. With `network.proxy.socks_remote_udp` off, UDP
-    goes around the proxy, so the REAL srflx would be born with the home
-    address, and to stop declaring would be a leak instead of a remedy.
-
-    The branch was unreachable by LUCK - no provider has usable UDP - and not by
-    construction. It is the shape of defect this project pays for: a condition
-    whose safety rests on a fact it does not verify.
-    """
-    from invisible_core import _capability, _geo, _proxy
-
-    monkeypatch.setattr(_capability, "capability",
-                        lambda p, **k: {"udp": True, "udp_matches_tcp": True})
-
-    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", False)
-    assert _geo._srflx_suppressed({"server": "socks5://g:1"}, "203.0.113.7") is False, (
-        "with no UDP routing through the proxy it MUST keep declaring")
-
-    monkeypatch.setattr(_proxy, "UDP_GOES_THROUGH_SOCKS", True)
-    assert _geo._srflx_suppressed({"server": "socks5://g:1"}, "203.0.113.7") is True, (
-        "con l'instradamento acceso E l'UDP coerente il ramo deve accendersi, "
-        "altrimenti la costante non e' una condizione ma un interruttore morto")
-
-
-def test_udp_routing_is_declared_in_one_place_only():
-    """The fact must not be rewritten: it is read from the constant."""
-    import inspect
-    from invisible_core import _geo, _proxy
-
-    assert _proxy.UDP_GOES_THROUGH_SOCKS is False, (
-        "if one day it is turned on, it is turned on HERE and the pref "
-        "network.proxy.socks_remote_udp is emitted in the same commit")
-    # ⛔ THE CHECK GOES ON THE CODE, NOT ON THE COMMENT. The first draft of this
-    # test looked for the string `socks_remote_udp` in the function's source and
-    # found it in the COMMENT explaining why the constant exists. It is this
-    # project's most repeated rule, applied in reverse.
-    lines = [r.split("#")[0] for r in
-             inspect.getsource(_geo._srflx_suppressed).splitlines()]
-    source = chr(10).join(lines)
-    assert "UDP_GOES_THROUGH_SOCKS" in source, (
-        "the decision is not reading the constant: the fact would go back to "
-        "being written in two places")
-    assert "Preferences" not in source and "socks_remote_udp" not in source, (
-        "_geo is reading the pref on its own instead of the constant")
-
-
 def _count_probes(monkeypatch):
     """Makes discovery deterministic and COUNTS how many times it is called."""
     import invisible_core.download as dl
@@ -753,44 +547,6 @@ def test_without_a_proxy_the_address_is_discovered_ONCE_only(monkeypatch):
 
 
 @pytest.mark.unit
-def test_without_a_proxy_the_engine_gets_neither_srflx_nor_ipv6_filter(monkeypatch):
-    """⛔ THE REGRESSION THE OBVIOUS FIX WOULD HAVE CAUSED.
-
-    Carrying the discovered address inside `egress_ip` and touching nothing else
-    looks like the minimal fix for the double round-trip, and it would have been
-    a double failure, because `egress_ip` drove TWO things:
-
-    1. the declared srflx - we would have announced a synthetic candidate with
-       the HOME address, that is, a candidate with no matching allocation, which
-       is exactly the signal a detector reads as the front end being
-       manipulated;
-    2. the IPv6 filter - `build_launch_env` turns it on for `if webrtc_ip`, so it
-       would have come back on with no proxy at all, undoing the measurement of
-       2026-08-25 (retail 6 candidates, us 3, because we always filtered).
-
-    Neither is visible from a test on `_geo` alone: the first goes through a
-    method, the second through an environment builder in another module. That is
-    why this test reaches all the way to the environment.
-    """
-    from invisible_core import _geo
-    from invisible_core.launch import build_launch_env
-
-    _count_probes(monkeypatch)
-    geo = _geo.prepare_session_geo("auto", None)
-
-    assert geo.egress_ip == "203.0.113.7", "the fact has to be in hand"
-    env = build_launch_env({}, srflx_declared=geo.srflx_to_declare(),
-                           base_env={})
-
-    assert "STEALTHFOX_WEBRTC_PUBLIC_IP" not in env, (
-        "with no proxy we would be declaring a synthetic srflx with the home "
-        "address: a candidate with no matching allocation")
-    assert "STEALTHFOX_WEBRTC_DISABLE_IPV6" not in env, (
-        "with no proxy the IPv6 filter came back on: that is the regression of "
-        "the 2026-08-25 measurement, retail 6 candidates against our 3")
-
-
-@pytest.mark.unit
 def test_behind_a_proxy_a_failed_discovery_does_NOT_fall_to_the_direct_address(monkeypatch):
     """The language is never derived from the home country while the timezone
     says another one.
@@ -836,8 +592,6 @@ def test_without_a_proxy_an_explicit_zone_still_gets_the_exits_position_and_lang
     assert (geo.latitude, geo.longitude) == (1.0, 2.0), "the position is the exit's"
     assert geo.locale.region == "GB", "the language is the exit's"
     assert count["n"] == 1, "one round trip for the three, not %d" % count["n"]
-    assert geo.srflx_to_declare() is None, (
-        "with no proxy nothing is declared: the real srflx is already the truth")
 
 
 @pytest.mark.unit

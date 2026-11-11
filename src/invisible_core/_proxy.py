@@ -177,9 +177,7 @@ def configure_proxy(
     # ⛔ `network.dns.disableIPv6 = True` WAS TRIED HERE AND REMOVED: IT IS INERT
     # BEHIND A PROXY, and a patch that moves no measurement is not a patch.
     #
-    # The idea was to make the profile IPv4-only throughout: IPv6 WebRTC
-    # candidates are already dropped behind a proxy (an IPv6 srflx is not
-    # obscured by mDNS and would carry the REAL global address), but HTTP could
+    # The idea was to make the profile IPv4-only throughout, but HTTP could
     # still leave over IPv6 - measured 2026-08-25 on a dual-stack residential
     # peer: we declared `73.209.132.45` while the same page reached an echo
     # service on `2603:300a:92e:8600:...`.
@@ -194,9 +192,8 @@ def configure_proxy(
     #
     # Worth knowing: **the address family behind a proxy is not ours to decide.**
     # If the peer has IPv6 and the site is dual-stack, we leave over IPv6 while
-    # WebRTC announces an IPv4. Actually closing that means ALSO declaring an
-    # IPv6 srflx with the proxy's IPv6 exit (discoverable: `api6.ipify.org`
-    # answers through the proxy), not switching IPv6 off from this side.
+    # WebRTC announces an IPv4. The IPv6 of the session is the `v6` bit of the
+    # declared network (`_webrtc_network`), not a switch from this side.
 
     result = dict(proxy)
 
@@ -269,38 +266,4 @@ def configure_proxy(
     # `RESOLVE_IGNORE_SOCKS_DNS`, which the gate exempts first. That is not an
     # exception we add: it is the one already holding up the SOCKS branch.
     prefs["zoom.stealth.dns.no_local_resolution"] = True
-
-    # ⛔ AND ICE's UDP LEAVES ANYWAY, if the server is written as a NUMERIC
-    # ADDRESS rather than a name. The DNS gate above cannot stop it, because a
-    # literal never reaches the resolver.
-    #
-    # Measured 2026-08-26 across three providers and two schemes: with a numeric
-    # STUN the engine receives the MAPPED-ADDRESS carrying the machine's REAL
-    # address, while the page sees the proxy's exit because the real candidate is
-    # rewritten. A leak no page-side check can see, and that only whoever runs
-    # the STUN does.
-    #
-    # The two prefs sit here together on purpose: they tell the engine the same
-    # thing from two sides - behind a proxy nothing leaves by a road the proxy
-    # does not cover - and one decision emits both.
-    prefs["zoom.stealth.webrtc.no_direct_udp"] = True
     return result
-
-
-#: ⛔ NO, and this constant exists because the answer is not obvious and a
-#: decision depends on it. The engine has the code for it
-#: (`netwerk/socket/nsSOCKSUDPIOLayer.{h,cpp}`, hooked up in `nsUDPSocket.cpp`)
-#: but it sits behind `network.proxy.socks_remote_udp`, which we do not set.
-#: Without it, **UDP goes around the proxy**, and a STUN reached that way answers
-#: with the machine's REAL address.
-#:
-#: Who reads it: `_geo._srflx_suppressed`. Giving up on declaring an srflx only
-#: makes sense if the REAL one will be born with the right address, and with UDP
-#: going around the proxy it would be born with the home address. In other words
-#: the condition "the exit carries coherent UDP" is NOT enough: the browser also
-#: has to send that UDP over there.
-#:
-#: The day the pref is switched on, this constant moves with it - and they are
-#: one fact written in one place.
-UDP_GOES_THROUGH_SOCKS = False
-

@@ -127,16 +127,9 @@ def build_launch_env(
     prefs: Dict[str, Any],
     *,
     timezone: Optional[str] = None,
-    #: The address to DECLARE as srflx, or None to declare nothing. ⛔ It is NOT
-    #: the exit IP, and the old name (`egress_ip`) made it look like one: it is
-    #: the decision `SessionGeo.srflx_to_declare` makes by looking at what the
-    #: exit is CAPABLE of. The twin in the wrapper (`_session.build_env`) carries
-    #: the same name on purpose: there were already two landing points, and two
-    #: different names would have hidden that they are the same thing.
-    srflx_declared: Optional[str] = None,
     #: The host network to DECLARE (`_webrtc_network.network_to_declare`), or None
     #: to declare nothing (a session without a proxy: its network is the real one).
-    #: Same rule as the WebRTC IP: a value already in base_env wins.
+    #: A value already in base_env wins.
     network_declared: Optional[str] = None,
     manifest_path: "Optional[str | os.PathLike[str]]" = None,
     base_env: Optional[Dict[str, str]] = None,
@@ -157,8 +150,9 @@ def build_launch_env(
     and the hidden-surface half of the contract lived only in the twin, so a
     consumer on this builder could not express a removal at all.
 
-    STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy egress IP; an
-    already-set value in base_env wins.
+    STEALTHFOX_WEBRTC_NETWORK is the one WebRTC variable: the host network a
+    proxied session declares (``network_declared``); an already-set value in
+    base_env wins.
 
     No ``TZ``: the engine takes the session's zone from the prefs
     (``juggler.timezone.override``) in every realm, and ``timezone=`` is
@@ -187,18 +181,9 @@ def build_launch_env(
             DeprecationWarning, stacklevel=2)
     env = dict(os.environ if base_env is None else base_env)
     if manifest_path is not None:
-        # An already-set value in base_env wins, same rule as the WebRTC IP:
+        # An already-set value in base_env wins, same rule as the network declaration:
         # an A/B harness has to be able to point this somewhere else.
         env.setdefault(environment.FONT_MANIFEST, str(manifest_path))
-    webrtc_ip = env.get(environment.WEBRTC_PUBLIC_IP) or srflx_declared
-    if webrtc_ip:
-        env[environment.WEBRTC_PUBLIC_IP] = webrtc_ip
-        # SOLO dietro un proxy. Un Firefox retail dual-stack emette un srflx
-        # IPv6 con l'indirizzo globale VERO in chiaro (l'mDNS offusca solo gli
-        # hosts): behind an IPv4 proxy that would be a leak and an inconsistency,
-        # without a proxy it is simply what an ordinary browser does. Measured
-        # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
-        env[environment.WEBRTC_DISABLE_IPV6] = "1"
     if network_declared:
         env.setdefault(environment.WEBRTC_NETWORK, network_declared)
     env.update(_DISPLAY_BACKEND)
@@ -452,7 +437,7 @@ def build_launch_plan(
     ).prefs
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)
-    env = build_launch_env(prefs, srflx_declared=geo.srflx_to_declare())
+    env = build_launch_env(prefs)
     argv = [binary, "-no-remote", "-profile", str(pdir)]
     argv += list(extra_args or [])
     if url:

@@ -18,7 +18,7 @@ WHAT IS DECLARED.
 * ``v6``: ``1`` only when the proxy's EXIT has IPv6 and the relay is PROVEN to carry an IPv6 destination. An IPv6 host
   address with no IPv6 road behind it would need an IPv6 srflx that cannot exist, and a persona without IPv6 behind a
   dual-stack exit contradicts the HTTP that reaches IPv6-only hosts through the proxy; following the exit is consistent
-  by construction. Nothing in the core proves a relay for IPv6 (``UDP_GOES_THROUGH_SOCKS`` is False), so the answer is
+  by construction. Nothing in the core proves a relay for IPv6, so the answer is
   ``0`` today and the two inputs exist for the day they can both be said.
 
 A session WITHOUT a proxy declares nothing: its network is the real one, which is what a retail Firefox shows.

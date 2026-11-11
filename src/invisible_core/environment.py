@@ -48,8 +48,6 @@ UV = "UV"
 GEOIP_MMDB = "STEALTHFOX_GEOIP_MMDB"
 #: The font manifest the engine loads; a value already set wins (`launch`).
 FONT_MANIFEST = "STEALTHFOX_FONT_MANIFEST"
-#: The IP WebRTC announces; a value already set wins (`launch`).
-WEBRTC_PUBLIC_IP = "STEALTHFOX_WEBRTC_PUBLIC_IP"
 #: The host network a proxied session declares, `v4=<address>;v6=<0|1>`; a value already set wins (`launch`).
 WEBRTC_NETWORK = "STEALTHFOX_WEBRTC_NETWORK"
 #: "off" leaves the system timer resolution alone (`juggler._pacing`).
@@ -63,13 +61,11 @@ CORE_AUTOFIX_ATTEMPTED = "INVISIBLE_CORE_AUTOFIX_ATTEMPTED"
 SESSION_TOKEN = "INVPW_SESSION_TOKEN"
 #: The hidden desktop the spawner starts the browser on (`_headless`).
 DESKTOP = "INVPW_DESKTOP"
-#: Tells the engine to emit no IPv6 candidate, behind a proxy (`launch`).
-WEBRTC_DISABLE_IPV6 = "STEALTHFOX_WEBRTC_DISABLE_IPV6"
 
 SETTINGS = (ENGINE_DIR, CACHE_DIR, DOWNLOAD_DEADLINE, GITHUB_TOKEN_OWN,
             GITHUB_TOKEN, SEAL_FILE, CORE_PIN, CORE_AUTOFIX,
             CORE_AUTOFIX_TIMEOUT, UV, GEOIP_MMDB, FONT_MANIFEST,
-            WEBRTC_PUBLIC_IP, WEBRTC_NETWORK, CURSOR_TIMER)
-HANDOFFS = (CORE_AUTOFIX_ATTEMPTED, SESSION_TOKEN, DESKTOP, WEBRTC_DISABLE_IPV6)
+            WEBRTC_NETWORK, CURSOR_TIMER)
+HANDOFFS = (CORE_AUTOFIX_ATTEMPTED, SESSION_TOKEN, DESKTOP)
 #: Everything the library reads from the environment.
 READ = SETTINGS + HANDOFFS

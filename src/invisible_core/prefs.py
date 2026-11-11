@@ -439,17 +439,11 @@ _BASELINE: Dict[str, Any] = {
     # obfuscate_host_addresses=true → host candidate is `<uuid>.local` mDNS,
     #   exactly like vanilla Firefox (BrowserLeaks "No Leak", Local IP "-").
     #   The mDNS-IPC hang feared on older builds does NOT reproduce on FF150.
-    # The proxy-egress srflx is injected by our C++ (srflx swap §17 + fallback
-    #   §17.B), fed the egress IP via STEALTHFOX_WEBRTC_PUBLIC_IP from
-    #   launcher._build_env (auto-discovered from the proxy).
-    # IPv6: media.peerconnection.ice.disableIPv6 is DEAD on FF150 (read by no
-    #   ICE-gathering code). The real filter is in nICEr (addrs.cpp), and since
-    #   2026-08-25 it reads ONE source: the environment variable
-    #   STEALTHFOX_WEBRTC_DISABLE_IPV6, written by `launch.build_launch_env`,
-    #   the one composer (the wrapper's `_session.build_env` delegates to it).
-    #   The pref `zoom.stealth.webrtc.disable_ipv6` is NOT written any more: the
-    #   native bridge does not read it, and a pref no C++ reads is precisely what
-    #   `test_no_orphan_prefs_in_baseline` forbids emitting.
+    # UDP and the srflx are the ENGINE's: behind a proxy it sends the STUN over the
+    #   SOCKS5 UDP layer and gathers a real srflx; the core proves and declares neither.
+    # The host network (adapter, private address, IPv6 bit) is declared ONCE, in
+    #   STEALTHFOX_WEBRTC_NETWORK (`_webrtc_network`), written by `launch.build_launch_env`.
+    #   media.peerconnection.ice.disableIPv6 is dead on FF150 (read by no ICE code).
     "media.peerconnection.enabled":                       True,
     "media.peerconnection.ice.no_host":                   False,
     "media.peerconnection.ice.default_address_only":      False,

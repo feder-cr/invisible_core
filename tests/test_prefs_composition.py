@@ -145,7 +145,6 @@ def test_the_public_api_declares_the_leak_prefs_and_NO_endpoint(tmp_path):
     assert not (endpoint & set(prefs)), sorted(endpoint & set(prefs))
     assert prefs["network.proxy.allow_bypass"] is False
     assert prefs["zoom.stealth.dns.no_local_resolution"] is True
-    assert prefs["zoom.stealth.webrtc.no_direct_udp"] is True
 
 
 def test_no_proxy_still_means_no_endpoint_prefs():

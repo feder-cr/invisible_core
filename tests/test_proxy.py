@@ -220,7 +220,6 @@ def test_the_escape_channel_prefs_stay_on_EVERY_scheme():
         configure_proxy({"server": server}, prefs)
         assert prefs["network.proxy.allow_bypass"] is False, server
         assert prefs["zoom.stealth.dns.no_local_resolution"] is True, server
-        assert prefs["zoom.stealth.webrtc.no_direct_udp"] is True, server
 
 
 @pytest.mark.unit

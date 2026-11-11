@@ -709,18 +709,9 @@ class SessionGeo(NamedTuple):
 
     ``timezone`` follows the precedence in the module docstring.
 
-    ⛔ ``egress_ip`` IS A FACT, NOT A DECISION: the address this session really
-    leaves from, discovered once, with or without a proxy. Whether that value is
-    then DECLARED to the engine as an srflx is decided by
-    :meth:`srflx_to_declare`, and without a proxy the answer is no.
-
-    Until 2026-08-26 this field was ``None`` without a proxy, and the "no" was
-    expressed by that very ``None``. One field for two meanings: the effect was
-    that ``prepare_session_geo`` discovered the address for the timezone, **threw
-    it away**, and ``resolve_session_locale`` had to discover it again. Two
-    identical requests to an external service, from the real address, before the
-    browser exists - where a real user makes zero. The fact is carried now, and
-    the "no" lives where the decision already lived.
+    ``egress_ip`` is the address this session really leaves from, discovered once,
+    with or without a proxy: the timezone, the language and the position come from
+    it. Nothing here is declared to the engine as an srflx: the engine decides UDP.
     """
 
     timezone: str
@@ -735,21 +726,6 @@ class SessionGeo(NamedTuple):
     #: defaults would have been a breaking change to an exported type.
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    #: ⛔ A SWITCH, AND ITS DEFAULT IS THE CAUTIOUS ONE.
-    #:
-    #: The first draft was a field carrying the ADDRESS to declare, defaulting to
-    #: ``None``. Wrong, and a test caught it immediately: ``SessionGeo`` is built
-    #: positionally in six places across code and tests, and everyone who did not
-    #: know about the new field stopped declaring the srflx **by accident**. That
-    #: is, the default fell on the side that leads to the worst sentence a
-    #: detector can write.
-    #:
-    #: Inverted: ``False`` means "declare", which is the behaviour it has always
-    #: had, and switching it off has to be said. It is ``True`` ONLY when the exit
-    #: has UDP both demonstrated AND coherent, because there the real srflx is
-    #: already born with the right address and declaring one would add a
-    #: candidate with no matching allocation.
-    srflx_suppressed: bool = False
     #: The session language, decided from the SAME egress as the timezone, by
     #: the one decision (`invisible_core._locale.decide_session_locale`).
     #: :func:`prepare_session_geo` always fills it; a consumer reads it and
@@ -758,75 +734,6 @@ class SessionGeo(NamedTuple):
     #: is why it has a default at all: the type is built positionally in
     #: tests, and a field without one would have broken every such call.
     locale: Optional["SessionLocale"] = None
-
-    def srflx_to_declare(self) -> Optional[str]:
-        """The address the engine must announce as its srflx, or ``None``.
-
-        ⛔ THE ONE PLACE where this question is answered. The two env builders -
-        ``launch.build_launch_env`` in the core and ``_session.build_env`` in the
-        wrapper - call it rather than recomputing it: they were already two
-        landing points, and the same rule written twice could have drifted.
-        """
-        return None if self.srflx_suppressed else self.egress_ip
-
-
-def _srflx_suppressed(proxy: Optional[Dict[str, str]],
-                     egress_ip: Optional[str]) -> bool:
-    """Declare a synthetic srflx, or let the real one through?
-
-    The criterion comes from a real detector's code, read rather than deduced:
-    its configuration contains no STUN at all, only TURN, and the allocation's
-    username is the same identifier its verification POST sends to the backend.
-    So in an honest browser **an srflx can only come from a successful
-    allocation**, and the client-side candidate and the server-side proof
-    coincide by construction. It is that implication a declared candidate
-    breaks.
-
-    Da qui la regola, che ha tre rami:
-
-    * **no proxy**: the real STUN answers with the address traffic actually
-      leaves from, so the srflx is born correct and with its own allocation.
-      Nothing is declared. Until 2026-08-26 this branch was not written here: the
-      same outcome fell out of ``egress_ip`` being ``None`` without a proxy - the
-      decision was encoded in the ABSENCE of a fact. The two are separated now,
-      and this branch says out loud what used to be obtained as a side effect.
-    * **UDP demonstrated and coherent** (UDP leaves from the same address as
-      TCP): the real srflx will already be born with the right address. Nothing
-      is declared: declaring would add a candidate with no matching allocation.
-    * **everything else**: the exit IP is declared, which is the behaviour it has
-      always had. Without an srflx the detector writes *"Javascript is
-      manipulated"*, which accuses the browser; with one it writes *"VPN/PROXY
-      detected"*, which accuses the network. The difference between those two
-      sentences is this line.
-
-    ⛔ AND THE PROBE CANNOT FAIL A LAUNCH. Whatever goes wrong - network, a
-    timeout, a field that is not there - falls back to the cautious branch. A
-    capability is only exploited once it is DEMONSTRATED.
-    """
-    if not egress_ip:
-        return False  # nothing to declare anyway: the cautious branch
-    if not _proxy_is_set(proxy):
-        return True  # direct connection: the real srflx already IS the truth
-    # ⛔ BEFORE THE PROBE, because if this is false the probe is pointless.
-    #
-    # That the EXIT carries coherent UDP is not enough: the BROWSER has to be the
-    # one sending us the UDP. With `network.proxy.socks_remote_udp` off, UDP goes
-    # around the proxy, so a real srflx would be born with the HOME address - and
-    # to stop declaring there would be a real leak instead of a remedy.
-    #
-    # The first draft of this function, on 2026-08-25, did not check it. The
-    # branch was unreachable by luck (no provider has usable UDP) and not by
-    # construction, which is exactly the shape of defect this project pays for: a
-    # condition whose safety rests on a fact it does not verify.
-    from ._proxy import UDP_GOES_THROUGH_SOCKS
-    if not UDP_GOES_THROUGH_SOCKS:
-        return False
-    try:
-        from ._capability import capability
-        c = capability(proxy, known_tcp_exit=egress_ip)
-    except Exception:  # noqa: BLE001
-        return False
-    return c.get("udp") is True and c.get("udp_matches_tcp") is True
 
 
 def _geoip_database(ip: str, proxied: bool) -> Any:
@@ -867,10 +774,10 @@ def prepare_session_geo(
     """Resolve the session timezone, egress IP AND language in ONE round-trip.
 
     The egress IP is discovered once and reused for the timezone mapping (when
-    ``timezone`` is ``""``/``"auto"``), the WebRTC public-IP override and the
+    ``timezone`` is ``""``/``"auto"``) and the
     language. Timezone precedence is identical to
-    :func:`resolve_session_timezone`; the egress IP is best-effort for the
-    WebRTC side (a discovery failure that the timezone path doesn't need won't
+    :func:`resolve_session_timezone`; the egress IP is best-effort
+    (a discovery failure that the timezone path doesn't need won't
     break the launch - but if the timezone path *does* need it behind a proxy,
     that path still fails loudly).
 
@@ -923,8 +830,7 @@ def prepare_session_geo(
         lat, lon = _coordinate(egress_ip)
         # The address was asked once above; the language reuses it and never
         # asks again, and a failure there is the en-US fallback it announces.
-        return SessionGeo(tz, egress_ip, lat, lon,
-                          _srflx_suppressed(proxy, egress_ip),  # explicit IANA wins
+        return SessionGeo(tz, egress_ip, lat, lon,  # explicit IANA wins
                           _decide(locale, egress_ip=egress_ip, proxy=proxy,
                                   may_discover=False, discovery_failure=egress_err))
     ip: Optional[str] = egress_ip
@@ -938,7 +844,7 @@ def prepare_session_geo(
     except Exception as exc:  # noqa: BLE001
         raise GeoTimezoneError(f"the egress timezone could not be resolved: {exc}",
                                kind="geoip_unavailable") from exc
-    return SessionGeo(zone, ip, lat, lon, _srflx_suppressed(proxy, ip),
+    return SessionGeo(zone, ip, lat, lon,
                       _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False))
 
 
