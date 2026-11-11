@@ -23,8 +23,11 @@ cause and the remedy: an explicit IANA zone, or a writable cache.
 """
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import re
+import socket
+import threading
 import time
 from typing import Any, Dict, NamedTuple, Optional
 from urllib.parse import quote
@@ -33,6 +36,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
+import urllib3.util.connection as _u3conn
 
 from ._locale import SessionLocale, _decide
 
@@ -59,6 +63,15 @@ _IP_ECHO_ENDPOINTS = (
     "https://icanhazip.com",
     "https://checkip.amazonaws.com",
 )
+
+# Echo endpoints that answer over IPv6 ONLY (an AAAA record and no A record). Used
+# for one question after the IPv4 echo could not connect: does this host have
+# IPv6 and no IPv4 route?
+_IPV6_ECHO_ENDPOINTS = (
+    "https://api6.ipify.org",
+    "https://ipv6.icanhazip.com",
+)
+_IPV6_PROBE_BUDGET = 6.0
 
 _SOCKS_SCHEMES = ("socks5://", "socks4://", "socks://")
 
@@ -142,6 +155,15 @@ _REMEDY = {
         "network - the proxy is not routing to the internet",
         "the reply was a PRIVATE address, so the request never left the local "
         "network - something here answered on the endpoint's behalf"),
+    # Never paired with a proxy: with one, the exit is the proxy's and the host's
+    # own address family does not matter.
+    "ipv6_only_no_proxy": (
+        "an IPv6-only host without a proxy is not supported: this host reaches the "
+        "internet only over IPv6, and a browser session here uses IPv4, so it would "
+        "have no connectivity. Use a proxy, or run on a host that has IPv4",
+        "an IPv6-only host without a proxy is not supported: this host reaches the "
+        "internet only over IPv6, and a browser session here uses IPv4, so it would "
+        "have no connectivity. Use a proxy, or run on a host that has IPv4"),
     "no_endpoint_tried": (
         "the budget expired before a single endpoint could be contacted, so "
         "nothing below was measured - raise `budget`, or find what delayed the "
@@ -387,6 +409,51 @@ def _proxies_for_requests(proxy: Dict[str, str]) -> Dict[str, str]:
     return {"http": url, "https": url}
 
 
+_family_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _only_family(family: "socket.AddressFamily"):
+    """Make the connections THIS thread opens use one address family, for the
+    duration of the block, through urllib3's own hook (``allowed_gai_family``,
+    read by ``create_connection`` on every connect). Other threads keep the
+    original answer; the lock keeps two blocks from overwriting each other's
+    restore. Opens no socket by itself."""
+    owner = threading.get_ident()
+    original = _u3conn.allowed_gai_family
+
+    def gated() -> "socket.AddressFamily":
+        return family if threading.get_ident() == owner else original()
+
+    with _family_lock:
+        _u3conn.allowed_gai_family = gated
+        try:
+            yield
+        finally:
+            _u3conn.allowed_gai_family = original
+
+
+def _host_is_ipv6_only() -> bool:
+    """True when an IPv6-only echo answers with an IPv6 address. Asked only after
+    the IPv4 echo could not connect, so a True here means: IPv6 yes, IPv4 route no.
+    Any failure is False (an offline machine stays an offline machine)."""
+    deadline = time.monotonic() + _IPV6_PROBE_BUDGET
+    for url in _IPV6_ECHO_ENDPOINTS:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            with _only_family(socket.AF_INET6):
+                resp = requests.get(url, proxies=None,
+                                    timeout=(remaining / 2, remaining / 2))
+            resp.raise_for_status()
+            if ipaddress.ip_address(resp.text.strip()).version == 6:
+                return True
+        except Exception:  # noqa: BLE001 - not proof of anything
+            continue
+    return False
+
+
 def discover_egress_ip(
     proxy: Optional[Dict[str, str]] = None,
     *,
@@ -409,6 +476,13 @@ def discover_egress_ip(
     budget is now handed to each request, so a slow first endpoint shortens the
     second rather than adding to it, and the step returns or raises within
     ``budget`` however many endpoints the list grows to.
+
+    Without a proxy the echo is made over IPv4 ONLY: the persona is IPv4-only
+    (``v6=0``), so the address that matters is the one the session will use. If no
+    IPv4 echo can connect while an IPv6-only echo answers, the host has no IPv4
+    route and a direct session on it would have no connectivity: that raises
+    ``GeoTimezoneError`` with ``kind="ipv6_only_no_proxy"`` (see
+    ``_webrtc_network.py``). If both fail, the failure is the usual one.
     """
     proxies = _proxies_for_requests(proxy) if proxy else None
     attempts: "list[_Attempt]" = []
@@ -434,9 +508,11 @@ def discover_egress_ip(
             # so the loop really does reach the second and third endpoint when
             # the first goes quiet.
             slice_ = min(timeout, remaining)
-            resp = requests.get(
-                url, proxies=proxies, timeout=(slice_ / 2, slice_ / 2)
-            )
+            with (contextlib.nullcontext() if proxies
+                  else _only_family(socket.AF_INET)):
+                resp = requests.get(
+                    url, proxies=proxies, timeout=(slice_ / 2, slice_ / 2)
+                )
             resp.raise_for_status()
             ip = resp.text.strip()
             parsed = ipaddress.ip_address(ip)  # raises ValueError if not an IP
@@ -466,6 +542,10 @@ def discover_egress_ip(
 
     proxied = bool(proxies)
     kinds = {a.kind for a in attempts}
+    if not proxied and kinds == {"connect_failed"} and _host_is_ipv6_only():
+        raise GeoTimezoneError(
+            _remedy("ipv6_only_no_proxy", False),
+            kind="ipv6_only_no_proxy", attempts=tuple(attempts))
     if not attempts:
         # NOT "mixed". Nothing failed for differing reasons, because nothing ran
         # at all - the budget was already spent when this step started. The old
@@ -810,6 +890,10 @@ def prepare_session_geo(
     egress_err: Optional[Exception] = None
     try:
         egress_ip = discover_egress_ip(proxy if proxy_set else None)
+    except GeoTimezoneError as exc:
+        if exc.kind == "ipv6_only_no_proxy":
+            raise  # no route for the browser: not a geo gap an explicit zone covers
+        egress_err = exc
     except Exception as exc:  # noqa: BLE001
         egress_err = exc
 
