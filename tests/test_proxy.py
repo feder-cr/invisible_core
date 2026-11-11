@@ -307,7 +307,7 @@ def test_without_a_proxy_the_fallback_is_not_declared():
         assert "network.proxy.allow_bypass" not in prefs, (
             f"{proxy!r}: pref declared where there is no proxy to bypass")
         assert not [k for k in prefs if k.startswith("network.trr.")], (
-            f"{proxy!r}: the core declares nothing about names, with or without a proxy")
+            f"{proxy!r}: configure_proxy writes no TRR key, with or without a proxy (the provider is declared in prefs.py)")
 
 
 def test_a_malformed_endpoint_leaves_no_half_written_prefs():

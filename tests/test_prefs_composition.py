@@ -144,7 +144,7 @@ def test_the_public_api_declares_the_leak_prefs_and_NO_endpoint(tmp_path):
                 "network.proxy.ssl_port"}
     assert not (endpoint & set(prefs)), sorted(endpoint & set(prefs))
     assert prefs["network.proxy.allow_bypass"] is False
-    assert not [k for k in prefs if k.startswith("network.trr.")]  # names: the engine derives the DoH state, not the core
+    assert {k for k in prefs if k.startswith("network.trr.")} == {"network.trr.uri", "network.trr.bootstrapAddr"}  # names: the provider is the core's, the engine derives the state
 
 
 def test_no_proxy_still_means_no_endpoint_prefs():

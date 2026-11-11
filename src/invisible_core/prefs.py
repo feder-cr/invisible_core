@@ -456,6 +456,22 @@ _BASELINE: Dict[str, Any] = {
     # start-up, so a profile that cached `true` would resolve names with the system resolver until the cache is rewritten.
     "network.parental_controls_cached_state":             False,
 
+    # NAMES: the DNS-over-HTTPS PROVIDER is the core's declaration; the STATE is the engine's.
+    #   The engine (Juggler) derives `network.trr.mode` (3 behind a proxy, the default 0 without one),
+    #   `network.trr.exclude-etc-hosts` and `network.trr.excluded-domains` from the proxies it is given (the browser proxy
+    #   and every context proxy), so the core declares none of those three. The provider is one declaration for every
+    #   session: without a proxy the engine never turns TRR on, so these two keys are inert there.
+    #   Why TRR at all: a name THE PAGE chooses (`iceServers`) must not reach the resolver of the machine, and must still
+    #   resolve: the exit decides where it points. Mode 3 sends every lookup to DoH with no fallback to the system
+    #   resolver, and a DoH request is an ordinary channel, so the proxy road the session already has carries it.
+    #   `bootstrapAddr` is the address of the DoH host, so that finding it needs no DNS. 162.159.61.4 is one of the
+    #   addresses `mozilla.cloudflare-dns.com` answered with on 2026-11-11 (172.64.41.4 is the other); it is Cloudflare's
+    #   anycast and the certificate is still checked against the host name. Both are USER values on purpose: Firefox's DoH
+    #   heuristics (`DoHController`) stand down when `network.trr.mode` or `network.trr.uri` has a user value. A caller
+    #   (an e2e with a local DoH) overrides them through `extra_prefs`, which is applied last.
+    "network.trr.uri":                                    "https://mozilla.cloudflare-dns.com/dns-query",
+    "network.trr.bootstrapAddr":                          "162.159.61.4",
+
     # TLS ClientHello fingerprint - match stock Firefox byte-for-byte.
     # The Playwright/Juggler Firefox build this binary derives from re-enables
     # cipher 0xC009 (TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA), which retail Firefox
