@@ -5,7 +5,7 @@ every address it found. A page cannot read those addresses (the host candidates 
 the names and reads their ranks, so the number of adapters and the presence of IPv6 described the machine under the
 browser, not the persona: three names on a PC with Hyper-V, one in a container. A retail Firefox on a given Windows machine
 shows what THAT machine has; a persona must show what its declared machine has, on every host. The declaration is one
-environment variable, ``STEALTHFOX_WEBRTC_NETWORK``, ``v4=<private address>;v6=<0|1>``, read by the engine at the three
+environment variable, ``STEALTHFOX_WEBRTC_NETWORK``, ``v4=<private address>;v6=<0|1>;p6=<the exit's /64, empty without IPv6>``, read by the engine at the three
 points where it asked the host (design: ``invisible_WebRTC/notes/declared-interfaces-design.md``). The engine side does not
 exist yet; until it does the variable is ignored.
 
@@ -65,10 +65,13 @@ class DeclaredNetwork:
 
     v4: str
     v6: bool
+    #: The /64 of the exit's IPv6 (``2001:db8:1234:5678``), empty without IPv6. A home host sits in the same /64 as the
+    #: srflx the NAT-less IPv6 path shows, so the engine builds its IPv6 host address from it. Said by the caller.
+    prefix6: str = ""
 
     def env_value(self) -> str:
         """The value of ``STEALTHFOX_WEBRTC_NETWORK``."""
-        return "v4=%s;v6=%d" % (self.v4, 1 if self.v6 else 0)
+        return "v4=%s;v6=%d;p6=%s" % (self.v4, 1 if self.v6 else 0, self.prefix6)
 
 
 def _weighted(rng: random.Random, weights) -> object:
@@ -102,14 +105,18 @@ def _address(rng: random.Random) -> str:
     return str(ipaddress.IPv4Address(".".join(str(o) for o in prefix + (host,))))
 
 
-def declared_network(seed: int, *, exit_ipv6: bool = False, relay_ipv6: bool = False) -> DeclaredNetwork:
+def declared_network(seed: int, *, exit_ipv6: bool = False, relay_ipv6: bool = False,
+                     exit_prefix6: str = "") -> DeclaredNetwork:
     """The network of the persona ``seed`` names. A pure function of the seed (and of the two proofs about IPv6)."""
     rng = random.Random(sub_seed(seed, _TAG))
-    return DeclaredNetwork(v4=_address(rng), v6=bool(exit_ipv6 and relay_ipv6))
+    v6 = bool(exit_ipv6 and relay_ipv6)
+    return DeclaredNetwork(v4=_address(rng), v6=v6, prefix6=exit_prefix6 if v6 else "")
 
 
-def network_to_declare(seed: int, *, exit_ipv6: bool = False, relay_ipv6: bool = False) -> str:
+def network_to_declare(seed: int, *, exit_ipv6: bool = False, relay_ipv6: bool = False,
+                       exit_prefix6: str = "") -> str:
     """THE ONE PLACE where the question "what network does this session declare" is answered, as the value for
     ``STEALTHFOX_WEBRTC_NETWORK``. Every session declares. The two env builders (the core's ``build_launch_plan`` and the
     wrapper's ``_session.build_env``) call it rather than recomputing it."""
-    return declared_network(seed, exit_ipv6=exit_ipv6, relay_ipv6=relay_ipv6).env_value()
+    return declared_network(seed, exit_ipv6=exit_ipv6, relay_ipv6=relay_ipv6,
+                            exit_prefix6=exit_prefix6).env_value()

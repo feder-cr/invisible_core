@@ -2,7 +2,7 @@
 
 Behind a proxy the engine must not read the interfaces of the machine it runs on: a page counts the host candidates and
 reads their ranks, so the count of adapters and the presence of IPv6 would describe the host, not the persona. The core
-declares the network in one environment variable, ``STEALTHFOX_WEBRTC_NETWORK``, in the form ``v4=<address>;v6=<0|1>``
+declares the network in one environment variable, ``STEALTHFOX_WEBRTC_NETWORK``, in the form ``v4=<address>;v6=<0|1>;p6=<prefix or empty>``
 (design: ``invisible_WebRTC/notes/declared-interfaces-design.md``):
 
 * ``v4``: one private address, drawn from the seed with the frequencies of a measured population of home LANs;
@@ -27,7 +27,7 @@ from invisible_core.launch import build_launch_env
 
 pytestmark = pytest.mark.unit
 
-_FORM = re.compile(r"^v4=(\d+\.\d+\.\d+\.\d+);v6=([01])$")
+_FORM = re.compile(r"^v4=(\d+\.\d+\.\d+\.\d+);v6=([01]);p6=(.*)$")
 
 
 def test_the_declaration_has_the_form_the_engine_reads():
@@ -36,16 +36,17 @@ def test_the_declaration_has_the_form_the_engine_reads():
     assert m, text
     assert ipaddress.IPv4Address(m.group(1)).is_private
     assert m.group(2) == "0"
+    assert m.group(3) == "", "no IPv6, no prefix"
 
 
 def test_the_same_seed_gives_the_same_declaration_everywhere():
     """Pinned values: same seed, same bytes on every machine (the draw is a pure function of the seed)."""
     assert [declared_network(s).env_value() for s in (0, 1, 42, 2**31 - 1, 123456789)] == [
-        "v4=172.21.22.218;v6=0",
-        "v4=192.168.2.22;v6=0",
-        "v4=192.168.1.101;v6=0",
-        "v4=192.168.2.138;v6=0",
-        "v4=192.168.0.110;v6=0",
+        "v4=172.21.22.218;v6=0;p6=",
+        "v4=192.168.2.22;v6=0;p6=",
+        "v4=192.168.1.101;v6=0;p6=",
+        "v4=192.168.2.138;v6=0;p6=",
+        "v4=192.168.0.110;v6=0;p6=",
     ]
 
 
@@ -66,7 +67,13 @@ def test_ipv6_needs_the_exit_and_the_relay_both():
     assert declared_network(42, exit_ipv6=True).v6 is False
     assert declared_network(42, relay_ipv6=True).v6 is False
     on = declared_network(42, exit_ipv6=True, relay_ipv6=True)
-    assert on.v6 is True and on.env_value().endswith(";v6=1")
+    assert on.v6 is True and on.env_value().endswith(";v6=1;p6=")
+    # With IPv6 the declaration also names the /64 of the exit: the home host address sits in the same /64 as the srflx
+    # (no NAT66). The caller says it; nothing is measured here. Ignored while v6 is 0.
+    prefix = "2001:db8:1234:5678"
+    with_prefix = declared_network(42, exit_ipv6=True, relay_ipv6=True, exit_prefix6=prefix)
+    assert with_prefix.env_value().endswith(";v6=1;p6=" + prefix)
+    assert declared_network(42, exit_prefix6=prefix).env_value().endswith(";v6=0;p6=")
     assert on.v4 == declared_network(42).v4, "IPv6 must not move the address"
 
 
@@ -117,14 +124,14 @@ def test_the_core_own_direct_launch_declares_the_network(monkeypatch, tmp_path):
 def test_the_declaration_travels_in_the_environment_variable_the_registry_names():
     assert environment.WEBRTC_NETWORK == "STEALTHFOX_WEBRTC_NETWORK"
     assert environment.WEBRTC_NETWORK in environment.SETTINGS and environment.WEBRTC_NETWORK in environment.READ
-    env = build_launch_env({}, network_declared="v4=192.168.1.9;v6=0", base_env={})
-    assert env["STEALTHFOX_WEBRTC_NETWORK"] == "v4=192.168.1.9;v6=0"
+    env = build_launch_env({}, network_declared="v4=192.168.1.9;v6=0;p6=", base_env={})
+    assert env["STEALTHFOX_WEBRTC_NETWORK"] == "v4=192.168.1.9;v6=0;p6="
 
 
 def test_a_value_the_caller_already_set_wins():
-    env = build_launch_env({}, network_declared="v4=192.168.1.9;v6=0",
-                           base_env={"STEALTHFOX_WEBRTC_NETWORK": "v4=10.0.0.5;v6=1"})
-    assert env["STEALTHFOX_WEBRTC_NETWORK"] == "v4=10.0.0.5;v6=1"
+    env = build_launch_env({}, network_declared="v4=192.168.1.9;v6=0;p6=",
+                           base_env={"STEALTHFOX_WEBRTC_NETWORK": "v4=10.0.0.5;v6=1;p6="})
+    assert env["STEALTHFOX_WEBRTC_NETWORK"] == "v4=10.0.0.5;v6=1;p6="
 
 
 def test_an_environment_built_by_hand_without_a_declaration_has_no_variable():
