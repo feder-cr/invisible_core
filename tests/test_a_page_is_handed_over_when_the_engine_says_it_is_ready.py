@@ -130,3 +130,46 @@ def test_without_the_wait_the_late_initial_document_interrupts_the_goto():
     with pytest.raises(NavigationInterrupted) as e:
         v.goto("http://a/", timeout=3)
     assert "about:blank" in str(e.value)
+
+
+def test_a_page_closed_before_it_was_ready_ends_the_wait_at_once():
+    """No endless wait: the page (not only the browser) goes away before the engine said Page.ready, with or without a limit on the wait."""
+    for limit in (None, 30):
+        c = FakeConnection()
+        v = Lifecycle(c, "S1")
+        feed(c, ("Page.frameAttached", {"frameId": "F1"}))
+        raised = []
+
+        def waiter():
+            try:
+                v.wait_for_page_ready(timeout=limit)
+            except BaseException as error:  # noqa: BLE001
+                raised.append(error)
+        t = threading.Thread(target=waiter)
+        t.start()
+        time.sleep(0.2)
+        started = time.monotonic()
+        v.detach()                 # the page closed, or its target disappeared
+        t.join(3)
+        assert not t.is_alive(), "the wait outlived the page (limit %s)" % (limit,)
+        assert time.monotonic() - started < 1.0
+        assert len(raised) == 1 and isinstance(raised[0], TargetClosedError) and "page was closed" in str(raised[0]), raised
+
+
+def test_a_popup_is_handed_over_after_its_own_ready_even_while_its_document_is_still_loading():
+    """A window.open page: the opener's url is navigating (started, not committed) when the engine says the popup is ready; the hand-over is
+    that event, not the load."""
+    c = FakeConnection()
+    v = Lifecycle(c, "S1")
+    feed(c, ("Page.frameAttached", {"frameId": "P1"}))
+    done = []
+    t = threading.Thread(target=lambda: (v.wait_for_page_ready(timeout=5), done.append(1)))
+    t.start()
+    time.sleep(0.15)
+    assert not done
+    feed(c, ("Page.navigationStarted", {"frameId": "P1", "navigationId": "NP", "url": "http://popup/"}))
+    time.sleep(0.15)
+    assert not done, "a started navigation is not a ready page"
+    feed(c, ("Page.ready", {}))
+    t.join(3)
+    assert done, "the popup was not handed over at its Page.ready"

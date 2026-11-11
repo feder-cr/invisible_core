@@ -231,6 +231,8 @@ class Lifecycle:
         #: The connection has ended (`_on_close`): no event will come, and a
         #: wait - with a limit or without one - says so instead of waiting.
         self._gone = False
+        #: The page this follows went away (`detach`): no event will come for it, and a wait says so instead of waiting.
+        self._detached = False
         # ⛔ REGISTERED, NOT CHAINED, and the difference is not style: this
         # used to capture the previous `on_event` and install a closure over
         # it, so every page added a nested call to the delivery of every
@@ -255,6 +257,9 @@ class Lifecycle:
             if self._settle_timer is not None:
                 self._settle_timer.cancel()
                 self._settle_timer = None
+            # A wait on this page, with or without a limit, ends now (a page closed before it was ready, a target that went away).
+            self._detached = True
+            self._cv.notify_all()
 
     def _on_close(self) -> None:
         with self._cv:
@@ -274,6 +279,9 @@ class Lifecycle:
         if self._gone:
             raise TargetClosedError(
                 "the browser closed while waiting for %s" % waiting_for)
+        if self._detached:
+            raise TargetClosedError(
+                "the page was closed while waiting for %s" % waiting_for)
         if began is not None and self._interruptions != began:
             raise Interrupted(*self._interruption)
 
