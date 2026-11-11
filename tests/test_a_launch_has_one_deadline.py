@@ -48,6 +48,7 @@ class _Browser:
         self.refuses = set(refuses)
         self.process = None
         self.methods = []        # every command the browser was sent, in order
+        self.params = {}         # the params of the last command of each method, as they arrived on the pipe
         # An answer still sleeping when the browser exits must not write: its
         # descriptor is closed by then, and the next test's pipe may have
         # been given the same number.
@@ -86,6 +87,7 @@ class _Browser:
             os.close(out_w)
 
     def _answer(self, from_w, msg):
+        self.params[msg["method"]] = msg.get("params")
         self.methods.append(msg["method"])
         time.sleep(self.answers.get(msg["method"], 0.0))
         if msg["method"] in self.refuses:
