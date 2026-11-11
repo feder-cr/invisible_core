@@ -219,6 +219,36 @@ def test_the_address_is_declared_once_and_no_pref_repeats_it():
     assert not spelled, spelled
 
 
+def test_ipv6_is_one_fact_and_the_core_writes_no_pref_for_it(monkeypatch, tmp_path):
+    """IPv6 is ONE fact for the whole browser: ``v6=0`` means no IPv6 for DNS, HTTP and ICE alike. The ENGINE derives
+    ``network.dns.disableIPv6`` from this same declaration, so the declaration is the single source and the core writes NO
+    pref (nor any launch-plan key) that mentions ``disableIPv6``. Pinned for the proxied and the direct session, in the
+    prefs the core composes, in the user.js the plan writes, in its argv and environment, and in every pref key the
+    source spells."""
+    import pathlib
+
+    from invisible_core import _geo, build_launch_plan, configure_proxy
+    from invisible_core._geo import SessionGeo
+    from invisible_core.prefs import compose_session_prefs, translate_profile_to_prefs
+
+    profile = generate_profile(seed=42)
+    keys = set(translate_profile_to_prefs(profile, timezone="America/New_York"))
+    for proxy in (None, {"server": "socks5://203.0.113.9:1080"}, {"server": "http://203.0.113.9:8080"}):
+        keys |= set(compose_session_prefs(profile, timezone="America/New_York", proxy=proxy, survive_hard_kill=True).prefs)
+        extra = {}
+        configure_proxy(proxy, extra)
+        keys |= set(extra)
+    monkeypatch.setattr(_geo, "prepare_session_geo", lambda tz, proxy, locale: SessionGeo("America/New_York", "203.0.113.7"))
+    plan = build_launch_plan(42, profile_dir=tmp_path, binary_path="firefox", timezone="America/New_York")
+    assert [k for k in keys if "disableipv6" in k.lower()] == []
+    assert not [k for k, v in plan.env.items() if "disableipv6" in (k + v).lower()], plan.env
+    assert not [a for a in plan.argv[:-1] if "disableipv6" in a.lower()], plan.argv
+    assert "disableIPv6" not in (tmp_path / "user.js").read_text(encoding="utf-8")
+    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "invisible_core"
+    spelled = [p.name for p in src.rglob("*.py") if re.search(r"""["'][^"'\n]*disableIPv6[^"'\n]*["']""", p.read_text(encoding="utf-8"))]
+    assert not spelled, spelled
+
+
 def test_a_dataclass_is_returned():
     d = declared_network(1)
     assert isinstance(d, DeclaredNetwork) and isinstance(d.v6, bool)

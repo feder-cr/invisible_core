@@ -5,9 +5,15 @@ every address it found. A page cannot read those addresses (the host candidates 
 the names and reads their ranks, so the number of adapters and the presence of IPv6 described the machine under the
 browser, not the persona: three names on a PC with Hyper-V, one in a container. A retail Firefox on a given Windows machine
 shows what THAT machine has; a persona must show what its declared machine has, on every host. The declaration is one
-environment variable, ``STEALTHFOX_WEBRTC_NETWORK``, ``v4=<private address>;v6=<0|1>;p6=<the exit's /64, empty without IPv6>``, read by the engine at the three
-points where it asked the host (design: ``invisible_WebRTC/notes/declared-interfaces-design.md``). The engine side does not
-exist yet; until it does the variable is ignored.
+environment variable, ``STEALTHFOX_WEBRTC_NETWORK``, ``v4=<private address>;v6=<0|1>;p6=<the exit's /64 as <prefix>::/64, empty
+without IPv6>``, read by the engine at the three points where it asked the host (design:
+``invisible_WebRTC/notes/declared-interfaces-design.md``). The engine reads it (``nr_stealth_network.cpp``): a missing or
+malformed variable, or a ``p6`` it refuses, gives NO host candidate at all, IPv4 included, so what the core writes must be
+exactly what that parser accepts (:class:`DeclaredNetwork` validates ``p6`` for that reason).
+
+IPv6 IS ONE FACT FOR THE WHOLE BROWSER. ``v6=0`` means no IPv6 for DNS, HTTP and ICE alike. The ENGINE derives
+``network.dns.disableIPv6`` from this same declaration, so the core writes NO pref for it: the declaration is the single
+source (a test pins that no pref or launch-plan key of the core mentions ``disableIPv6``).
 
 WHAT IS DECLARED.
 
