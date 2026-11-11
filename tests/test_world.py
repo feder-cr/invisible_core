@@ -407,4 +407,4 @@ def test_the_core_starts_the_engine_only_where_it_says_so():
     windows = functions["juggler/connection.py::_spawn_windows"]
     posix = functions["juggler/connection.py::_spawn_posix"]
     assert _audit_line(windows) < _first_call_line(windows, "CreateProcessW")
-    assert _audit_line(posix) < _first_call_line(posix, "Popen")
+    assert _audit_line(posix) < _first_call_line(posix, "posix_spawn")

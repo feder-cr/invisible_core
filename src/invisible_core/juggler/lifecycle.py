@@ -188,7 +188,11 @@ class Lifecycle:
         self._left_frames: set = set()
         self.main_frame: Optional[str] = None
         self.ready = False
-        self._inflight = 0
+        #: The requests in flight, as Playwright keeps them: a map from request id to the frame that owns it and the
+        #: navigation it belongs to, not a count. A count has no way to forget a request whose end never comes (a
+        #: beacon cancelled with the page, a request closed before the client answered it): one such request kept
+        #: `networkidle` away from every later document of a page that is reused. See `_forget_requests`.
+        self._open: dict = {}
         #: The session's ONE memory of which requests are its favicon: this
         #: lifecycle feeds it, a page's server asks it (`favicon.py`).
         self.favicons = FaviconRequests()
@@ -329,7 +333,7 @@ class Lifecycle:
                                    ("networkidle2", 2, self._last_crowded)):
             waiting = [f for f in self.frames.values()
                        if "load" in f.states and state not in f.states]
-            if not waiting or self._inflight > most:
+            if not waiting or len(self._open) > most:
                 continue
             quiet_for = now - since
             if quiet_for < IDLE_QUIET:
@@ -429,6 +433,8 @@ class Lifecycle:
                 return None
             self._retire(p["frameId"], itself=False)
             nav = p.get("navigationId")
+            if nav is not None:
+                self._forget_requests({f.id}, keep_navigation=nav)
             f.url = p.get("url", f.url)
             # The frame's name (the iframe's `name`, or its `id`), which the
             # engine sends with every commit and pyppeteer's `frame.name` reads.
@@ -501,20 +507,42 @@ class Lifecycle:
             nav = p.get("navigationId")
             if nav:
                 self._record_went(nav, p.get("url"))
-            self._inflight += 1
+            frame_id = p.get("frameId")
+            replaced = p.get("redirectedFrom")
+            if replaced:
+                # The hop replaces the request it redirects (the engine may never end the old id), in the same frame.
+                old = self._open.pop(replaced, None)
+                if old and not frame_id:
+                    frame_id = old[0]
+            rid = p.get("requestId")
+            # Playwright drops a request whose frame it does not have: a beacon sent at `pagehide` is announced after
+            # its frame left, no end ever comes for it, and held here it would keep `networkidle` away for good.
+            if rid is not None and frame_id not in self._left_frames:
+                self._open[rid] = (frame_id, nav)
             self._last_activity = time.monotonic()
-            if self._inflight > 2:
+            if len(self._open) > 2:
                 self._last_crowded = self._last_activity
         elif method in ("Network.requestFinished", "Network.requestFailed"):
-            if self._inflight > 2:
+            if len(self._open) > 2:
                 self._last_crowded = time.monotonic()
-            # It never drops below zero: a response without its request
-            # does arrive for real, for instance for a load that started
-            # before we hooked in, and a negative counter would make
-            # `networkidle` unreachable forever.
-            self._inflight = max(0, self._inflight - 1)
+            # An end for a request not held is nothing: a response without its request does arrive for real (a load
+            # that started before we hooked in), an end can come twice, and a request may already have been forgotten
+            # with its document. It can neither close another request nor make the count negative.
+            self._open.pop(p.get("requestId"), None)
             self._last_activity = time.monotonic()
         return None
+
+    def _forget_requests(self, frame_ids, keep_navigation=None) -> None:
+        """Drop the requests of these frames, except the one of `keep_navigation` (the new document's own request,
+        which ends with it). A request without a frame belongs to the main frame. Called when a frame commits a new
+        document and when frames leave: the requests of a document that is gone cannot hold the next one."""
+        ids = set(frame_ids)
+        for rid, (owner, nav) in list(self._open.items()):
+            # A request of a frame this page does not have (its attach never reached us, or it left) can only be held
+            # by a request whose end we will never see: it goes with the next document, as Playwright's never counted it.
+            orphan = owner is not None and owner not in self.frames
+            if orphan or ((owner or self.main_frame) in ids and not (keep_navigation and nav == keep_navigation)):
+                del self._open[rid]
 
     def _tell(self, what: str, frame_id: str, url: Optional[str] = None,
               **detail) -> None:
@@ -529,6 +557,7 @@ class Lifecycle:
         gone = [k for k in self.frames
                 if self._descendants(k, frame_id) or (itself and k == frame_id)]
         gone.sort(key=lambda k: -self._depth(k))
+        self._forget_requests(gone)
         for k in gone:
             self.frames.pop(k, None)
             self._left_frames.add(k)
@@ -883,7 +912,7 @@ class Lifecycle:
                                   % (sorted(f.states) or "none"))
                     raise TimeoutError(
                         "%s not reached in %.0fs (%s, inflight requests: "
-                        "%d)" % (state, timeout, reason, self._inflight))
+                        "%d)" % (state, timeout, reason, len(self._open)))
                 # networkidle comes true on a SILENCE DEADLINE, when nothing
                 # happens; `_settle`'s timer notifies then, so every state
                 # can sleep until the next notify.
@@ -1039,4 +1068,4 @@ class Lifecycle:
 
     @property
     def inflight(self) -> int:
-        return self._inflight
+        return len(self._open)
