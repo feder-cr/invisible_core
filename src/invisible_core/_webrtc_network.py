@@ -58,6 +58,24 @@ DATASET: Dict[str, Dict] = {
 
 _TAG = "webrtc-network"
 
+#: What the engine's ``PrefixOf`` (nr_stealth_network.cpp) refuses inside global unicast space.
+_NOT_A_HOME_PREFIX = tuple(ipaddress.IPv6Network(n) for n in ("2001::/32", "2002::/16", "2001:db8::/32"))
+_GLOBAL_UNICAST = ipaddress.IPv6Network("2000::/3")
+
+
+def _engine_prefix6(text: str) -> str:
+    """The /64 named by ``text`` in the form the engine parses (``<prefix>::/64``), or a ``ValueError``."""
+    address, slash, length = text.partition("/")
+    if "%" in address or (slash and length != "64"):
+        raise ValueError("the exit prefix %r is not an IPv6 address or a /64 of one" % (text,))
+    try:
+        network = ipaddress.IPv6Network((ipaddress.IPv6Address(address), 64), strict=False)
+    except ValueError:
+        raise ValueError("the exit prefix %r is not an IPv6 address or a /64 of one" % (text,)) from None
+    if not network.subnet_of(_GLOBAL_UNICAST) or any(network.overlaps(n) for n in _NOT_A_HOME_PREFIX):
+        raise ValueError("the exit prefix %r is not a global unicast /64 a home could have (the engine refuses it)" % (text,))
+    return "%s/64" % network.network_address
+
 
 @dataclass(frozen=True)
 class DeclaredNetwork:
@@ -65,9 +83,17 @@ class DeclaredNetwork:
 
     v4: str
     v6: bool
-    #: The /64 of the exit's IPv6 (``2001:db8:1234:5678``), empty without IPv6. A home host sits in the same /64 as the
-    #: srflx the NAT-less IPv6 path shows, so the engine builds its IPv6 host address from it. Said by the caller.
+    #: The /64 of the exit's IPv6, empty without IPv6. A home host sits in the same /64 as the srflx the NAT-less IPv6 path
+    #: shows, so the engine builds its IPv6 host address from it. Said by the caller as an IPv6 address (or ``<address>/64``)
+    #: in global unicast space; it is stored in the one form the engine parser reads, ``<prefix>::/64``
+    #: (``2a01:e0a:1f2:3450::/64``). Not the bare four groups (``2a01:e0a:1f2:3450``): ``inet_pton`` refuses them and the
+    #: engine drops the whole declaration, the IPv4 address with it. Documentation (2001:db8::/32), Teredo (2001::/32), 6to4
+    #: (2002::/16), link-local, unique-local and any length but 64 are refused here for the same reason: a ``ValueError``.
     prefix6: str = ""
+
+    def __post_init__(self) -> None:
+        if self.prefix6:
+            object.__setattr__(self, "prefix6", _engine_prefix6(self.prefix6))
 
     def env_value(self) -> str:
         """The value of ``STEALTHFOX_WEBRTC_NETWORK``."""
