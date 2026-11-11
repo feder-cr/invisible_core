@@ -337,6 +337,13 @@ class LaunchPlan:
     #: by guessing which firefox is theirs. Defaulted so that anything
     #: constructing a LaunchPlan positionally keeps working.
     session_token: SessionToken = field(default_factory=SessionToken)
+    #: The position this session declares, as the ``geolocation`` object of
+    #: ``Browser.setGeolocationOverride`` (exactly latitude, longitude, accuracy),
+    #: or None when the exit has no point. This path launches the binary with
+    #: subprocess and holds no protocol connection, so it cannot send the
+    #: command: the consumer that drives the browser sends it for every context
+    #: it creates (the wrapper does, from ``SessionGeo.geolocation_override``).
+    geolocation: Optional[Dict[str, float]] = None
 
 
 def build_launch_plan(
@@ -427,7 +434,7 @@ def build_launch_plan(
     # decides the language, in one call; raises behind a dead proxy
     # (fail-early, by design). No "auto" branch of its own here: the language
     # is the geo decision's, like the timezone.
-    geo = prepare_session_geo(timezone, proxy, locale)
+    geo = prepare_session_geo(timezone, proxy, locale, seed=seed)
     fp = generate_profile(seed=seed, pin=pin)
     # One composition for all three entry points (prefs.py). This path takes the
     # proxy layer and the hard-kill layer; it does NOT write the humanize prefs,
@@ -449,4 +456,5 @@ def build_launch_plan(
     # part of the plan is a token somebody has to remember to add to the env.
     token = SessionToken.mint()
     return LaunchPlan(binary=binary, profile_dir=pdir, argv=argv,
-                      env=token.stamp(env), session_token=token)
+                      env=token.stamp(env), session_token=token,
+                      geolocation=geo.geolocation_override())

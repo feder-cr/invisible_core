@@ -26,7 +26,7 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
 
     asked = []
 
-    def fake_geo(tz, proxy, locale="auto"):
+    def fake_geo(tz, proxy, locale="auto", **_kw):
         # The language is the geo decision's: build_launch_plan hands it what
         # the caller asked for and keeps no "auto" branch of its own.
         asked.append(locale)

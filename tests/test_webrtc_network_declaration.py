@@ -179,7 +179,7 @@ def test_the_core_own_direct_launch_declares_the_network(monkeypatch, tmp_path):
     from invisible_core._geo import SessionGeo
 
     monkeypatch.setattr(_geo, "prepare_session_geo",
-                        lambda tz, proxy, locale: SessionGeo("America/New_York", "203.0.113.7"))
+                        lambda tz, proxy, locale, **_kw: SessionGeo("America/New_York", "203.0.113.7"))
     monkeypatch.delenv("STEALTHFOX_WEBRTC_NETWORK", raising=False)
     plan = build_launch_plan(42, profile_dir=tmp_path, binary_path="firefox", timezone="America/New_York")
     assert plan.env["STEALTHFOX_WEBRTC_NETWORK"] == network_to_declare(42)
@@ -238,7 +238,7 @@ def test_ipv6_is_one_fact_and_the_core_writes_no_pref_for_it(monkeypatch, tmp_pa
         extra = {}
         configure_proxy(proxy, extra)
         keys |= set(extra)
-    monkeypatch.setattr(_geo, "prepare_session_geo", lambda tz, proxy, locale: SessionGeo("America/New_York", "203.0.113.7"))
+    monkeypatch.setattr(_geo, "prepare_session_geo", lambda tz, proxy, locale, **_kw: SessionGeo("America/New_York", "203.0.113.7"))
     plan = build_launch_plan(42, profile_dir=tmp_path, binary_path="firefox", timezone="America/New_York")
     assert [k for k in keys if "disableipv6" in k.lower()] == []
     assert not [k for k, v in plan.env.items() if "disableipv6" in (k + v).lower()], plan.env

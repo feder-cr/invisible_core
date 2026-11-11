@@ -302,9 +302,10 @@ def test_a_session_without_coordinates_still_resolves_its_timezone(monkeypatch):
     position is just a browser nobody has asked where it is.
     """
     _install_fake_maxminddb(monkeypatch, {"location": {"time_zone": "Europe/Rome"}})
-    geo = prepare_session_geo("Europe/Rome", None)
+    geo = prepare_session_geo("Europe/Rome", None, seed=42)
     assert geo.timezone == "Europe/Rome"
-    assert geo.latitude is None and geo.longitude is None
+    assert geo.latitude is None and geo.longitude is None and geo.accuracy is None
+    assert geo.geolocation_override() is None
 
 
 
@@ -613,10 +614,15 @@ def test_without_a_proxy_an_explicit_zone_still_gets_the_exits_position_and_lang
     known-bad this test would have caught is that `latitude` stayed None and
     the count stayed 0."""
     count = _count_probes(monkeypatch)
-    geo = _geo.prepare_session_geo("Asia/Tokyo", None, "auto")
+    geo = _geo.prepare_session_geo("Asia/Tokyo", None, "auto", seed=42)
 
     assert geo.timezone == "Asia/Tokyo", "an explicit zone still wins"
-    assert (geo.latitude, geo.longitude) == (1.0, 2.0), "the position is the exit's"
+    # The declared position is the exit's point (1.0, 2.0) moved by the seed,
+    # inside half of the declared accuracy; the exact numbers are the
+    # business of test_geoposition.py.
+    assert geo.accuracy is not None and 1000 <= geo.accuracy <= 10000
+    assert abs(geo.latitude - 1.0) * 111_000 <= geo.accuracy / 2 + 1, "the position is the exit's"
+    assert abs(geo.longitude - 2.0) * 111_000 <= geo.accuracy / 2 + 1, "the position is the exit's"
     assert geo.locale.region == "GB", "the language is the exit's"
     assert count["n"] == 1, "one round trip for the three, not %d" % count["n"]
 
@@ -633,9 +639,9 @@ def test_without_a_proxy_a_failed_discovery_does_not_fail_an_explicit_zone(monke
         raise GeoTimezoneError("offline")
 
     monkeypatch.setattr(_geo, "discover_egress_ip", boom)
-    geo = _geo.prepare_session_geo("Asia/Tokyo", None, "en-US")
+    geo = _geo.prepare_session_geo("Asia/Tokyo", None, "en-US", seed=42)
     assert geo.timezone == "Asia/Tokyo" and geo.egress_ip is None
-    assert (geo.latitude, geo.longitude) == (None, None)
+    assert (geo.latitude, geo.longitude, geo.accuracy) == (None, None, None)
     assert count["n"] == 1, "a failure is not retried by the language decision"
     with pytest.raises(GeoTimezoneError):
         _geo.prepare_session_geo("auto", None, "en-US")

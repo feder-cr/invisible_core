@@ -149,7 +149,7 @@ def get_default_stealth_prefs(
     profile = generate_profile(resolved_seed, pin=pin)
     # The same decision a launch makes, from the same exit: one call for the
     # zone, the language and the address, so the three cannot disagree.
-    geo = prepare_session_geo(timezone, proxy, locale)
+    geo = prepare_session_geo(timezone, proxy, locale, seed=resolved_seed)
     # One composition for all three entry points (prefs.py). Two things this
     # function did NOT do before 2026-08-01 and now does, both by taking the
     # shared layers rather than rebuilding them:

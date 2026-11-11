@@ -71,7 +71,7 @@ def no_network(monkeypatch):
     # The fake decides the language the way the real one does for an explicit
     # tag (no network), so the direct path really declares LOCALE.
     monkeypatch.setattr(_geo, "prepare_session_geo",
-                        lambda tz, proxy, locale="auto": SessionGeo(
+                        lambda tz, proxy, locale="auto", **_kw: SessionGeo(
                             TZ, "198.51.100.4", locale=decide_session_locale(locale)))
 
 

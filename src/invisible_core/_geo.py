@@ -38,6 +38,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import requests
 import urllib3.util.connection as _u3conn
 
+from ._geoposition import DeclaredPosition, position_to_declare
 from ._locale import SessionLocale, _decide
 
 
@@ -800,10 +801,14 @@ class SessionGeo(NamedTuple):
 
     timezone: str
     egress_ip: Optional[str]
-    #: The declared position, from the SAME record of the exit IP the timezone
-    #: and the language come from. ``None`` when there is no IP to derive it from
-    #: (the egress discovery failed; it runs with or without a proxy): in that case the engine receives NO
-    #: declaration and refuses, rather than asking the hardware.
+    #: The DECLARED position of the session, the one the engine is told
+    #: (``Browser.setGeolocationOverride {latitude, longitude, accuracy}``): the
+    #: exit IP's point from the SAME geoip record the timezone and the language
+    #: come from, moved by the session seed and given the accuracy of an
+    #: IP-based fix (:mod:`invisible_core._geoposition`). ``None`` when there is
+    #: nothing to declare it from (no seed, the egress discovery failed - it runs
+    #: with or without a proxy - or the record has no point): in that case NO
+    #: override is sent and nothing is invented.
     #:
     #: They have defaults because ``SessionGeo`` is built positionally with two
     #: arguments in six places across code and tests: adding them without
@@ -818,6 +823,19 @@ class SessionGeo(NamedTuple):
     #: is why it has a default at all: the type is built positionally in
     #: tests, and a field without one would have broken every such call.
     locale: Optional["SessionLocale"] = None
+    #: The accuracy of the declared position, in metres (see ``latitude``);
+    #: ``None`` exactly when the position is.
+    accuracy: Optional[float] = None
+
+    def geolocation_override(self) -> "Optional[Dict[str, float]]":
+        """The ``geolocation`` object of ``Browser.setGeolocationOverride``:
+        exactly ``latitude``, ``longitude`` and ``accuracy`` (the command has no
+        field for altitude, heading or speed), or ``None`` when nothing is
+        declared."""
+        if self.latitude is None or self.longitude is None or self.accuracy is None:
+            return None
+        return {"latitude": self.latitude, "longitude": self.longitude,
+                "accuracy": self.accuracy}
 
 
 def _geoip_database(ip: str, proxied: bool) -> Any:
@@ -854,6 +872,7 @@ def _geoip_database(ip: str, proxied: bool) -> Any:
 
 def prepare_session_geo(
     timezone: str, proxy: Optional[Dict[str, str]], locale: Optional[str] = "auto",
+    *, seed: Optional[int] = None,
 ) -> SessionGeo:
     """Resolve the session timezone, egress IP AND language in ONE round-trip.
 
@@ -871,6 +890,13 @@ def prepare_session_geo(
     that must agree with one another, instead of repeating an
     ``if locale == "auto"`` branch of its own: until 36.x every consumer did,
     five copies across four packages.
+
+    ``seed`` is the session seed. The position is declared FROM it
+    (:func:`invisible_core._geoposition.declared_position`): the exit city's
+    point moved per seed, with the accuracy of an IP-based fix. Without a seed
+    there is no machine to place, so NOTHING is declared (``latitude``,
+    ``longitude`` and ``accuracy`` stay ``None``); the same when the exit has
+    no point.
     """
     from .download import ensure_geoip_mmdb
 
@@ -898,7 +924,7 @@ def prepare_session_geo(
         egress_err = exc
 
     # Timezone resolution - same precedence as resolve_session_timezone.
-    def _coordinate(ip: "Optional[str]") -> "tuple[Optional[float], Optional[float]]":
+    def _coordinate(ip: "Optional[str]") -> "Optional[DeclaredPosition]":
         """Coordinates are BEST-EFFORT, the zone is not, and the gap is meant.
 
         A wrong timezone behind a proxy is the `tz_mismatch` trap and has to fail
@@ -907,33 +933,40 @@ def prepare_session_geo(
         engine refuses it cleanly. Failing a launch over that would be more
         brittle without being more faithful.
         """
-        if not ip:
-            return None, None
+        if not ip or seed is None:
+            return None
         try:
-            return ip_to_coordinates(ip, ensure_geoip_mmdb())
+            base_lat, base_lon = ip_to_coordinates(ip, ensure_geoip_mmdb())
         except Exception:  # noqa: BLE001
-            return None, None
+            return None
+        return position_to_declare(seed, base_lat, base_lon)
 
     if tz and tz.lower() != "auto":
-        lat, lon = _coordinate(egress_ip)
+        where = _coordinate(egress_ip)
         # The address was asked once above; the language reuses it and never
         # asks again, and a failure there is the en-US fallback it announces.
-        return SessionGeo(tz, egress_ip, lat, lon,  # explicit IANA wins
+        return SessionGeo(tz, egress_ip,  # explicit IANA wins
+                          where.latitude if where else None,
+                          where.longitude if where else None,
                           _decide(locale, egress_ip=egress_ip, proxy=proxy,
-                                  may_discover=False, discovery_failure=egress_err))
+                                  may_discover=False, discovery_failure=egress_err),
+                          where.accuracy if where else None)
     ip: Optional[str] = egress_ip
     try:
         if ip is None:  # the discovery above failed
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
-        lat, lon = _coordinate(ip)
+        where = _coordinate(ip)
         zone = ip_to_timezone(ip, _geoip_database(ip, proxy_set))
     except GeoTimezoneError:
         raise  # "auto" could not be honoured: see the module docstring
     except Exception as exc:  # noqa: BLE001
         raise GeoTimezoneError(f"the egress timezone could not be resolved: {exc}",
                                kind="geoip_unavailable") from exc
-    return SessionGeo(zone, ip, lat, lon,
-                      _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False))
+    return SessionGeo(zone, ip,
+                      where.latitude if where else None,
+                      where.longitude if where else None,
+                      _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False),
+                      where.accuracy if where else None)
 
 
 def resolve_session_timezone(
