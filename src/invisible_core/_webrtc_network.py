@@ -38,6 +38,13 @@ dual-stack machine would also show an IPv6 host and an IPv6 srflx. ``v6`` become
 IPv6 and the road for it is proven; no measurement of the exit's IPv6 is written until that proof exists, because its result
 would be ANDed with a proof that is always false.
 
+The same fact has a second face: a direct session on a host that has IPv6 and NO IPv4 route has no connectivity, because
+every lookup asks A only. The core refuses that launch (``GeoTimezoneError``, ``kind="ipv6_only_no_proxy"``: "an IPv6-only
+host without a proxy is not supported"; use a proxy or a host with IPv4). The refusal comes from the direct egress echo, which
+is made over IPv4 only: when no IPv4 echo can connect and an IPv6-only echo answers, the host is IPv6-only; when both fail
+the failure is the usual one, so an offline machine is not misdiagnosed. With a proxy the exit is the proxy's and this does
+not apply.
+
 ⛔ THE DATASET IS NOT THE POPULATION OF WINDOWS PCs. It is 1.79 million WD Cloud network drives (a NAS), read by
 https://blog.benjojo.co.uk/post/picking-unused-rfc1918-ip-space (2025-06-05), the only public count of private LAN
 addresses found with real numbers. It skews to Europe (the FritzBox default is 13% of it) and to people who own a NAS. The
