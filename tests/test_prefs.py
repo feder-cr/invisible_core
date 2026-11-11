@@ -151,6 +151,37 @@ def test_a_launch_never_registers_its_binary_to_start_at_login():
     assert "browser.startup.windowsLaunchOnLogin.enabled" not in prefs
 
 
+@pytest.mark.unit
+def test_a_launch_keeps_the_first_run_record_in_the_profile(tmp_path, monkeypatch):
+    """The record has to reach the profile the engine reads, not only the dict
+    the core composes: `launch` writes the session's prefs to `user.js` and
+    takes some out on the way, and a pref lost there is a first run again."""
+    import pathlib
+    import tempfile
+    from invisible_core.juggler import instance
+    from invisible_core.juggler.connection import EventListeners
+
+    class _Conn(EventListeners):
+        def startup_send(self, method, params=None):
+            return {}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(instance.connection, "launch", lambda *a, **kw: _Conn())
+    prefs = translate_profile_to_prefs(generate_profile(seed=42),
+                                       timezone="America/New_York")
+    browser = instance.launch("x", prefs=prefs, env={})
+    try:
+        user_js = pathlib.Path(browser._files.profile, "user.js").read_text(
+            encoding="utf-8")
+    finally:
+        browser.close()
+    assert ('user_pref("browser.startup.windowsLaunchOnLogin.alreadyApplied", '
+            'true);') in user_js
+
+
 # The language-table tests (AL1-AL3) moved to test_session_locale.py in 36.x,
 # with the table: they go through decide_session_locale, its one caller.
 
