@@ -31,8 +31,10 @@ actionability.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -997,24 +999,70 @@ def _spawn_windows(executable, argv, env):
             msvcrt.open_osfhandle(our_read, os.O_RDONLY), p)
 
 
+class _PosixProcess:
+    """The things `launch` and `Connection.close` ask of a process, over a pid that `os.posix_spawn` gave: `pid`, `poll()`,
+    `returncode`, `wait()`, `terminate()`, `kill()`, `stdout` (the surface the `Popen` used to have, and `_WindowsProcess` has)."""
+
+    def __init__(self, pid: int, stdout) -> None:
+        self.pid = pid
+        self.stdout = stdout
+        self.returncode: Optional[int] = None
+        self._lock = threading.Lock()
+
+    def poll(self) -> Optional[int]:
+        with self._lock:
+            if self.returncode is None:
+                try:
+                    done, status = os.waitpid(self.pid, os.WNOHANG)
+                except ChildProcessError:
+                    # waiting for children is disabled for this process (SIGCHLD ignored): the child is gone, its status is not
+                    # knowable; `Popen` says 0.
+                    self.returncode = 0
+                else:
+                    if done == self.pid:
+                        self.returncode = os.waitstatus_to_exitcode(status)
+            return self.returncode
+
+    def wait(self, timeout: Optional[float] = None) -> int:
+        end = None if timeout is None else time.monotonic() + timeout
+        delay = 0.0005
+        while True:
+            code = self.poll()
+            if code is not None:
+                return code
+            if end is not None and time.monotonic() >= end:
+                raise subprocess.TimeoutExpired(str(self.pid), timeout or 0)
+            time.sleep(delay)
+            delay = min(delay * 2, 0.05)
+
+    def _signal(self, number: int) -> None:
+        if self.poll() is None:
+            try:
+                os.kill(self.pid, number)
+            except ProcessLookupError:
+                pass
+
+    def terminate(self) -> None:
+        self._signal(signal.SIGTERM)
+
+    def kill(self) -> None:
+        self._signal(signal.SIGKILL)
+
+
 def _spawn_posix(executable, argv, env):
     """Starts the engine with its Juggler pipe on descriptors 3 (it reads) and 4 (it writes).
 
-    `nsRemoteDebuggingPipe.cpp` does not look the numbers up: 3 and 4 are hard-wired in the engine. So the descriptor table of the
-    CHILD is built in the child, by `preexec_fn`, and nothing of it depends on what the parent has open.
+    `nsRemoteDebuggingPipe.cpp` does not look the numbers up: 3 and 4 are hard-wired in the engine. So the child's descriptor table
+    is made by the SPAWN itself (`os.posix_spawn` with file actions: `dup2` of the two pipe ends onto 3 and 4, of the output pipe onto
+    1 and 2, and a close of every inherited descriptor above 4), and no Python runs in the child: nothing depends on what the
+    parent has open, and a launch from one of the server's worker threads, with other threads alive in the parent, cannot meet a
+    lock that one of them held at the fork (the documented danger of `preexec_fn`).
 
-    ⛔ IT USED TO DEPEND ON THE PARENT, and failed only sometimes. The two sweeps that CPython does must be told apart:
-    `pass_fds` is made inheritable in the child BEFORE `preexec_fn` runs, and a number in it that is not open in the parent
-    makes the launch fail with `[Errno 9] Bad file descriptor`; and `close_fds` closes everything that is not in `pass_fds`
-    AFTER `preexec_fn`, so the descriptors `dup2` made on 3 and 4 die unless they are in the list. The old call named 3 and 4 in
-    `pass_fds` to survive the second and so needed them open in the parent for the first: it worked when the two pipes the parent
-    had just made happened to be on 3 and 4 (a bare shell), and failed when they were not and 3 or 4 was closed (under a wrapper
-    that leaves other descriptors open, such as `xvfb-run`).
-
-    ⛔ THE REMEDY IS NOT TO ASK CPYTHON FOR EITHER SWEEP: no `pass_fds`, `close_fds=False`, and the child closes what must not
-    reach the engine itself (`fix_descriptors`): the parent's two pipe ends are moved out of the way of 3 and 4, put on 3 and 4,
-    and every other descriptor above 4 is marked not-inheritable, so it is closed at `exec` (the child's standard three and the
-    pipe are all the engine receives, as before).
+    ⛔ IT USED TO DEPEND ON THE PARENT, and failed only sometimes. The call named 3 and 4 in `pass_fds`, which CPython makes inheritable in
+    the child BEFORE `preexec_fn` runs: a number that is not open in the parent fails the launch with `[Errno 9] Bad file
+    descriptor`. It worked when the two pipes the parent had just made happened to be on 3 and 4 (a bare shell) and failed when
+    they were not and 3 or 4 was closed (under a wrapper that leaves other descriptors open, such as `xvfb-run`). 3 and 4 were in the
+    list only because `close_fds` closes, after `preexec_fn`, whatever is not in it.
     """
     # ⛔ THE ENGINE IS DECLARED WHERE IT STARTS. On Windows the spawn is
     # `CreateProcessW` through ctypes, which raises none of the audit events
@@ -1026,37 +1074,53 @@ def _spawn_posix(executable, argv, env):
     # that raises stops the spawn before anything is created.
     sys.audit(LAUNCH_EVENT, executable, argv)
     import fcntl
+
+    def above_four(fd: int) -> int:
+        # A pipe end that is itself on 3 or 4 would be overwritten by the `dup2` of another: they are moved first.
+        if fd >= 5:
+            return fd
+        moved = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 5)
+        os.close(fd)
+        return moved
+
     its_read, our_write = os.pipe()
     our_read, its_write = os.pipe()
-
-    def fix_descriptors():
-        # Runs in the child, after the fork. The sources are first moved above 4 (a pipe end that is itself on 3 or 4 would be
-        # overwritten by the `dup2` of the other), then put on the numbers the engine reads; `dup2` clears the close-on-exec
-        # flag of the NEW descriptor, which is what lets 3 and 4 reach the engine.
-        read_end = fcntl.fcntl(its_read, fcntl.F_DUPFD_CLOEXEC, 5)
-        write_end = fcntl.fcntl(its_write, fcntl.F_DUPFD_CLOEXEC, 5)
-        os.dup2(read_end, 3)
-        os.dup2(write_end, 4)
-        # Everything the parent had open that is not the standard three or the pipe is closed at `exec`. The directory of
-        # descriptors lists them; a platform without it keeps the old sweep's effect with a range.
-        try:
-            listed = [int(name) for name in os.listdir("/dev/fd") if name.isdigit()]
-        except OSError:
-            listed = list(range(5, 4096))
-        for fd in listed:
-            if fd > 4:
-                try:
-                    os.set_inheritable(fd, False)
-                except OSError:
-                    pass
-
-    p = subprocess.Popen([executable] + argv, env=env,
-                         preexec_fn=fix_descriptors,
-                         close_fds=False,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    os.close(its_read)
-    os.close(its_write)
-    return our_write, our_read, p
+    out_read, out_write = os.pipe()
+    its_read, its_write, out_write = above_four(its_read), above_four(its_write), above_four(out_write)
+    try:
+        for attempt in (1, 2):
+            actions = [(os.POSIX_SPAWN_DUP2, its_read, 3), (os.POSIX_SPAWN_DUP2, its_write, 4),
+                       (os.POSIX_SPAWN_DUP2, out_write, 1), (os.POSIX_SPAWN_DUP2, out_write, 2)]
+            # What close_fds did: every descriptor the parent has open and INHERITABLE is closed in the child (the ones Python
+            # makes are not inheritable and go at `exec`; these are the ones the parent was started with). A descriptor that
+            # another thread closes between this list and the spawn fails the spawn with EBADF: the list is made again once.
+            try:
+                listed = [int(name) for name in os.listdir("/dev/fd") if name.isdigit()]
+            except OSError:
+                listed = []
+            for fd in listed:
+                if fd > 4:
+                    try:
+                        if os.get_inheritable(fd):
+                            actions.append((os.POSIX_SPAWN_CLOSE, fd))
+                    except OSError:
+                        pass
+            try:
+                pid = os.posix_spawn(executable, [executable] + argv, env, file_actions=actions,
+                                     setsigdef=[getattr(signal, name) for name in ("SIGPIPE", "SIGXFSZ") if hasattr(signal, name)])
+                break
+            except OSError as error:
+                if error.errno != errno.EBADF or attempt == 2:
+                    raise
+    except BaseException:
+        for fd in (our_write, our_read, out_read):
+            os.close(fd)
+        raise
+    finally:
+        os.close(its_read)
+        os.close(its_write)
+        os.close(out_write)
+    return our_write, our_read, _PosixProcess(pid, os.fdopen(out_read, "rb"))
 
 
 #: The audit event the engine's two spawns raise before the process is
