@@ -47,6 +47,7 @@ class _Browser:
         self.answers = dict(answers or {})
         self.refuses = set(refuses)
         self.process = None
+        self.methods = []        # every command the browser was sent, in order
         # An answer still sleeping when the browser exits must not write: its
         # descriptor is closed by then, and the next test's pipe may have
         # been given the same number.
@@ -85,6 +86,7 @@ class _Browser:
             os.close(out_w)
 
     def _answer(self, from_w, msg):
+        self.methods.append(msg["method"])
         time.sleep(self.answers.get(msg["method"], 0.0))
         if msg["method"] in self.refuses:
             reply = {"id": msg["id"], "error": {"message": "proxy refused here"}}

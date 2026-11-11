@@ -284,6 +284,7 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                                 'of': {'k': 'String'}}},
                                           'k': 'Object'},
                                'returns': None},
+ 'Browser.setNoBrowserProxy': {'params': None, 'returns': None},
  'Browser.setOnlineOverride': {'params': {'fields': {'browserContextId': {'k': 'Optional',
                                                                           'of': {'k': 'String'}},
                                                      'override': {'k': 'Nullable',

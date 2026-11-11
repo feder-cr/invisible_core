@@ -45,7 +45,9 @@ def test_the_generated_protocol_has_the_five_domains():
     # parent), both for invisible_selenium.
     # 80 since firefox-62: `Page.getFrameOrigin` (where the viewport of a frame
     # starts in the main frame's, across processes; the hit-target check).
-    assert len(COMMANDS) == 80, "commands: %d" % len(COMMANDS)
+    # 81 since the proxy handshake: `Browser.setNoBrowserProxy`, the explicit "this session has no proxy" that the
+    # Juggler waits for (with `Browser.setBrowserProxy`) before it lets a proxied channel start.
+    assert len(COMMANDS) == 81, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
 
