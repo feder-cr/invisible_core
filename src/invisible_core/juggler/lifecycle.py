@@ -401,6 +401,8 @@ class Lifecycle:
 
         if method == "Page.navigationStarted":
             f = self._frame(p["frameId"])
+            if f is None:
+                return None
             f.navigation = p["navigationId"]
             f._started.setdefault(f.navigation, self.c.delivered)
             # ⛔ THIS is where the correctness of the whole file lives: the
@@ -419,8 +421,10 @@ class Lifecycle:
             # it commits belong to the document being replaced; the new
             # document's attach after. Playwright retires them at the same
             # moment (`frameCommittedNewDocumentNavigation`).
-            self._retire(p["frameId"], itself=False)
             f = self._frame(p["frameId"])
+            if f is None:
+                return None
+            self._retire(p["frameId"], itself=False)
             nav = p.get("navigationId")
             f.url = p.get("url", f.url)
             # The frame's name (the iframe's `name`, or its `id`), which the
@@ -451,11 +455,15 @@ class Lifecycle:
 
         if method == "Page.navigationAborted":
             f = self._frame(p["frameId"])
+            if f is None:
+                return None
             f.aborted[p["navigationId"]] = p.get("errorText", "aborted")
             return f
 
         if method == "Page.sameDocumentNavigation":
             f = self._frame(p["frameId"])
+            if f is None:
+                return None
             f.url = p.get("url", f.url)
             f.same_document += 1
             # ⛔ No clearing here: it is the same document.
@@ -467,6 +475,8 @@ class Lifecycle:
 
         if method == "Page.eventFired":
             f = self._frame(p["frameId"])
+            if f is None:
+                return None
             name = p.get("name")
             if name == "load":
                 f.states.add("load")
@@ -539,14 +549,20 @@ class Lifecycle:
             cur = self.frames.get(cur.parent)
         return False
 
-    def _frame(self, fid: str) -> Frame:
-        # An event can name a frame we never saw attach (we hooked in on an
-        # already-live page). It gets created instead of being lost.
-        if fid not in self.frames:
-            self.frames[fid] = Frame(fid, None)
-            if self.main_frame is None:
-                self.main_frame = fid
-        return self.frames[fid]
+    def _frame(self, fid: str) -> Optional[Frame]:
+        """The frame `fid` names, or None: a frame is born of `Page.frameAttached`
+        alone (`_apply`).
+
+        ⛔ AN EVENT OF A FRAME WE DO NOT KNOW IS NOT A FRAME. This used to create
+        one, for "a frame we never saw attach (we hooked in on an already-live
+        page)"; but the engine announces every frame it holds when the session
+        starts (PageAgent's constructor), so what reaches here unknown is a frame
+        that already left: its process reporting `navigationStarted`, a commit or
+        a `load` after `frameDetached`. Created again, with no parent, it was a
+        ghost in the client's `page.frames` that no document holds. Playwright's
+        frame manager drops these events the same way (`frameRequestedNavigation`,
+        `frameAbortedNavigation`, `frameLifecycleEvent`: `if (!frame) return`)."""
+        return self.frames.get(fid)
 
     # ── waiting ─────────────────────────────────────────────────────────────
     def _reached(self, f: Frame, state: str) -> bool:
@@ -893,6 +909,9 @@ class Lifecycle:
         # the command is on its way ends the wait.
         with self._cv:
             f = self._frame(fid)
+            if f is None:
+                raise RuntimeError("Frame was detached: %s is not attached to the "
+                                   "page" % fid)
             before = f.same_document
             began = self._interruptions
             f.asked += 1
@@ -918,7 +937,13 @@ class Lifecycle:
         # (measured 2026-10-04, one step behind on every fragment goto).
         if nav is None:
             with self._cv:
-                while self._frame(fid).same_document == before:
+                while True:
+                    f = self._frame(fid)
+                    if f is None:
+                        raise RuntimeError("Frame was detached during the "
+                                           "same-document navigation to %s" % url)
+                    if f.same_document != before:
+                        break
                     self._check_alive("the same-document navigation to %s" % url,
                                       began)
                     if deadline.passed():
