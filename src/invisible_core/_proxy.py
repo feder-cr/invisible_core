@@ -241,29 +241,24 @@ def configure_proxy(
     # in those words instead of with `prefs == {}`.
     prefs["network.proxy.allow_bypass"] = False
 
-    # ⛔ AND THE SECOND HALF, BECAUSE THE FIRST IS NOT ENOUGH ON HTTP.
+    # NAMES: Firefox's own DNS-over-HTTPS, through the proxy, and nothing local.
     #
-    # `allow_bypass` closes the CHANNELS that fall back to direct. But three
-    # surfaces are not channels and call `AsyncResolveNative` without passing any
-    # filter: `NetworkConnectivityService`, the DoH heuristic's probes, and the
-    # ICE resolver. The engine's own gate
-    # (`netwerk/dns/DNSServiceBase.cpp`, `DNSForbiddenByActiveProxy`) would stop
-    # them, but it can only recognise a proxy written into the `network.proxy.*`
-    # prefs - and on the HTTP branch we write none, because Playwright routes
-    # per channel. So `network.proxy.type` stays 5 and the gate never arms.
+    # `allow_bypass` closes the CHANNELS that fall back to direct, but three surfaces are not channels and call
+    # `AsyncResolveNative` themselves: `NetworkConnectivityService`, the DoH heuristics and the ICE resolver, whose name
+    # THE PAGE chooses through `iceServers`. A name of the page's choosing must not reach the resolver of the machine, and
+    # must still resolve: the exit decides where it points. TRR mode 3 sends every lookup to DoH with no fallback to the
+    # system resolver, and a DoH request is an ordinary channel, so the proxy road the session already has carries it.
+    # The engine has no DNS gate any more (it refused every name, so an ICE server named by the page never resolved).
     #
-    # The engine cannot deduce it: we tell it. That is rule 1 - the core
-    # declares, the engine obeys - applied to DNS.
+    # `bootstrapAddr` is the address of the DoH host, so that finding it needs no DNS. 162.159.61.4 is one of the addresses
+    # `mozilla.cloudflare-dns.com` answered with on 2026-11-11 (172.64.41.4 is the other); it is Cloudflare's anycast and
+    # the certificate is still checked against the host name. Both prefs are USER values on purpose: Firefox's DoH
+    # heuristics (`DoHController`) stand down when `network.trr.mode` or `network.trr.uri` has a user value.
     #
-    # MEASURED 2026-08-25 behind an HTTP proxy, two identical rounds, with only
-    # `allow_bypass` already active: `example.org` 28 remained, `ipv4only.arpa`
-    # 12, `cloudflare-dns.com` 6 and - the worst - `stunprobe.invalid` 6, which
-    # is a name chosen BY THE PAGE through `iceServers`. Behind SOCKS the same
-    # names were already at 0.
-    #
-    # The proxy's own endpoint still resolves: both the SOCKS layer
-    # (`nsSOCKSIOLayer`) and `DnsAndConnectSocket` ask for their resolution with
-    # `RESOLVE_IGNORE_SOCKS_DNS`, which the gate exempts first. That is not an
-    # exception we add: it is the one already holding up the SOCKS branch.
-    prefs["zoom.stealth.dns.no_local_resolution"] = True
+    # Only here, so only with a proxy: without one the exit is the machine's own network and retail resolves with the
+    # system resolver (mode 0). Not declared: `socks_remote_dns` / `socks5_remote_dns` (a Juggler session writes no proxy
+    # endpoint to the prefs: every proxy is marked "resolves the host", so those governed a road that does not exist).
+    prefs["network.trr.mode"] = 3
+    prefs["network.trr.uri"] = "https://mozilla.cloudflare-dns.com/dns-query"
+    prefs["network.trr.bootstrapAddr"] = "162.159.61.4"
     return result

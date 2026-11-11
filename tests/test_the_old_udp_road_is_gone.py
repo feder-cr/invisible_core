@@ -29,7 +29,7 @@ def test_a_proxied_session_writes_no_udp_switch():
     prefs = compose_session_prefs(generate_profile(seed=7), timezone="America/New_York",
                                   proxy={"server": "socks5://gw:1080"}).prefs
     assert prefs.get("network.proxy.allow_bypass") is False  # the proxy layer did run
-    assert prefs.get("zoom.stealth.dns.no_local_resolution") is True
+    assert prefs.get("network.trr.mode") == 3
     for name in _GONE_PREFS:
         assert name not in prefs, name
 

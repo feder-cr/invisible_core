@@ -451,22 +451,6 @@ _BASELINE: Dict[str, Any] = {
     "media.peerconnection.ice.relay_only":                False,
     "media.peerconnection.use_document_iceservers":       True,
 
-    # Proxy - route DNS through SOCKS proxies to avoid local DNS leaks.
-    #
-    # There are TWO prefs and they are not aliases. `nsProtocolProxyService`
-    # reads `socks_remote_dns` into mSOCKS4ProxyRemoteDNS and
-    # `socks5_remote_dns` into mSOCKS5ProxyRemoteDNS, and `SOCKSRemoteDNS()`
-    # picks between them by the negotiated SOCKS version. This project uses
-    # SOCKS5, so the one declared here drove the branch that never runs, and
-    # the branch that DOES run took Firefox's own compiled default.
-    #
-    # That default is `true`, so nothing leaked - which is exactly why it
-    # survived: the safe behaviour was somebody else's default rather than our
-    # declaration. An upstream flip on a rebase, or a proxy that negotiates
-    # SOCKS4, and local DNS resolution comes back with nothing here asserting
-    # otherwise. Both are declared now. Added 2026-08-09.
-    "network.proxy.socks_remote_dns":                     True,
-    "network.proxy.socks5_remote_dns":                    True,
     "network.proxy.failover_direct":                      False,
 
     # TLS ClientHello fingerprint - match stock Firefox byte-for-byte.

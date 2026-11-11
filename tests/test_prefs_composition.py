@@ -144,7 +144,7 @@ def test_the_public_api_declares_the_leak_prefs_and_NO_endpoint(tmp_path):
                 "network.proxy.ssl_port"}
     assert not (endpoint & set(prefs)), sorted(endpoint & set(prefs))
     assert prefs["network.proxy.allow_bypass"] is False
-    assert prefs["zoom.stealth.dns.no_local_resolution"] is True
+    assert prefs["network.trr.mode"] == 3  # names: DoH through the proxy, no local resolver
 
 
 def test_no_proxy_still_means_no_endpoint_prefs():
@@ -152,8 +152,8 @@ def test_no_proxy_still_means_no_endpoint_prefs():
     behind an endpoint the caller never named.
 
     Asserted on the keys that NAME an endpoint, not on the `network.proxy.`
-    prefix: `socks_remote_dns` and `failover_direct` are part of the baseline
-    fingerprint and are set whether or not a proxy is in play. Written the broad
+    prefix: `failover_direct` is part of the baseline
+    fingerprint and is set whether or not a proxy is in play. Written the broad
     way first, and those two are why it went red.
     """
     prefs = get_default_stealth_prefs(SEED, timezone="America/New_York", locale="en-US")
