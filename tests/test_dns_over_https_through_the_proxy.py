@@ -44,6 +44,26 @@ def test_the_old_dns_gate_switch_is_gone(server):
     assert "zoom.stealth.dns.no_local_resolution" not in prefs
 
 
+@pytest.mark.parametrize("server,host", [("socks5://gw.example.test:1080", "gw.example.test"),
+                                         ("http://proxy.example.test:8080", "proxy.example.test"),
+                                         ("https://secure.example.test:8443", "secure.example.test")])
+def test_a_proxy_named_by_a_name_is_the_one_name_the_system_resolver_answers(server, host):
+    """Resolving the proxy's own name through DoH would need the proxy: circular. Like an app at home configured with a
+    proxy, Firefox resolves ONLY that name with the system resolver, so it goes in ``network.trr.excluded-domains`` (the
+    built-in ``localhost,local`` list is a separate pref). The TLS name of an https proxy stays the name."""
+    prefs = {}
+    configure_proxy({"server": server}, prefs)
+    assert prefs["network.trr.excluded-domains"] == host
+
+
+@pytest.mark.parametrize("server", ["socks5://203.0.113.9:1080", "http://203.0.113.9:8080", "https://203.0.113.9:8443",
+                                    "socks5://[2001:db8::9]:1080"])
+def test_a_proxy_given_by_an_address_excludes_no_name(server):
+    prefs = {}
+    configure_proxy({"server": server}, prefs)
+    assert "network.trr.excluded-domains" not in prefs
+
+
 def test_a_session_without_a_proxy_keeps_the_system_resolver():
     """No proxy: the retail default (TRR off, mode 0) and no DoH key at all."""
     for proxy in (None, {}, {"server": ""}, {"server": "direct://"}):

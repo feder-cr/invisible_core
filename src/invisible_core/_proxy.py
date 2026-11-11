@@ -27,6 +27,7 @@ proxied session can still leak through.
 """
 from __future__ import annotations
 
+import ipaddress
 from typing import Any, Dict, NamedTuple, Optional
 from urllib.parse import unquote
 
@@ -264,4 +265,11 @@ def configure_proxy(
     # Even in mode 3 Firefox answers a name that is in the machine's hosts file from the file (exclude-etc-hosts is true by
     # default): what the host says is not a thing a persona has.
     prefs["network.trr.exclude-etc-hosts"] = False
+    # The proxy's OWN name cannot go through DoH (DoH needs the proxy): the one name the system resolver answers, as for an
+    # app at home configured with a proxy. An address needs no lookup, so it excludes nothing.
+    endpoint = parse_proxy(proxy)
+    try:
+        ipaddress.ip_address(endpoint.host)
+    except ValueError:
+        prefs["network.trr.excluded-domains"] = endpoint.host
     return result
