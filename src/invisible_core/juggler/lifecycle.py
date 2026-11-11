@@ -503,6 +503,13 @@ class Lifecycle:
         if method.startswith("Network.") and self.favicons.see(method, p):
             return None
 
+        if method == "Network.requestWillBeSent" and p.get("method") == "OPTIONS" and not p.get("isIntercepted"):
+            # ⛔ AS PLAYWRIGHT'S OWN SERVER (ffNetworkManager `_onRequestWillBeSent`: `if (event.method === "OPTIONS" &&
+            # !event.isIntercepted) return;`): an OPTIONS request that no route holds is a CORS preflight the browser makes
+            # for the page. The page's frame never learns of it, so `networkidle` does not count it; counting it here made
+            # a page with preflighted fetches wait for requests stock Firefox ignores. Its end finds no request and is nothing.
+            return None
+
         if method == "Network.requestWillBeSent":
             nav = p.get("navigationId")
             if nav:
