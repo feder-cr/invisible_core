@@ -219,7 +219,7 @@ def test_the_escape_channel_prefs_stay_on_EVERY_scheme():
         prefs = {}
         configure_proxy({"server": server}, prefs)
         assert prefs["network.proxy.allow_bypass"] is False, server
-        assert prefs["network.trr.mode"] == 3, server
+        assert not [k for k in prefs if k.startswith("network.trr.")], server
 
 
 @pytest.mark.unit
@@ -280,17 +280,16 @@ def test_behind_any_proxy_the_direct_fallback_is_off():
             f"directly with the real IP")
 
 
-def test_behind_any_proxy_names_go_to_doh_through_the_proxy():
-    """A name the PAGE chooses (``iceServers``) must not reach the resolver of the machine, and must still resolve.
-    Behind any proxy the session declares TRR mode 3 (``tests/test_dns_over_https_through_the_proxy.py`` has the whole
-    contract); the engine has no gate of its own."""
+def test_behind_any_proxy_the_core_declares_nothing_about_names():
+    """The engine derives the DNS-over-HTTPS state from the proxies it is given (browser and per context); the core writes
+    no ``network.trr.*`` key (``tests/test_dns_over_https_through_the_proxy.py`` has the whole contract)."""
     from invisible_core import configure_proxy
 
     for server in ("socks5://h:1080", "socks4://h:1080", "socks://h:1080",
                    "http://h:8080", "https://h:8443"):
         prefs = {}
         configure_proxy({"server": server}, prefs)
-        assert prefs.get("network.trr.mode") == 3, f"{server}: names would resolve on the resolver at home"
+        assert not [k for k in prefs if k.startswith("network.trr.")], server
 
 
 def test_without_a_proxy_the_fallback_is_not_declared():
@@ -307,9 +306,8 @@ def test_without_a_proxy_the_fallback_is_not_declared():
         configure_proxy(proxy, prefs)
         assert "network.proxy.allow_bypass" not in prefs, (
             f"{proxy!r}: pref declared where there is no proxy to bypass")
-        assert "network.trr.mode" not in prefs, (
-            f"{proxy!r}: with no proxy, the system resolver is the NORMAL path, and "
-            f"DoH would be a divergence from retail paid for nothing")
+        assert not [k for k in prefs if k.startswith("network.trr.")], (
+            f"{proxy!r}: the core declares nothing about names, with or without a proxy")
 
 
 def test_a_malformed_endpoint_leaves_no_half_written_prefs():
