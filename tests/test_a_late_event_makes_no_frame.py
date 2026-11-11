@@ -1,5 +1,4 @@
-"""A frame is born of `Page.frameAttached` only: a late event of a frame that left, or of one never announced, is
-not a frame.
+"""A late event of a frame that left is not a frame; an id never seen still is.
 
 `Lifecycle._frame` created a Frame for any id an event named. An event of a frame already detached (its
 `navigationStarted`, `navigationCommitted`, `eventFired` arriving after `frameDetached`, which happens when the
@@ -59,13 +58,19 @@ def test_the_late_events_of_a_detached_frame_do_not_bring_it_back():
     assert [t for t in told if t[1] == CHILD and t[0] != "frameDetached"] == [("frameAttached", CHILD)], told
 
 
-def test_the_events_of_a_frame_never_announced_make_no_frame():
-    engine, life, told = _page()
-    for method, params in _late("subframe-77"):
-        engine.dispatch_event(method, params, S)
-    assert "subframe-77" not in life.frames, sorted(life.frames)
-    assert life.main_frame == MAIN
-    assert not [t for t in told if t[1] == "subframe-77"], told
+def test_a_lifecycle_made_on_a_live_page_learns_its_main_frame_from_the_first_event():
+    """A Lifecycle made for a page already live never sees the page's first `frameAttached`: an id it never saw is a
+    frame. 580bf80 refused it, and every goto of the clients that attach late answered "the page has not announced its
+    main frame yet" (30 e2e red on candidate #5: test_juggler_actions, test_juggler_injected, ...)."""
+    class _Navigates(EventListeners):
+        def send(self, method, params=None, session=None, timeout=None):
+            return {"navigationId": None}
+    engine = _Navigates()
+    life = Lifecycle(engine, S)
+    engine.dispatch_event("Page.eventFired", {"frameId": MAIN, "name": "load"}, S)
+    assert life.main_frame == MAIN and MAIN in life.frames
+    engine.dispatch_event("Page.sameDocumentNavigation", {"frameId": MAIN, "url": "http://a.test/#x"}, S)
+    assert life.frames[MAIN].url == "http://a.test/#x"
 
 
 def test_a_frame_attached_again_after_it_left_is_a_frame():

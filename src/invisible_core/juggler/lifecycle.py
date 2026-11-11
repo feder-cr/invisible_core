@@ -184,6 +184,8 @@ class Lifecycle:
         self.c = connection
         self.session = session
         self.frames: dict = {}
+        # The frames that left (detached, or dropped at a commit above them): a late event of one makes no frame.
+        self._left_frames: set = set()
         self.main_frame: Optional[str] = None
         self.ready = False
         self._inflight = 0
@@ -382,6 +384,7 @@ class Lifecycle:
             # cross-process navigation").
             fid = p["frameId"]
             parent = p.get("parentFrameId")
+            self._left_frames.discard(fid)
             f = self.frames.get(fid)
             if f is None:
                 f = self.frames[fid] = Frame(fid, parent)
@@ -528,6 +531,7 @@ class Lifecycle:
         gone.sort(key=lambda k: -self._depth(k))
         for k in gone:
             self.frames.pop(k, None)
+            self._left_frames.add(k)
         for k in gone:
             self._tell("frameDetached", k)
 
@@ -550,19 +554,29 @@ class Lifecycle:
         return False
 
     def _frame(self, fid: str) -> Optional[Frame]:
-        """The frame `fid` names, or None: a frame is born of `Page.frameAttached`
-        alone (`_apply`).
+        """The frame `fid` names; None for a frame that left.
 
-        ⛔ AN EVENT OF A FRAME WE DO NOT KNOW IS NOT A FRAME. This used to create
-        one, for "a frame we never saw attach (we hooked in on an already-live
-        page)"; but the engine announces every frame it holds when the session
-        starts (PageAgent's constructor), so what reaches here unknown is a frame
-        that already left: its process reporting `navigationStarted`, a commit or
-        a `load` after `frameDetached`. Created again, with no parent, it was a
-        ghost in the client's `page.frames` that no document holds. Playwright's
-        frame manager drops these events the same way (`frameRequestedNavigation`,
-        `frameAbortedNavigation`, `frameLifecycleEvent`: `if (!frame) return`)."""
-        return self.frames.get(fid)
+        ⛔ A LATE EVENT OF A FRAME THAT LEFT IS NOT A FRAME. Its process can still
+        report `navigationStarted`, a commit or a `load` after `frameDetached` (or
+        after a commit above it dropped it); created again, with no parent, it was
+        a ghost in the client's `page.frames` that no document holds. Playwright's
+        frame manager drops the events of a frame it does not hold
+        (`frameRequestedNavigation`, `frameAbortedNavigation`,
+        `frameLifecycleEvent`: `if (!frame) return`).
+
+        ⛔ BUT AN ID NEVER SEEN IS STILL A FRAME. A Lifecycle made for a page that
+        is already live (the Juggler clients that attach to a page: actions,
+        injected, the posix pipe) never sees the page's first `frameAttached`, and
+        its first event is how it learns the main frame. Refusing those (the first
+        version of this fix, 580bf80) answered "the page has not announced its main
+        frame yet" to every goto of theirs: 30 e2e red on candidate #5."""
+        if fid in self._left_frames:
+            return None
+        if fid not in self.frames:
+            self.frames[fid] = Frame(fid, None)
+            if self.main_frame is None:
+                self.main_frame = fid
+        return self.frames[fid]
 
     # ── waiting ─────────────────────────────────────────────────────────────
     def _reached(self, f: Frame, state: str) -> bool:
