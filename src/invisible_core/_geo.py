@@ -38,6 +38,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import requests
 import urllib3.util.connection as _u3conn
 
+from . import _udp_exit
 from ._geoposition import DeclaredPosition, position_to_declare
 from ._locale import SessionLocale, _decide
 
@@ -826,6 +827,10 @@ class SessionGeo(NamedTuple):
     #: The accuracy of the declared position, in metres (see ``latitude``);
     #: ``None`` exactly when the position is.
     accuracy: Optional[float] = None
+    #: The MEASURED UDP exit of a SOCKS5 proxy (:mod:`invisible_core._udp_exit`): ``coherent``, ``no`` or
+    #: ``unmeasured``. It travels in the proxy's declaration on the pipe (``configure_proxy(..., udp=)``). ``None``
+    #: when nothing was measured: no proxy, or one that is not SOCKS5.
+    udp_exit: Optional[str] = None
 
     def geolocation_override(self) -> "Optional[Dict[str, float]]":
         """The ``geolocation`` object of ``Browser.setGeolocationOverride``:
@@ -914,6 +919,9 @@ def prepare_session_geo(
     # address, and the "auto" branch below raises with it.
     egress_ip: Optional[str] = None
     egress_err: Optional[Exception] = None
+    # ⛔ THE UDP EXIT IS MEASURED BESIDE THE TCP EXIT, through the same proxy, on a thread: the two are independent
+    # until they are compared, so a launch pays the longer of the two and not their sum. SOCKS5 only; None otherwise.
+    pending = _udp_exit.start_measurement(proxy) if proxy_set else None
     try:
         egress_ip = discover_egress_ip(proxy if proxy_set else None)
     except GeoTimezoneError as exc:
@@ -922,6 +930,9 @@ def prepare_session_geo(
         egress_err = exc
     except Exception as exc:  # noqa: BLE001
         egress_err = exc
+    udp_exit = pending.result(egress_ip) if pending is not None else None
+    if egress_ip is not None:
+        _udp_exit.remember(proxy, udp_exit)   # a context given this proxy later does not measure it again
 
     # Timezone resolution - same precedence as resolve_session_timezone.
     def _coordinate(ip: "Optional[str]") -> "Optional[DeclaredPosition]":
@@ -950,7 +961,8 @@ def prepare_session_geo(
                           where.longitude if where else None,
                           _decide(locale, egress_ip=egress_ip, proxy=proxy,
                                   may_discover=False, discovery_failure=egress_err),
-                          where.accuracy if where else None)
+                          where.accuracy if where else None,
+                          udp_exit)
     ip: Optional[str] = egress_ip
     try:
         if ip is None:  # the discovery above failed
@@ -966,7 +978,8 @@ def prepare_session_geo(
                       where.latitude if where else None,
                       where.longitude if where else None,
                       _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False),
-                      where.accuracy if where else None)
+                      where.accuracy if where else None,
+                      udp_exit)
 
 
 def resolve_session_timezone(

@@ -37,6 +37,9 @@ from urllib.parse import unquote
 _PROXY_TYPES = {"http": "http", "https": "https",
                 "socks": "socks", "socks5": "socks", "socks4": "socks4"}
 
+#: What the `udp` field of the proxy declaration may say (`_udp_exit` measures it).
+UDP_EXIT_VALUES = ("coherent", "no", "unmeasured")
+
 #: The port Playwright documents as the default for each scheme.
 _DEFAULT_PORT = {"http": 80, "https": 443, "socks": 1080, "socks4": 1080}
 
@@ -50,6 +53,9 @@ class ProxyEndpoint(NamedTuple):
     username: str
     password: str
     bypass: tuple
+    #: The measured UDP exit of a SOCKS5 proxy (`_udp_exit`): ``coherent``, ``no`` or ``unmeasured``; None when it was
+    #: not measured (any other proxy, or a caller that did not).
+    udp: Optional[str] = None
 
     @property
     def is_socks(self) -> bool:
@@ -71,6 +77,9 @@ class ProxyEndpoint(NamedTuple):
             params["username"] = self.username
         if self.password:
             params["password"] = self.password
+        # The measured UDP exit travels WITH the proxy, for a SOCKS5 one only; absent means `no` to the engine.
+        if self.udp is not None and self.type == "socks":
+            params["udp"] = self.udp
         return params
 
 
@@ -145,15 +154,24 @@ def parse_proxy(proxy: Optional[Dict[str, Any]]) -> Optional[ProxyEndpoint]:
     bypass = proxy.get("bypass")
     if isinstance(bypass, str):
         bypass = [b.strip() for b in bypass.split(",") if b.strip()]
+    udp = proxy.get("udp")
+    if udp in (None, ""):
+        udp = None
+    elif udp not in UDP_EXIT_VALUES:
+        raise ValueError(
+            "proxy udp %r is not one of %s" % (udp, ", ".join(UDP_EXIT_VALUES)))
     return ProxyEndpoint(type=kind, host=host, port=port,
                          username=username,
                          password=password,
-                         bypass=tuple(bypass or ()))
+                         bypass=tuple(bypass or ()),
+                         udp=udp)
 
 
 def configure_proxy(
     proxy: Optional[Dict[str, str]],
     prefs: Dict[str, Any],
+    *,
+    udp: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     """Validate the endpoint, close the leak channels, hand it on. NO routing.
 
@@ -165,6 +183,12 @@ def configure_proxy(
     What remains is what was never routing: the prefs below close the channels
     a proxied session can still leak through. They were already applied to both
     schemes and they still are, unchanged.
+
+    ``udp`` is the MEASURED UDP exit of the proxy (`SessionGeo.udp_exit`):
+    it is put under the ``udp`` key of the returned dict, which is the slot the
+    engine command is built from, and whatever the caller wrote under that key
+    is replaced by it (or removed when nothing was measured): a caller does not
+    declare a coherent UDP, the core measures it.
 
     Returns the endpoint dict so the caller can hand it to the client that
     sends the command, ``None`` when no proxy was asked for. An unreadable
@@ -196,6 +220,9 @@ def configure_proxy(
     # declared network (`_webrtc_network`), not a switch from this side.
 
     result = dict(proxy)
+    result.pop("udp", None)
+    if udp is not None:
+        result["udp"] = udp
 
     # ⛔ WHEN THE PROXY STUMBLES, FIREFOX'S FALLBACK IS TO GO OUT IN THE CLEAR.
     #

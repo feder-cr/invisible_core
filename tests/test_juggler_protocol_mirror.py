@@ -77,6 +77,16 @@ def test_the_commands_the_client_will_use_are_declared():
     assert "Page.dispatchTrustedInputEvents" not in COMMANDS
 
 
+def test_both_proxy_commands_declare_the_measured_udp_exit():
+    """The proxy declaration carries the UDP exit the core measured (`_udp_exit`): an optional `udp`, one of three
+    words. The engine is a closed world, so a command sent with `udp` before the field is declared is REFUSED."""
+    for name in ("Browser.setBrowserProxy", "Browser.setContextProxy"):
+        field = COMMANDS[name]["params"]["fields"]["udp"]
+        assert field == {"k": "Optional",
+                         "of": {"k": "Enum", "values": ["coherent", "no", "unmeasured"]}}, name
+    assert len(COMMANDS) == 81, "the field adds no command"
+
+
 def test_every_protocol_name_this_package_writes_is_declared():
     """⛔ A COMMAND THE ENGINE NO LONGER HAS IS FOUND HERE, NOT IN A BROWSER.
 

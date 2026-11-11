@@ -37,6 +37,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from invisible_core import SessionLocale, parse_proxy
+from invisible_core._udp_exit import declare_context_proxy, declare_launch_proxy
 
 from invisible_core.juggler import connection
 from invisible_core import write_user_js
@@ -174,7 +175,9 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
         proxy_command = None
         if proxy:
             try:
-                proxy_command = parse_proxy(proxy).as_engine_command()
+                parse_proxy(proxy)
+                proxy_command = parse_proxy(
+                    declare_launch_proxy(proxy)).as_engine_command()
             except ValueError as exc:
                 raise EngineError("the proxy cannot be applied: %s" % exc)
         # ⛔ THE PROXY IS SET BY THE CORE'S `launch`, before any page exists,
@@ -512,7 +515,11 @@ class Browser:
         # expressed must not come back usable.
         if options.get("proxy"):
             try:
-                proxy = parse_proxy(options["proxy"]).as_engine_command()
+                parse_proxy(options["proxy"])
+                # ⛔ MEASURED BEFORE IT IS SENT: a SOCKS5 proxy's UDP exit travels in this very command (`udp`),
+                # and without it the engine drops the UDP of every SOCKS5 proxy.
+                proxy = parse_proxy(
+                    declare_context_proxy(options["proxy"])).as_engine_command()
             except ValueError as exc:
                 raise EngineError(
                     "the context proxy cannot be applied: %s" % exc)
