@@ -62,3 +62,65 @@ def test_the_engine_keeps_no_descriptor_of_the_parent_but_its_pipe():
     done = subprocess.run([sys.executable, "-c", PARENT], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
     assert done.stdout.rsplit(":", 1)[-1] == "0", "the engine holds descriptors above 4 that the parent opened: " + done.stdout
+
+
+MANY_THREADS = textwrap.dedent(r'''
+    import os, sys, threading, time
+    from invisible_core.juggler import connection
+
+    # an "engine" that answers on fd 4 whatever it reads on fd 3, until fd 3 reaches end of file, then exits
+    engine = ("import os\n"
+              "while True:\n"
+              "    d = os.read(3, 64)\n"
+              "    if not d: break\n"
+              "    os.write(4, b'echo:' + d)\n")
+    results, errors = {}, []
+
+    def launch(n):
+        try:
+            our_write, our_read, process = connection._spawn_posix(sys.executable, ["-c", engine], dict(os.environ))
+            os.write(our_write, ("hello-%d" % n).encode())
+            results[n] = (os.read(our_read, 64).decode(), our_write, process)
+        except BaseException as error:   # noqa: BLE001
+            errors.append(repr(error))
+
+    # other threads open and close descriptors all the time, the way the server's readers do
+    stop = threading.Event()
+
+    def churn():
+        while not stop.is_set():
+            r, w = os.pipe()
+            os.close(r)
+            os.close(w)
+
+    churners = [threading.Thread(target=churn) for _ in range(3)]
+    for t in churners:
+        t.start()
+    threads = [threading.Thread(target=launch, args=(n,)) for n in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    stop.set()
+    for t in churners:
+        t.join()
+    assert not errors, errors
+    assert len(results) == 12, len(results)
+    # every engine got its OWN pipe: its answer carries its own number
+    assert all(results[n][0] == "echo:hello-%d" % n for n in results), {n: results[n][0] for n in results}
+    # and no engine holds the write end of another's pipe: closing the one end each parent keeps ends every engine, all of them
+    for n in results:
+        os.close(results[n][1])
+    for n in results:
+        results[n][2].wait(timeout=15)
+    print("ok")
+''')
+
+
+def test_twelve_launches_from_twelve_threads_at_once_do_not_cross_their_pipes():
+    """The launch runs from the worker threads of the server, with other threads alive in the parent. Twelve at once, with threads
+    that open and close descriptors meanwhile: each engine answers on its OWN pipe, and when each parent closes the end it keeps,
+    every engine reaches end of file and exits: no engine got a copy of another's pipe (it would never see the end) and none
+    of the spawns failed on a descriptor another thread had closed."""
+    done = subprocess.run([sys.executable, "-c", MANY_THREADS], capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0 and done.stdout.strip() == "ok", done.stderr.strip().splitlines()[-3:]
