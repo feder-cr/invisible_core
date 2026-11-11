@@ -779,30 +779,25 @@ _BASELINE: Dict[str, Any] = {
     "network.dns.disablePrefetch":                        True,
     "network.dns.disablePrefetchFromHTTPS":               True,
 
-    # === Fission / site-isolation disabled (FF146 Playwright parity) ===
-    # Force a single content-process model. Three knobs are required in FF150:
-    # upstream Playwright Firefox (FF146-based) only needed fission.autostart=False
-    # because FF146's default isolation strategy was looser. FF150 ships with
-    # fission.webContentIsolationStrategy=1 (IsolateEverything) which still
-    # site-isolates cross-origin iframes into separate `webIsolated` content
-    # processes EVEN WHEN fission.autostart is False. From the parent process's
-    # point of view, those iframes get a Juggler Frame placeholder with no
-    # docShell, no URL, and an execution context that wraps the wrong global,
-    # so frame.evaluate() fails with cross-origin SOP errors and
-    # element_handle.content_frame() returns None.
+    # === Fission: every site in a content process of its own ===
+    # A page is held by one content process per fragment root: the top, and every
+    # frame whose parent is in another process. The Juggler routes every command
+    # to the root that holds the frame (ContentMux), announces the frames from the
+    # parent (FrameLifecycle), and keeps a frame tree per root, so a cross-site
+    # iframe is reached like any other: frame.evaluate(), content_frame(), clicks.
     #
-    # Pinning the strategy to 0 keeps every cross-origin web iframe in the
-    # parent's content process, where the Juggler code paths from the FF146
-    # era expect them. processCount.webIsolated=1 is kept as belt-and-suspenders
-    # in case some path still classifies an origin as webIsolated despite the
-    # strategy change. It costs nothing to leave.
+    # `fission.webContentIsolationStrategy` 1 is IsolateEverything: one remote type
+    # per site, as retail Firefox does on desktop. `fission.autostart` is what
+    # turns Fission on; `fission.autostart.session` is NOT declared here: the
+    # parent writes it itself at startup (nsAppRunner.cpp, after it reads the
+    # first). `dom.ipc.processCount.webIsolated` 4 is the desktop default: the
+    # number of processes one site may use.
     #
-    # See issue #20 + tests/test_cross_origin_iframe.py for the regression
-    # sentinel that catches a future A/B flipping these back.
-    "fission.autostart":                                  False,
-    "fission.autostart.session":                          False,
-    "fission.webContentIsolationStrategy":                0,  # IsolateNothing
-    "dom.ipc.processCount.webIsolated":                   1,
+    # tests/test_fission_strategy1_prefs.py holds these three together; the
+    # wrapper's tests/test_cross_origin_iframe.py holds the behaviour.
+    "fission.autostart":                                  True,
+    "fission.webContentIsolationStrategy":                1,  # IsolateEverything
+    "dom.ipc.processCount.webIsolated":                   4,
 
     # === Uploading a real file, which did not work without this ===
     #

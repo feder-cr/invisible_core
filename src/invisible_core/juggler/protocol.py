@@ -2,7 +2,7 @@
 Do not edit by hand.
 
 Source: omni.ja!modules/juggler/protocol/Protocol.js
-Commands: 79   Events: 35
+Commands: 80   Events: 35
 
 The browser enforces this schema in a CLOSED WORLD: an undeclared field is
 REJECTED at runtime, not ignored. It therefore serves to verify what WE
@@ -516,6 +516,11 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                                   'k': 'Object',
                                                                   'ref': 'pageTypes.DOMQuad'}}},
                                       'k': 'Object'}},
+ 'Page.getFrameOrigin': {'params': {'fields': {'frameId': {'k': 'String'}},
+                                    'k': 'Object'},
+                         'returns': {'fields': {'x': {'k': 'Number'},
+                                                'y': {'k': 'Number'}},
+                                     'k': 'Object'}},
  'Page.goBack': {'params': {'fields': {'frameId': {'k': 'String'}}, 'k': 'Object'},
                  'returns': {'fields': {'success': {'k': 'Boolean'}}, 'k': 'Object'}},
  'Page.goForward': {'params': {'fields': {'frameId': {'k': 'String'}}, 'k': 'Object'},

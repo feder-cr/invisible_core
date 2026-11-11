@@ -43,7 +43,9 @@ def test_the_generated_protocol_has_the_five_domains():
     # 79 since firefox-44: `Page.elementAtom` (Firefox's own WebDriver atoms,
     # run against the page through an Xray) and `Page.title` (read in the
     # parent), both for invisible_selenium.
-    assert len(COMMANDS) == 79, "commands: %d" % len(COMMANDS)
+    # 80 since firefox-62: `Page.getFrameOrigin` (where the viewport of a frame
+    # starts in the main frame's, across processes; the hit-target check).
+    assert len(COMMANDS) == 80, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
 
