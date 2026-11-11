@@ -1,13 +1,16 @@
-"""The core declares NOTHING about names: no ``network.trr.*`` key is ever produced, with or without a proxy.
+"""The DoH PROVIDER is a declaration of the core: exactly two ``network.trr.*`` keys, for every session.
 
-Behind a proxy every name must be resolved by Firefox's own DNS-over-HTTPS, through the proxy, and nothing local. That state
-(``network.trr.mode``, ``uri``, ``bootstrapAddr``, ``exclude-etc-hosts``, ``excluded-domains``) is derived by the ENGINE
-(Juggler) from the proxies it is given: the browser proxy and every context proxy. A proxy given per context is covered
-too, which a pref written once at launch could never do. So the core writes no key starting with ``network.trr.``.
+Behind a proxy every name must be resolved by Firefox's own DNS-over-HTTPS, through the proxy, and nothing local. The STATE
+(``network.trr.mode``, ``exclude-etc-hosts``, ``excluded-domains``) is derived by the ENGINE (Juggler) from the proxies it is
+given: the browser proxy and every context proxy, which a pref written once at launch could never cover. The PROVIDER is the
+core's: ``network.trr.uri`` and ``network.trr.bootstrapAddr``, declared once for every session (with or without a proxy: the
+engine turns TRR on only when a proxy is present, so without one mode stays the default 0). They are USER values on purpose,
+because Firefox's DoH heuristics (``DoHController``) stand down when ``network.trr.mode`` or ``network.trr.uri`` has a user
+value. ``extra_prefs`` overrides them like any other pref.
 
-What the core still owns: ``network.proxy.allow_bypass`` (False with a proxy, absent without) and
-``network.parental_controls_cached_state`` (False). ``socks_remote_dns`` and ``socks5_remote_dns`` are not declared either:
-a Juggler session writes no proxy endpoint to the prefs.
+What the core still owns besides: ``network.proxy.allow_bypass`` (False with a proxy, absent without) and
+``network.parental_controls_cached_state`` (False). ``socks_remote_dns`` and ``socks5_remote_dns`` are not declared: a Juggler
+session writes no proxy endpoint to the prefs.
 """
 from __future__ import annotations
 

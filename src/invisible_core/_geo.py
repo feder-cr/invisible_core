@@ -718,7 +718,7 @@ class SessionGeo(NamedTuple):
     egress_ip: Optional[str]
     #: The declared position, from the SAME record of the exit IP the timezone
     #: and the language come from. ``None`` when there is no IP to derive it from
-    #: (no proxy, or discovery failed): in that case the engine receives NO
+    #: (the egress discovery failed; it runs with or without a proxy): in that case the engine receives NO
     #: declaration and refuses, rather than asking the hardware.
     #:
     #: They have defaults because ``SessionGeo`` is built positionally with two
