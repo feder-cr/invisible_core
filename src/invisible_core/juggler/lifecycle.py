@@ -299,7 +299,7 @@ class Lifecycle:
                 self._cv.notify_all()
             f = self._apply(method, p)
             self._settle()
-            if f is not None or method.startswith("Network."):
+            if f is not None or method.startswith("Network.") or method == "Page.ready":
                 self._cv.notify_all()
 
     def _settle(self) -> None:
@@ -766,6 +766,28 @@ class Lifecycle:
                         "navigation(s) not started, frame %s at %s"
                         % (timeout, self._link_clicks, frame_id,
                            f.navigation if f else None))
+                self._cv.wait(deadline.slice(0.05))
+
+    def wait_for_page_ready(self, timeout: Optional[float] = 20.0) -> None:
+        """Return once the engine has said the page is ready (`Page.ready`), waiting for it to arrive.
+
+        ⛔ A PAGE IS HANDED TO THE CALLER ONLY WHEN IT IS READY, as Playwright does (`FFPage` reports the page as new on `Page.ready`).
+        The engine sends it "whenever the page has completed initialization, e.g. finished all the transient navigations to the
+        `about:blank`" (PageHandler.js). Handing the page over on the main frame alone, the caller's first `goto` could be sent
+        while the page's own initial `about:blank` was still to commit: `Frame.outcome` takes the first document committed after
+        the reply of the command, that one is not ours, and the `goto` fails with "interrupted by another navigation to
+        about:blank" (measured on a loaded machine: three different tests, two runs of the CI, and `new_context().new_page()`
+        followed by `goto` in a loop in a fourth). `Page.ready` is replayed to a lifecycle built after it was sent, so a page that
+        was already ready returns at once.
+        """
+        deadline = Deadline(timeout)
+        with self._cv:
+            while not self.ready:
+                self._check_alive("the page to be ready")
+                if deadline.passed():
+                    raise TimeoutError(
+                        "the page was not ready in %.0fs: the engine never said Page.ready (frames seen: %s)"
+                        % (timeout, sorted(self.frames)))
                 self._cv.wait(deadline.slice(0.05))
 
     def wait_for_main_frame(self, timeout: Optional[float] = 20.0) -> str:

@@ -785,6 +785,8 @@ class Page:
         self._detached = False
         self.replayed_events = browser.replay(session, conn.dispatch_event)
         self.main_frame_id = self.lifecycle.wait_for_main_frame(timeout=None)
+        # Handed over ready, as Playwright's own page is: the first `goto` cannot meet the page's initial about:blank.
+        self.lifecycle.wait_for_page_ready(timeout=None)
 
     @property
     def browser(self) -> Browser:
