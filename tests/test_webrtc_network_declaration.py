@@ -132,14 +132,20 @@ def test_an_environment_built_by_hand_without_a_declaration_has_no_variable():
     assert "STEALTHFOX_WEBRTC_NETWORK" not in build_launch_env({}, base_env={})
 
 
-def test_the_old_host_ip_pref_is_the_same_declaration_not_a_second_one():
-    """One declaration of the address (``declared preferences once``): the pref the engine still tests for emptiness
-    carries the declared address, so the two can never disagree."""
+def test_the_address_is_declared_once_and_no_pref_repeats_it():
+    """One declaration (``declared preferences once``): the engine reads the network from STEALTHFOX_WEBRTC_NETWORK only.
+    The pref ``zoom.stealth.webrtc.host_ip`` (a second copy of the address that the engine only tested for emptiness)
+    is not written any more, and no source file spells it."""
+    import pathlib
+
     from invisible_core.prefs import translate_profile_to_prefs
 
     for seed in (0, 42, 987654321):
         prefs = translate_profile_to_prefs(generate_profile(seed=seed), timezone="America/New_York")
-        assert prefs["zoom.stealth.webrtc.host_ip"] == declared_network(seed).v4
+        assert not [k for k in prefs if "host_ip" in k], [k for k in prefs if "host_ip" in k]
+    src = pathlib.Path(__file__).resolve().parents[1] / "src" / "invisible_core"
+    spelled = [p.name for p in src.rglob("*.py") if "host_ip" in p.read_text(encoding="utf-8")]
+    assert not spelled, spelled
 
 
 def test_a_dataclass_is_returned():

@@ -32,7 +32,6 @@ from .constants import OSCPU_OVERRIDE, PLATFORM_OVERRIDE, USER_AGENT
 from ._fpforge import Profile
 from ._fpforge.profile import branding_archive, voices_for
 from ._locale import SessionLocale
-from ._webrtc_network import declared_network
 from ._webgl_personas import choose_gfx_device, gfx_device_for, persona_for, render_noise_seed
 from ._proxy import configure_proxy
 
@@ -1894,16 +1893,6 @@ def _apply_render_seed(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.fpp.hw_seed"] = render_noise_seed(profile.seed)
 
 
-def _apply_webrtc_host_ip(prefs: Dict[str, Any], profile: Profile) -> None:
-    # The engine tests this pref for emptiness only (`StealthIceGathering.cpp`): a content
-    # process that got no addresses from the parent gathers anyway. It never uses the value
-    # as an address. The address of the persona is declared ONCE, by
-    # `_webrtc_network.declared_network`, which also fills STEALTHFOX_WEBRTC_NETWORK for every
-    # session; the pref carries the same value so the two cannot disagree. It goes
-    # when the engine stops reading the host (design: declared-interfaces-design.md).
-    prefs["zoom.stealth.webrtc.host_ip"] = declared_network(profile.seed).v4
-
-
 def _apply_extension_lists(prefs: Dict[str, Any], persona) -> None:
     """Windows/mac extension list.
 
@@ -2000,7 +1989,6 @@ def translate_profile_to_prefs(
     _apply_voices(prefs, profile, session_locale)
     _apply_timezone(prefs, timezone)
     _apply_render_seed(prefs, profile)
-    _apply_webrtc_host_ip(prefs, profile)
     _apply_extension_lists(prefs, persona)
     _apply_platform_workarounds(prefs, virtual_display=virtual_display)
     _apply_caller_overlay(prefs, extra_prefs)

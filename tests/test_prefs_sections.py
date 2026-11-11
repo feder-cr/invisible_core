@@ -240,29 +240,6 @@ def test_a_zone_the_engine_cannot_open_is_refused(zone, hint):
     assert prefs["juggler.timezone.override"] == "America/Phoenix"
 
 
-def test_the_webrtc_host_ip_is_seed_derived_and_looks_like_a_home_router(profile):
-    import ipaddress
-
-    seen = set()
-    for seed in range(200):
-        prefs = {}
-        P._apply_webrtc_host_ip(prefs, generate_profile(seed))
-        ip = prefs["zoom.stealth.webrtc.host_ip"]
-        addr = ipaddress.IPv4Address(ip)
-        assert addr.is_private, ip
-        # The host octet is never .0, .1 (the gateway) or .255: not a host address a real router hands out.
-        assert 2 <= int(ip.split(".")[3]) <= 254, ip
-        seen.add(ip)
-    assert len(seen) > 150, f"only {len(seen)} distinct LAN IPs across 200 seeds"
-
-
-def test_the_same_seed_gives_the_same_host_ip(profile):
-    a, b = {}, {}
-    P._apply_webrtc_host_ip(a, profile)
-    P._apply_webrtc_host_ip(b, generate_profile(42))
-    assert a == b, "the synthetic ICE candidate must be stable per session"
-
-
 def test_the_theme_moves_the_os_flag_and_not_the_palette(profile):
     """Until 49.46.0 this was `test_a_light_theme_brings_the_windows_colour_palette`
     and asserted that a dark theme brought NO palette - the host's colours on
