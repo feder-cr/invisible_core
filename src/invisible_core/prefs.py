@@ -677,18 +677,18 @@ _BASELINE: Dict[str, Any] = {
     #: asked says `prompt`, and ours has never been asked - so the fix for one
     #: tell had quietly introduced a smaller one.
     #:
-    #: Nothing replaces it. The provider URL below is empty, so a call cannot
+    #: Nothing replaces it. The engine ships no network geolocation URL (its
+    #: default is empty on every OS, so the core declares none), so a call cannot
     #: reach the network even if a page makes one, and Playwright grants no
     #: permissions by default, so the call is refused exactly as it is for a
     #: user who dismisses the prompt.
-    "geo.provider.network.url":                           "",
     #: ⛔ `browser.region.network.url` and `browser.region.update.enabled` are
     #: NOT emitted any more - owner decision, 2026-08-17. It is not an
     #: oversight: it is the case where suppressing moves AWAY from retail.
     #:
     #: They are Firefox's REGION service, which has nothing to do with a page's
-    #: geolocation - that one is stopped by the line above, which stays and is
-    #: load-bearing. A standard Firefox asks for the region ONCE per session,
+    #: geolocation - that one is stopped by the engine's empty provider URL, which
+    #: stays and is load-bearing. A standard Firefox asks for the region ONCE per session,
     #: and we were doing it anyway: measured 2026-08-17, the product sends that
     #: request even with the empty pref emitted, while a bare launch with the
     #: same pref zeroes it. So we were shipping a declaration that promised
