@@ -96,3 +96,10 @@ def test_no_source_file_declares_the_gate_switch_or_the_remote_dns_prefs():
                for n in ast.walk(ast.parse(p.read_bytes()))
                if isinstance(n, ast.Constant) and n.value in names]
     assert not spelled, spelled
+
+
+def test_the_cached_parental_controls_state_is_declared_off_once():
+    """The engine answers 'parental controls off' from its own service, but upstream reads the cached pref once before
+    that answer is written back: a profile that cached ``true`` would send names to the system resolver until then."""
+    base = get_default_stealth_prefs(7, timezone="America/New_York", locale="en-US")
+    assert base["network.parental_controls_cached_state"] is False

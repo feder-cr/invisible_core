@@ -452,6 +452,9 @@ _BASELINE: Dict[str, Any] = {
     "media.peerconnection.use_document_iceservers":       True,
 
     "network.proxy.failover_direct":                      False,
+    # Parental controls are declared off by the engine's own service; upstream still reads this cached copy once at
+    # start-up, so a profile that cached `true` would resolve names with the system resolver until the cache is rewritten.
+    "network.parental_controls_cached_state":             False,
 
     # TLS ClientHello fingerprint - match stock Firefox byte-for-byte.
     # The Playwright/Juggler Firefox build this binary derives from re-enables
