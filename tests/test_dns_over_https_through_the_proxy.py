@@ -34,6 +34,7 @@ def test_a_proxied_session_declares_doh_only(server):
     assert prefs["network.trr.mode"] == 3, "TRR only: no fallback to the resolver of the machine"
     assert prefs["network.trr.uri"] == "https://mozilla.cloudflare-dns.com/dns-query"
     assert ipaddress.ip_address(prefs["network.trr.bootstrapAddr"]), "the DoH host is found without DNS"
+    assert prefs["network.trr.exclude-etc-hosts"] is False, "the hosts file of the machine answers nothing"
 
 
 @pytest.mark.parametrize("server", _PROXIES)

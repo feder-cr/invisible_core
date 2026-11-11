@@ -261,4 +261,7 @@ def configure_proxy(
     prefs["network.trr.mode"] = 3
     prefs["network.trr.uri"] = "https://mozilla.cloudflare-dns.com/dns-query"
     prefs["network.trr.bootstrapAddr"] = "162.159.61.4"
+    # Even in mode 3 Firefox answers a name that is in the machine's hosts file from the file (exclude-etc-hosts is true by
+    # default): what the host says is not a thing a persona has.
+    prefs["network.trr.exclude-etc-hosts"] = False
     return result
