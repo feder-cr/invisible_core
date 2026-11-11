@@ -27,7 +27,6 @@ proxied session can still leak through.
 """
 from __future__ import annotations
 
-import ipaddress
 from typing import Any, Dict, NamedTuple, Optional
 from urllib.parse import unquote
 
@@ -242,34 +241,7 @@ def configure_proxy(
     # in those words instead of with `prefs == {}`.
     prefs["network.proxy.allow_bypass"] = False
 
-    # NAMES: Firefox's own DNS-over-HTTPS, through the proxy, and nothing local.
-    #
-    # `allow_bypass` closes the CHANNELS that fall back to direct, but three surfaces are not channels and call
-    # `AsyncResolveNative` themselves: `NetworkConnectivityService`, the DoH heuristics and the ICE resolver, whose name
-    # THE PAGE chooses through `iceServers`. A name of the page's choosing must not reach the resolver of the machine, and
-    # must still resolve: the exit decides where it points. TRR mode 3 sends every lookup to DoH with no fallback to the
-    # system resolver, and a DoH request is an ordinary channel, so the proxy road the session already has carries it.
-    # The engine has no DNS gate any more (it refused every name, so an ICE server named by the page never resolved).
-    #
-    # `bootstrapAddr` is the address of the DoH host, so that finding it needs no DNS. 162.159.61.4 is one of the addresses
-    # `mozilla.cloudflare-dns.com` answered with on 2026-11-11 (172.64.41.4 is the other); it is Cloudflare's anycast and
-    # the certificate is still checked against the host name. Both prefs are USER values on purpose: Firefox's DoH
-    # heuristics (`DoHController`) stand down when `network.trr.mode` or `network.trr.uri` has a user value.
-    #
-    # Only here, so only with a proxy: without one the exit is the machine's own network and retail resolves with the
-    # system resolver (mode 0). Not declared: `socks_remote_dns` / `socks5_remote_dns` (a Juggler session writes no proxy
-    # endpoint to the prefs: every proxy is marked "resolves the host", so those governed a road that does not exist).
-    prefs["network.trr.mode"] = 3
-    prefs["network.trr.uri"] = "https://mozilla.cloudflare-dns.com/dns-query"
-    prefs["network.trr.bootstrapAddr"] = "162.159.61.4"
-    # Even in mode 3 Firefox answers a name that is in the machine's hosts file from the file (exclude-etc-hosts is true by
-    # default): what the host says is not a thing a persona has.
-    prefs["network.trr.exclude-etc-hosts"] = False
-    # The proxy's OWN name cannot go through DoH (DoH needs the proxy): the one name the system resolver answers, as for an
-    # app at home configured with a proxy. An address needs no lookup, so it excludes nothing.
-    endpoint = parse_proxy(proxy)
-    try:
-        ipaddress.ip_address(endpoint.host)
-    except ValueError:
-        prefs["network.trr.excluded-domains"] = endpoint.host
+    # NAMES: not declared here. The engine (Juggler) derives the DNS-over-HTTPS state (`network.trr.*`) from the proxies it
+    # is given, the browser proxy and every context proxy, so a proxy given per context is covered too; the core declares
+    # nothing about names and writes no `network.trr.` key, with or without a proxy.
     return result
