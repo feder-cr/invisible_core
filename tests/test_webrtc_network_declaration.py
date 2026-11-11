@@ -1,4 +1,4 @@
-"""The host network a proxied session declares to the engine, once, from the seed.
+"""The host network a session declares to the engine, once, from the seed, proxied or not.
 
 Behind a proxy the engine must not read the interfaces of the machine it runs on: a page counts the host candidates and
 reads their ranks, so the count of adapters and the presence of IPv6 would describe the host, not the persona. The core
@@ -9,8 +9,8 @@ declares the network in one environment variable, ``STEALTHFOX_WEBRTC_NETWORK``,
 * ``v6``: ``1`` only when the proxy's exit has IPv6 AND the relay is proven to carry an IPv6 destination. Nothing proves the
   second today, so it is ``0``.
 
-The same seed gives the same declaration on every machine; a session without a proxy declares nothing (its network is the
-real one, which is what a retail Firefox shows).
+The same seed gives the same declaration on every machine and with or without a proxy: the engine no longer reads the host's
+adapters, so a session without a proxy declares the same machine (IPv6 stays 0, a declared residual difference).
 """
 from __future__ import annotations
 
@@ -94,12 +94,24 @@ def test_the_most_common_home_lan_is_the_commonest_draw():
     assert counts.most_common(1)[0][0] == "192.168.1"
 
 
-def test_a_session_without_a_proxy_declares_nothing():
-    assert network_to_declare(42, proxied=False) is None
+def test_every_session_declares_the_network_with_or_without_a_proxy():
+    """No ``proxied`` argument exists: the declaration is a function of the seed alone."""
+    import inspect
+
+    assert "proxied" not in inspect.signature(network_to_declare).parameters
+    assert network_to_declare(42) == declared_network(42).env_value()
 
 
-def test_a_proxied_session_declares_the_network():
-    assert network_to_declare(42, proxied=True) == declared_network(42).env_value()
+def test_the_core_own_direct_launch_declares_the_network(monkeypatch, tmp_path):
+    """``build_launch_plan`` is a direct session (it refuses a proxy). It must carry the declaration too."""
+    from invisible_core import _geo, build_launch_plan
+    from invisible_core._geo import SessionGeo
+
+    monkeypatch.setattr(_geo, "prepare_session_geo",
+                        lambda tz, proxy, locale: SessionGeo("America/New_York", "203.0.113.7"))
+    monkeypatch.delenv("STEALTHFOX_WEBRTC_NETWORK", raising=False)
+    plan = build_launch_plan(42, profile_dir=tmp_path, binary_path="firefox", timezone="America/New_York")
+    assert plan.env["STEALTHFOX_WEBRTC_NETWORK"] == network_to_declare(42)
 
 
 def test_the_declaration_travels_in_the_environment_variable_the_registry_names():
@@ -115,7 +127,8 @@ def test_a_value_the_caller_already_set_wins():
     assert env["STEALTHFOX_WEBRTC_NETWORK"] == "v4=10.0.0.5;v6=1"
 
 
-def test_without_a_declaration_the_variable_is_absent():
+def test_an_environment_built_by_hand_without_a_declaration_has_no_variable():
+    """Only a caller that composes an environment itself can leave it out; the two session builders never do."""
     assert "STEALTHFOX_WEBRTC_NETWORK" not in build_launch_env({}, base_env={})
 
 

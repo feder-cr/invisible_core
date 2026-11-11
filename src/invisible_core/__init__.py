@@ -54,7 +54,7 @@ from .constants import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION
 # reads as public, and nothing in __all__ said so.
 from .seal import EngineMismatch, active_seal, verify_engine
 from .launch import tz_env, LaunchPlan, build_launch_env, build_launch_plan, write_user_js
-# The host network a proxied session declares to the engine (both env builders call it).
+# The host network a session declares to the engine (both env builders call it).
 from ._webrtc_network import network_to_declare
 
 # One headline version, and it is the honest one.

@@ -1898,8 +1898,8 @@ def _apply_webrtc_host_ip(prefs: Dict[str, Any], profile: Profile) -> None:
     # The engine tests this pref for emptiness only (`StealthIceGathering.cpp`): a content
     # process that got no addresses from the parent gathers anyway. It never uses the value
     # as an address. The address of the persona is declared ONCE, by
-    # `_webrtc_network.declared_network`, which also fills STEALTHFOX_WEBRTC_NETWORK for a
-    # proxied session; the pref carries the same value so the two cannot disagree. It goes
+    # `_webrtc_network.declared_network`, which also fills STEALTHFOX_WEBRTC_NETWORK for every
+    # session; the pref carries the same value so the two cannot disagree. It goes
     # when the engine stops reading the host (design: declared-interfaces-design.md).
     prefs["zoom.stealth.webrtc.host_ip"] = declared_network(profile.seed).v4
 

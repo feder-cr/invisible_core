@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from . import environment
 from ._headless import DESKTOP_ENV
+from ._webrtc_network import network_to_declare
 
 
 def _pref_literal(name: str, v: Any) -> str:
@@ -127,8 +128,9 @@ def build_launch_env(
     prefs: Dict[str, Any],
     *,
     timezone: Optional[str] = None,
-    #: The host network to DECLARE (`_webrtc_network.network_to_declare`), or None
-    #: to declare nothing (a session without a proxy: its network is the real one).
+    #: The host network to DECLARE (`_webrtc_network.network_to_declare`); every
+    #: session declares it, with or without a proxy. None only for a caller that builds
+    #: an environment by hand.
     #: A value already in base_env wins.
     network_declared: Optional[str] = None,
     manifest_path: "Optional[str | os.PathLike[str]]" = None,
@@ -151,7 +153,7 @@ def build_launch_env(
     consumer on this builder could not express a removal at all.
 
     STEALTHFOX_WEBRTC_NETWORK is the one WebRTC variable: the host network a
-    proxied session declares (``network_declared``); an already-set value in
+    session declares, proxied or not (``network_declared``); an already-set value in
     base_env wins.
 
     No ``TZ``: the engine takes the session's zone from the prefs
@@ -437,7 +439,7 @@ def build_launch_plan(
     ).prefs
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)
-    env = build_launch_env(prefs)
+    env = build_launch_env(prefs, network_declared=network_to_declare(seed))
     argv = [binary, "-no-remote", "-profile", str(pdir)]
     argv += list(extra_args or [])
     if url:

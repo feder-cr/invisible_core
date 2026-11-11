@@ -1,6 +1,6 @@
-"""The host network a proxied session declares to the engine: one adapter, one private IPv4 address, one bit for IPv6.
+"""The host network a session declares to the engine, with or without a proxy: one adapter, one private IPv4 address, one bit for IPv6.
 
-WHY. Behind a proxy the engine used to read the machine's interface list (``GetAdaptersAddresses``, netlink) and gather
+WHY. The engine used to read the machine's interface list (``GetAdaptersAddresses``, netlink) and gather
 every address it found. A page cannot read those addresses (the host candidates are ``<uuid>.local`` names), but it counts
 the names and reads their ranks, so the number of adapters and the presence of IPv6 described the machine under the
 browser, not the persona: three names on a PC with Hyper-V, one in a container. A retail Firefox on a given Windows machine
@@ -15,13 +15,22 @@ WHAT IS DECLARED.
   of home LANs (:data:`DATASET`). It is invisible to a page that has no camera or microphone permission (the host
   candidates are mDNS names, the srflx ``raddr`` is ``0.0.0.0``, and ``getStats`` shows no resolved address); with the
   permission granted Firefox stops obfuscating and the address is what the page reads, so it is drawn like a real one.
-* ``v6``: ``1`` only when the proxy's EXIT has IPv6 and the relay is PROVEN to carry an IPv6 destination. An IPv6 host
+* ``v6``: ``1`` only when the EXIT has IPv6 and the road (the relay, behind a proxy) is PROVEN to carry an IPv6 destination. An IPv6 host
   address with no IPv6 road behind it would need an IPv6 srflx that cannot exist, and a persona without IPv6 behind a
   dual-stack exit contradicts the HTTP that reaches IPv6-only hosts through the proxy; following the exit is consistent
   by construction. Nothing in the core proves a relay for IPv6, so the answer is
   ``0`` today and the two inputs exist for the day they can both be said.
 
-A session WITHOUT a proxy declares nothing: its network is the real one, which is what a retail Firefox shows.
+EVERY session declares, proxied or not. The engine no longer reads the host's adapters at all (a build without the
+declaration gives no host candidates), so the same declaration describes a direct session too: a persona is the same
+machine with and without a proxy, and nothing about the network depends on the host under the browser.
+
+DECLARED RESIDUAL DIFFERENCE. ``v6`` is ``0`` for every session today, so a direct session on a dual-stack network
+declares only IPv4: the shape of a home without IPv6, which is about half of the users (Google measured 50.1% over IPv6 on
+2026-03-28, https://pulse.internetsociety.org/blog/18-years-later-ipv6-reaches-majority). A retail Firefox on the same
+dual-stack machine would also show an IPv6 host and an IPv6 srflx. ``v6`` becomes 1 only when the EXIT (proxy or direct) has
+IPv6 and the road for it is proven; no measurement of the exit's IPv6 is written until that proof exists, because its result
+would be ANDed with a proof that is always false.
 
 ⛔ THE DATASET IS NOT THE POPULATION OF WINDOWS PCs. It is 1.79 million WD Cloud network drives (a NAS), read by
 https://blog.benjojo.co.uk/post/picking-unused-rfc1918-ip-space (2025-06-05), the only public count of private LAN
@@ -35,7 +44,7 @@ from __future__ import annotations
 import ipaddress
 import random
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict
 
 from .seedmix import sub_seed
 
@@ -99,11 +108,8 @@ def declared_network(seed: int, *, exit_ipv6: bool = False, relay_ipv6: bool = F
     return DeclaredNetwork(v4=_address(rng), v6=bool(exit_ipv6 and relay_ipv6))
 
 
-def network_to_declare(seed: int, *, proxied: bool, exit_ipv6: bool = False,
-                       relay_ipv6: bool = False) -> Optional[str]:
+def network_to_declare(seed: int, *, exit_ipv6: bool = False, relay_ipv6: bool = False) -> str:
     """THE ONE PLACE where the question "what network does this session declare" is answered, as the value for
-    ``STEALTHFOX_WEBRTC_NETWORK``, or ``None`` for a session that declares nothing (no proxy). The two env builders (the
-    core's ``build_launch_plan`` and the wrapper's ``_session.build_env``) call it rather than recomputing it."""
-    if not proxied:
-        return None
+    ``STEALTHFOX_WEBRTC_NETWORK``. Every session declares. The two env builders (the core's ``build_launch_plan`` and the
+    wrapper's ``_session.build_env``) call it rather than recomputing it."""
     return declared_network(seed, exit_ipv6=exit_ipv6, relay_ipv6=relay_ipv6).env_value()

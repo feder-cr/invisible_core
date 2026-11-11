@@ -48,7 +48,7 @@ UV = "UV"
 GEOIP_MMDB = "STEALTHFOX_GEOIP_MMDB"
 #: The font manifest the engine loads; a value already set wins (`launch`).
 FONT_MANIFEST = "STEALTHFOX_FONT_MANIFEST"
-#: The host network a proxied session declares, `v4=<address>;v6=<0|1>`; a value already set wins (`launch`).
+#: The host network a session declares, `v4=<address>;v6=<0|1>`; a value already set wins (`launch`).
 WEBRTC_NETWORK = "STEALTHFOX_WEBRTC_NETWORK"
 #: "off" leaves the system timer resolution alone (`juggler._pacing`).
 CURSOR_TIMER = "INVPW_CURSOR_TIMER"

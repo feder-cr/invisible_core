@@ -59,7 +59,7 @@ def test_build_launch_plan_writes_userjs_env_and_argv(tmp_path, monkeypatch):
     assert 'user_pref("zoom.stealth.screen.dpr", "1.25");' in text            # float -> string
     assert 'user_pref("toolkit.startup.max_resumed_crashes", -1);' in text    # no Safe Mode prompt
     assert 'user_pref("browser.sessionstore.resume_from_crash", false);' in text
-    assert "STEALTHFOX_WEBRTC_NETWORK" not in plan.env  # no proxy: nothing declared
+    assert plan.env["STEALTHFOX_WEBRTC_NETWORK"].startswith("v4=")  # every session declares its network
 
 
 def test_write_user_js_emits_user_pref_lines(tmp_path):
