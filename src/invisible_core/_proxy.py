@@ -241,7 +241,8 @@ def configure_proxy(
     # in those words instead of with `prefs == {}`.
     prefs["network.proxy.allow_bypass"] = False
 
-    # NAMES: not declared here. The engine (Juggler) derives the DNS-over-HTTPS state (`network.trr.*`) from the proxies it
-    # is given, the browser proxy and every context proxy, so a proxy given per context is covered too; the core declares
-    # nothing about names and writes no `network.trr.` key, with or without a proxy.
+    # NAMES: not declared here. The engine (Juggler) derives the DNS-over-HTTPS STATE (`network.trr.mode`,
+    # `exclude-etc-hosts`, `excluded-domains`) from the proxies it is given, the browser proxy and every context proxy, so a
+    # proxy given per context is covered too. The PROVIDER (`network.trr.uri`, `bootstrapAddr`) is declared once for every
+    # session in `prefs.py`, with or without a proxy; this function writes no `network.trr.` key.
     return result
