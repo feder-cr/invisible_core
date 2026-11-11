@@ -998,30 +998,23 @@ def _spawn_windows(executable, argv, env):
 
 
 def _spawn_posix(executable, argv, env):
-    """⛔ IT WAS BROKEN, AND THE DOCSTRING HAD GUESSED WHICH HALF.
+    """Starts the engine with its Juggler pipe on descriptors 3 (it reads) and 4 (it writes).
 
-    This leg was written from `nsRemoteDebuggingPipe.cpp` and never executed
-    until 2026-08-28. The symptom on the first run: the browser starts, prints
-    `Juggler listening to the pipe`, stays alive - and the very first write
-    raises `BrokenPipeError`. A live process with no reader on the other end.
+    `nsRemoteDebuggingPipe.cpp` does not look the numbers up: 3 and 4 are hard-wired in the engine. So the descriptor table of the
+    CHILD is built in the child, by `preexec_fn`, and nothing of it depends on what the parent has open.
 
-    ⛔ THE CAUSE, MEASURED RATHER THAN REASONED. CPython's close-all-fds
-    sweep runs AFTER `preexec_fn`, so the two descriptors this function creates
-    with `dup2` are closed again before `exec` unless they are in the keep
-    list. A four-line experiment reported it exactly:
+    ⛔ IT USED TO DEPEND ON THE PARENT, and failed only sometimes. The two sweeps that CPython does must be told apart:
+    `pass_fds` is made inheritable in the child BEFORE `preexec_fn` runs, and a number in it that is not open in the parent
+    makes the launch fail with `[Errno 9] Bad file descriptor`; and `close_fds` closes everything that is not in `pass_fds`
+    AFTER `preexec_fn`, so the descriptors `dup2` made on 3 and 4 die unless they are in the list. The old call named 3 and 4 in
+    `pass_fds` to survive the second and so needed them open in the parent for the first: it worked when the two pipes the parent
+    had just made happened to be on 3 and 4 (a bare shell), and failed when they were not and 3 or 4 was closed (under a wrapper
+    that leaves other descriptors open, such as `xvfb-run`).
 
-        with preexec_fn + pass_fds(its_read, its_write) ->  alive=[3]
-        with 3 and 4 also kept                          ->  alive=[3, 4]
-
-    Fd 3 survived only by accident: the first `os.pipe()` in the parent
-    happened to return 3, so it was already in the keep list and the `dup2`
-    onto it was a no-op. Fd 4 was created by `dup2` and swept away - which is
-    why the browser could ANNOUNCE itself (it had a read end on 3) and never
-    receive anything (nothing owned the read end of OUR pipe once 4 died).
-
-    ⛔ The remedy is to name 3 and 4 in `pass_fds` as well. They are not open
-    in the parent and do not have to be: that list is a set of NUMBERS the
-    child's sweep spares, not a set of parent handles.
+    ⛔ THE REMEDY IS NOT TO ASK CPYTHON FOR EITHER SWEEP: no `pass_fds`, `close_fds=False`, and the child closes what must not
+    reach the engine itself (`fix_descriptors`): the parent's two pipe ends are moved out of the way of 3 and 4, put on 3 and 4,
+    and every other descriptor above 4 is marked not-inheritable, so it is closed at `exec` (the child's standard three and the
+    pipe are all the engine receives, as before).
     """
     # ⛔ THE ENGINE IS DECLARED WHERE IT STARTS. On Windows the spawn is
     # `CreateProcessW` through ctypes, which raises none of the audit events
@@ -1032,39 +1025,34 @@ def _spawn_posix(executable, argv, env):
     # `invisible_core.testing.world` refuses it outside an e2e test, and a hook
     # that raises stops the spawn before anything is created.
     sys.audit(LAUNCH_EVENT, executable, argv)
+    import fcntl
     its_read, our_write = os.pipe()
     our_read, its_write = os.pipe()
 
     def fix_descriptors():
-        # On POSIX the numbers are HARDWIRED in the C++: 3 for reading,
-        # 4 for writing. `nsRemoteDebuggingPipe.cpp` does not look them up.
-        #
-        # ⛔ AND 3 AND 4 *ARE* IN `pass_fds`. This comment used to say they
-        # could not be, on the reasoning that the list names fds the parent
-        # hands down. That reasoning was wrong: the list is a set of NUMBERS
-        # the child spares during its close sweep, and the sweep runs AFTER
-        # `preexec_fn` - measured, not assumed. Without them the browser starts
-        # with nothing on 4 and the first write gets EPIPE from a live
-        # process.
-        #
-        # `dup2` clears CLOEXEC on the NEW descriptor, which is what saves this
-        # in the ordinary case - but only when the source and target differ.
-        # `dup2(fd, fd)` is documented to be a no-op that does NOT clear it, so
-        # a pipe that happens to land on 3 or 4 would be closed at exec while
-        # every other run works. The explicit `set_inheritable` below removes
-        # that difference instead of relying on which fds the OS handed out.
-        for source, target in ((its_read, 3), (its_write, 4)):
-            if source != target:
-                os.dup2(source, target)
-            os.set_inheritable(target, True)
+        # Runs in the child, after the fork. The sources are first moved above 4 (a pipe end that is itself on 3 or 4 would be
+        # overwritten by the `dup2` of the other), then put on the numbers the engine reads; `dup2` clears the close-on-exec
+        # flag of the NEW descriptor, which is what lets 3 and 4 reach the engine.
+        read_end = fcntl.fcntl(its_read, fcntl.F_DUPFD_CLOEXEC, 5)
+        write_end = fcntl.fcntl(its_write, fcntl.F_DUPFD_CLOEXEC, 5)
+        os.dup2(read_end, 3)
+        os.dup2(write_end, 4)
+        # Everything the parent had open that is not the standard three or the pipe is closed at `exec`. The directory of
+        # descriptors lists them; a platform without it keeps the old sweep's effect with a range.
+        try:
+            listed = [int(name) for name in os.listdir("/dev/fd") if name.isdigit()]
+        except OSError:
+            listed = list(range(5, 4096))
+        for fd in listed:
+            if fd > 4:
+                try:
+                    os.set_inheritable(fd, False)
+                except OSError:
+                    pass
 
     p = subprocess.Popen([executable] + argv, env=env,
                          preexec_fn=fix_descriptors,
-                         # ⛔ 3 and 4 ARE IN THIS LIST, see the docstring.
-                         # Without them the sweep that runs after `preexec_fn`
-                         # closes exactly the two descriptors this whole
-                         # function exists to create.
-                         pass_fds=(its_read, its_write, 3, 4),
+                         close_fds=False,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     os.close(its_read)
     os.close(its_write)
