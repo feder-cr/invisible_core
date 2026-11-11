@@ -70,11 +70,75 @@ def test_ipv6_needs_the_exit_and_the_relay_both():
     assert on.v6 is True and on.env_value().endswith(";v6=1;p6=")
     # With IPv6 the declaration also names the /64 of the exit: the home host address sits in the same /64 as the srflx
     # (no NAT66). The caller says it; nothing is measured here. Ignored while v6 is 0.
-    prefix = "2001:db8:1234:5678"
+    prefix = "2a01:e0a:1f2:3450::/64"
     with_prefix = declared_network(42, exit_ipv6=True, relay_ipv6=True, exit_prefix6=prefix)
     assert with_prefix.env_value().endswith(";v6=1;p6=" + prefix)
     assert declared_network(42, exit_prefix6=prefix).env_value().endswith(";v6=0;p6=")
     assert on.v4 == declared_network(42).v4, "IPv6 must not move the address"
+
+
+# Copied from the engine, series worktree C:\ff\wt\doh-engine at commit e403bd08bb:
+#   dom/media/webrtc/transport/test/gtest/TestStealthDeclaredNetwork.cpp  (tests IPv6IsTheExitPrefixAndATemporaryIdentifierOnTheSameAdapter
+#   and APrefixMustBeGlobalUnicast) and the parser it exercises, dom/media/webrtc/transport/nr_stealth_network.cpp (PrefixOf:
+#   "<address>/64" or "<address>", global unicast 2000::/3, not Teredo, 6to4 nor documentation).
+#   (p6 string, does the engine accept it)
+_ENGINE_P6 = [
+    ("2a01:e0a:1f2:3450::/64", True),      # gtest: the form the engine tests use
+    ("2a01:e0a:1f2:3450::", True),         # PrefixOf: the "/64" is optional
+    ("fe80::/64", False),                  # gtest: not global unicast
+    ("2001:db8:1::/64", False),            # gtest: documentation
+    ("2001:0:53aa::/64", False),           # gtest: Teredo
+    ("2002:c000:204::/64", False),         # gtest: 6to4
+    ("fd12:3456::/64", False),             # gtest: unique local
+    ("2a01:e0a::/48", False),              # gtest: only a /64 is a prefix
+    ("10.0.0.1", False),                   # gtest: not IPv6
+    ("2001:db8:1234:5678", False),         # the bare four-group form the core used to declare: inet_pton rejects it
+]
+
+
+def _engine_accepts(p6: str) -> bool:
+    """A model of ``PrefixOf``, held to the table above by :func:`test_the_model_of_the_engine_parser_agrees_with_its_gtest`."""
+    address, _, length = p6.partition("/")
+    if length not in ("", "64"):
+        return False
+    try:
+        a = ipaddress.IPv6Address(address)
+    except ValueError:
+        return False
+    b = a.packed
+    if (b[0] & 0xE0) != 0x20:
+        return False
+    return not (b[:4] == b"\x20\x01\x00\x00" or b[:2] == b"\x20\x02" or b[:4] == b"\x20\x01\x0d\xb8")
+
+
+def test_the_model_of_the_engine_parser_agrees_with_its_gtest():
+    for p6, accepted in _ENGINE_P6:
+        assert _engine_accepts(p6) is accepted, p6
+
+
+@pytest.mark.parametrize("p6,accepted", _ENGINE_P6)
+def test_the_prefix_the_core_declares_is_one_the_engine_parser_accepts(p6, accepted):
+    """The engine rejects a malformed or non-global p6 and, with it, the whole declaration (the IPv4 host address too). So the
+    core must refuse what the engine refuses, at the source, and what it emits must be what the engine accepts."""
+    if not accepted:
+        with pytest.raises(ValueError):
+            declared_network(42, exit_ipv6=True, relay_ipv6=True, exit_prefix6=p6)
+        return
+    text = declared_network(42, exit_ipv6=True, relay_ipv6=True, exit_prefix6=p6).env_value()
+    emitted = text.rsplit(";p6=", 1)[1]
+    assert _engine_accepts(emitted), text
+    assert emitted == "2a01:e0a:1f2:3450::/64", "one canonical form: the /64 network, written with its length"
+
+
+def test_a_host_address_in_the_prefix_is_reduced_to_its_64():
+    got = declared_network(42, exit_ipv6=True, relay_ipv6=True, exit_prefix6="2A01:0E0A:1F2:3450:1:2:3:4/64")
+    assert got.prefix6 == "2a01:e0a:1f2:3450::/64"
+
+
+def test_a_prefix_is_validated_even_when_a_declaration_is_built_by_hand():
+    with pytest.raises(ValueError):
+        DeclaredNetwork(v4="192.168.1.9", v6=True, prefix6="2001:db8:1234:5678")
+    assert DeclaredNetwork(v4="192.168.1.9", v6=True, prefix6="").env_value() == "v4=192.168.1.9;v6=1;p6="
 
 
 def test_the_frequencies_are_those_of_the_measured_population():
