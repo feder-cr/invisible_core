@@ -1088,3 +1088,15 @@ def test_a_value_that_is_not_a_list_of_rule_codes_is_refused(tmp_path, capsys, v
 ])
 def test_the_key_comes_out_as_the_select_string(tmp_path, value, expected):
     assert hooks.hook_config(_lint_repo(tmp_path, f"lint = {value}"))["lint"] == expected
+
+
+def test_an_unknown_key_also_says_the_installed_core_may_be_older(tmp_path, capsys):
+    """A repository that declares a key a newer core added is refused by an older
+    core as a typo. The refusal keeps its typo wording and adds the other cause,
+    with the fix, because the reader of that line has no way to tell them apart."""
+    root = make_repo(tmp_path, block="pytest = false\npin = false\nsome_new_gate = true")
+    assert run_policy(root)[0] == 1
+    err = capsys.readouterr().err
+    assert "nothing reads" in err and "misspelt key" in err
+    assert "installed invisible-core is older" in err
+    assert "upgrade it" in err and "pin" in err
