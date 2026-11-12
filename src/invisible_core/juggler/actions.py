@@ -384,7 +384,13 @@ class Actions:
                     # it lands outside - then the loop recomputes, because the
                     # geometry has just changed underneath.
                     point = self._center_point(f, element, position, deadline)
-                    if point is not None and not self._in_viewport(point):
+                    # ⛔ A FRAME'S ELEMENT IS ASKED OF THE ENGINE EVEN WHEN ITS POINT IS INSIDE THE MAIN VIEWPORT. The point is in
+                    # the main frame's space, where an element that a scrolled frame has pushed out of ITS OWN viewport, or a
+                    # frame that its parent has scrolled out of view, still has coordinates inside the main viewport; the
+                    # click then aimed at a place the frame does not show, and the hit test answered `<html>`. The engine's
+                    # command is "only if needed" and looks at the element's frame and every frame above it (across
+                    # processes), so it is the one to ask; for the main frame the viewport test is the whole question.
+                    if point is not None and (f != self.lifecycle.main_frame or not self._in_viewport(point)):
                         # The point asked for, when there is one: the engine
                         # brings that rect of the element into view.
                         rect = ({"x": float(position["x"]), "y": float(position["y"]),
