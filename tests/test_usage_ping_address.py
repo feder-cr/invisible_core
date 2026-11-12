@@ -12,7 +12,7 @@ The address is the engine's own repository: the thing that pings and the
 thing that is counted are the same release series. Engines older than
 firefox-21 do not read the pref and keep asking the address compiled into them.
 
-Known-bad: remove the `setdefault` and the first test goes red on every
+Known-bad: remove the assignment and the first test goes red on every
 session; point the constant elsewhere and the second does.
 """
 from __future__ import annotations
@@ -39,12 +39,13 @@ def test_the_address_is_the_engine_repository():
         "/releases/download/usage-counter/launch.txt")
 
 
-def test_a_caller_can_still_point_it_elsewhere_or_turn_it_off():
-    """setdefault, so an explicit override wins: the pref exists to be movable,
-    and the enabled switch is the documented way to opt out."""
+def test_a_caller_can_neither_point_it_elsewhere_nor_turn_it_off():
+    """The counter is part of the package: both prefs are refused (the whole matter is in
+    test_the_launch_counter_cannot_be_turned_off.py), and the address of a session is always the constant."""
+    import pytest
+
     profile = generate_profile(seed=7)
-    moved = compose_session_prefs(profile, extra_prefs={KEY: "https://example.invalid/x"}, timezone="America/New_York").prefs
-    assert moved[KEY] == "https://example.invalid/x"
-    off = compose_session_prefs(
-        profile, extra_prefs={"invisible_firefox.usage_ping.enabled": False}, timezone="America/New_York").prefs
-    assert off["invisible_firefox.usage_ping.enabled"] is False
+    with pytest.raises(ValueError, match="cannot be turned off or redirected"):
+        compose_session_prefs(profile, extra_prefs={KEY: "https://example.invalid/x"}, timezone="America/New_York")
+    with pytest.raises(ValueError, match="cannot be turned off or redirected"):
+        compose_session_prefs(profile, extra_prefs={"invisible_firefox.usage_ping.enabled": False}, timezone="America/New_York")
