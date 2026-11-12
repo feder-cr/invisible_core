@@ -384,6 +384,14 @@ class EventListeners:
                     self.handler_errors.append("%s: %s" % (method, failure))
 
 
+def _is_a_closed_pipe(exc: OSError) -> bool:
+    """A write that failed because the other end of the pipe is closed: EPIPE (`BrokenPipeError`) everywhere; on Windows, whose
+    pipes come as C-runtime descriptors, the same fact also arrives as ERROR_BROKEN_PIPE (109), ERROR_NO_DATA (232) or EINVAL."""
+    if isinstance(exc, BrokenPipeError) or exc.errno == errno.EPIPE:
+        return True
+    return sys.platform == "win32" and (getattr(exc, "winerror", None) in (109, 232) or exc.errno == errno.EINVAL)
+
+
 class Connection(EventListeners):
     """A pipe to an already-launched Firefox."""
 
@@ -685,12 +693,34 @@ class Connection(EventListeners):
 
     def _write(self, msg: dict) -> bool:
         """Writes one message; False, writing nothing, once `close` has
-        released the write end (see `__init__`)."""
+        released the write end (see `__init__`) or the browser has closed its
+        end of the pipe.
+
+        ⛔ THE ONE PLACE A WRITE CAN FAIL BECAUSE THE BROWSER IS GONE. An engine
+        that dies between the check at the top of `send_placed` (or the one of
+        `launch`) and this write, before the reader has seen the end of its
+        pipe, used to leave `os.write` raising a bare `BrokenPipeError`: it
+        came out of `BrowserType.launch` as "[Errno 32] Broken pipe", with
+        neither the exit code nor the last lines of the engine, which are the
+        only account of why it stopped, and nothing a client could tell from a
+        bug of its own (seen once in the e2e of the wrapper on a hosted runner,
+        2026-11-12, while 640 other launches of the same run were good). A pipe the other end has closed is the same fact as a
+        closed one, so it gets the same answer: False, which every caller turns
+        into `_closed_error()` (exit code, last output, `TargetClosedError`,
+        the word a client's rerun rules recognise), or ignores (`post`). The
+        error that the write itself raised is kept as the reason head."""
         data = json.dumps(msg).encode("utf-8") + NUL
         with self._write_lock:
             if self._to_browser < 0:
                 return False
-            os.write(self._to_browser, data)
+            try:
+                os.write(self._to_browser, data)
+            except OSError as exc:
+                if not _is_a_closed_pipe(exc):
+                    raise
+                if self._error is None:
+                    self._error = exc
+                return False
         return True
 
     def close(self, timeout: float = 5.0) -> None:
