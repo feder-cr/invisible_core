@@ -47,7 +47,8 @@ def test_the_generated_protocol_has_the_five_domains():
     # starts in the main frame's, across processes; the hit-target check).
     # 81 since the proxy handshake: `Browser.setNoBrowserProxy`, the explicit "this session has no proxy" that the
     # Juggler waits for (with `Browser.setBrowserProxy`) before it lets a proxied channel start.
-    assert len(COMMANDS) == 81, "commands: %d" % len(COMMANDS)
+    # 82 since the engine after firefox-63: `Page.addBinding` (a binding of one page, for page.expose_function).
+    assert len(COMMANDS) == 82, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
 
@@ -84,7 +85,7 @@ def test_both_proxy_commands_declare_the_measured_udp_exit():
         field = COMMANDS[name]["params"]["fields"]["udp"]
         assert field == {"k": "Optional",
                          "of": {"k": "Enum", "values": ["coherent", "no", "unmeasured"]}}, name
-    assert len(COMMANDS) == 81, "the field adds no command"
+    assert len(COMMANDS) == 82, "the field adds no command"
 
 
 def test_every_protocol_name_this_package_writes_is_declared():
