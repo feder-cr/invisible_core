@@ -384,12 +384,20 @@ class EventListeners:
                     self.handler_errors.append("%s: %s" % (method, failure))
 
 
+#: `sys.platform == "win32"`, a name of its own so that a test can stand on either side.
+_IS_WINDOWS = sys.platform == "win32"
+#: How long a write that failed with EINVAL on Windows waits for the proof that the engine is gone (seconds).
+_GONE_WAIT = 1.0
+
+
 def _is_a_closed_pipe(exc: OSError) -> bool:
-    """A write that failed because the other end of the pipe is closed: EPIPE (`BrokenPipeError`) everywhere; on Windows, whose
-    pipes come as C-runtime descriptors, the same fact also arrives as ERROR_BROKEN_PIPE (109), ERROR_NO_DATA (232) or EINVAL."""
+    """A write that failed because the other end of the pipe is closed: EPIPE (`BrokenPipeError`) everywhere, and on Windows also
+    ERROR_BROKEN_PIPE (109) and ERROR_NO_DATA (232), the two codes a pipe says it by. NOT EINVAL: on Windows a pipe whose reader
+    is gone can also come out as EINVAL, but so does a descriptor that is not valid or a count out of range, and a bare errno
+    cannot tell them apart (`Connection._engine_is_gone` can)."""
     if isinstance(exc, BrokenPipeError) or exc.errno == errno.EPIPE:
         return True
-    return sys.platform == "win32" and (getattr(exc, "winerror", None) in (109, 232) or exc.errno == errno.EINVAL)
+    return _IS_WINDOWS and getattr(exc, "winerror", None) in (109, 232)
 
 
 class Connection(EventListeners):
@@ -450,7 +458,8 @@ class Connection(EventListeners):
                     if raw:
                         self._deliver(raw)
         except OSError as e:
-            self._error = e
+            with self._lock:
+                self._error = e
         finally:
             self._closed = True
             # ⛔ Whoever is waiting must be WOKEN UP, not left to the
@@ -607,8 +616,15 @@ class Connection(EventListeners):
         msg: dict = {"id": msg_id, "method": method, "params": params or {}}
         if session:
             msg["sessionId"] = session
-        if not self._write(msg):
-            # `close` ran between the check above and the write.
+        try:
+            written = self._write(msg)
+        except BaseException:
+            # A write that fails for another reason than a closed pipe leaves nothing pending either.
+            with self._lock:
+                self._pending.pop(msg_id, None)
+            raise
+        if not written:
+            # `close` ran between the check above and the write, or the browser closed its end.
             with self._lock:
                 self._pending.pop(msg_id, None)
             raise self._closed_error()
@@ -715,13 +731,38 @@ class Connection(EventListeners):
                 return False
             try:
                 os.write(self._to_browser, data)
+                return True
             except OSError as exc:
-                if not _is_a_closed_pipe(exc):
-                    raise
-                if self._error is None:
-                    self._error = exc
+                failure = exc
+        # Decided outside the write lock: the wait below is not a reason to hold the other writers.
+        if not (_is_a_closed_pipe(failure)
+                or (_IS_WINDOWS and failure.errno == errno.EINVAL and self._engine_is_gone(_GONE_WAIT))):
+            raise failure
+        with self._lock:                     # the reader writes the same field, under the same lock
+            if self._error is None:
+                self._error = failure
+        return False
+
+    def _engine_is_gone(self, wait: float) -> bool:
+        """True once the engine has exited or the reader has seen the end of its stream, waiting up to `wait` seconds for it.
+
+        Only the error branch of a write asks, and only for an error that does not say by itself that the pipe is closed (EINVAL
+        on Windows). The window is real: the pipe is already closed while `poll()` still says None, so a bare `poll()` would turn
+        the very case this is for into a rethrown EINVAL. A process that is alive and a reader that still reads are the proof
+        that the error is something else, and then the caller raises it as it came."""
+        deadline = time.monotonic() + wait
+        while True:
+            if self._closed:
+                return True
+            if self._process is not None:
+                try:
+                    if self._process.poll() is not None:
+                        return True
+                except Exception:
+                    pass
+            if time.monotonic() >= deadline:
                 return False
-        return True
+            time.sleep(0.01)
 
     def close(self, timeout: float = 5.0) -> None:
         """Closes the pipe and waits for the browser to exit on its own.

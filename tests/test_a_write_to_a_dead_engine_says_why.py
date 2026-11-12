@@ -38,15 +38,39 @@ class _DeadProcess:
         return self.code
 
 
+class _SlowToExit:
+    """Still running when the write fails, exited a moment later: the window in which the pipe is closed and `poll()` says None."""
+
+    pid = 4243
+
+    def __init__(self, polls_alive: int, code: int = -11) -> None:
+        self.polls_alive, self.code = polls_alive, code
+
+    def poll(self):
+        if self.polls_alive > 0:
+            self.polls_alive -= 1
+            return None
+        return self.code
+
+    def terminate(self) -> None:
+        self.polls_alive = 0
+
+    kill = terminate
+
+    def wait(self, timeout=None):
+        self.polls_alive = 0
+        return self.code
+
+
 class _Browser:
     """The browser's ends of the protocol pipe, and its output. `dies` is what an exit does to the pipe it reads from."""
 
-    def __init__(self, exit_code: int = -11) -> None:
+    def __init__(self, exit_code: int = -11, process=None) -> None:
         out_r, self.out_w = os.pipe()
         self.output = ProcessOutput(os.fdopen(out_r, "rb"))
         self.to_r, to_w = os.pipe()
         from_r, self.from_w = os.pipe()
-        self.connection = Connection(to_w, from_r, _DeadProcess(exit_code))
+        self.connection = Connection(to_w, from_r, process or _DeadProcess(exit_code))
         self.connection.output = self.output
 
     def dies(self, last_words: bytes = REASON) -> None:
@@ -103,3 +127,69 @@ def test_a_write_that_fails_for_another_reason_is_not_swallowed(browser, monkeyp
         browser.connection.send("Browser.enable", timeout=5)
     assert caught.value.errno == errno.ENOSPC
     assert not isinstance(caught.value, TargetClosedError)
+
+
+# --- EINVAL: a closed pipe on Windows only when the engine is gone --------------------------------
+
+def _einval(fd, data):
+    raise OSError(errno.EINVAL, "Invalid argument")
+
+
+@pytest.fixture
+def windows(monkeypatch):
+    """Stand on the Windows side: EINVAL may be a closed pipe there; the wait for the proof is short."""
+    monkeypatch.setattr(connection_module, "_IS_WINDOWS", True, raising=False)
+    monkeypatch.setattr(connection_module, "_GONE_WAIT", 0.3, raising=False)
+
+
+def test_an_einval_with_the_engine_alive_and_the_reader_open_is_raised_as_it_came(windows, monkeypatch):
+    """A descriptor that is not valid, a count out of range: nothing says the engine is gone, so nothing says it was."""
+    b = _Browser(process=_SlowToExit(polls_alive=10 ** 6))
+    try:
+        monkeypatch.setattr(connection_module.os, "write", _einval)
+        with pytest.raises(OSError) as caught:
+            b.connection.send("Browser.enable", timeout=5)
+        assert caught.value.errno == errno.EINVAL
+        assert not isinstance(caught.value, TargetClosedError)
+        assert b.connection._pending == {}
+    finally:
+        b.release()
+
+
+def test_an_einval_with_the_engine_exited_is_a_closed_pipe(windows, monkeypatch):
+    b = _Browser(exit_code=-11)
+    try:
+        b.dies()
+        monkeypatch.setattr(connection_module.os, "write", _einval)
+        with pytest.raises(TargetClosedError) as caught:
+            b.connection.send("Browser.enable", timeout=5)
+        assert "exited with code -11" in str(caught.value)
+        assert "undeclared pref" in str(caught.value)
+    finally:
+        b.release()
+
+
+def test_an_einval_while_poll_still_says_running_waits_for_the_exit(windows, monkeypatch):
+    """The window: the pipe is closed, the process has not yet been reaped. A bare `poll()` would rethrow the EINVAL."""
+    b = _Browser(process=_SlowToExit(polls_alive=5, code=-11))
+    try:
+        b.dies()
+        monkeypatch.setattr(connection_module.os, "write", _einval)
+        with pytest.raises(TargetClosedError) as caught:
+            b.connection.send("Browser.enable", timeout=5)
+        assert "exited with code -11" in str(caught.value)
+    finally:
+        b.release()
+
+
+def test_an_einval_off_windows_is_never_a_closed_pipe(monkeypatch):
+    monkeypatch.setattr(connection_module, "_IS_WINDOWS", False, raising=False)
+    b = _Browser(exit_code=-11)
+    try:
+        b.dies()
+        monkeypatch.setattr(connection_module.os, "write", _einval)
+        with pytest.raises(OSError) as caught:
+            b.connection.send("Browser.enable", timeout=5)
+        assert caught.value.errno == errno.EINVAL and not isinstance(caught.value, TargetClosedError)
+    finally:
+        b.release()
