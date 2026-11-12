@@ -181,6 +181,22 @@ jobs:
           print(f"all {checked} published versions point at a live engine")
           PY
 
+      # The README's way in is uv, so the user path is uv's: installed the way
+      # its own installer puts it, which is what the README's reader runs. A
+      # venv uv makes has no pip in it, and that is the environment under test.
+      - name: uv, from its own installer (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: uv, from its own installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       # PyPI does not serve a new version to pip the instant twine finishes, and
       # this workflow runs on the ledger pull request, which the publish job
       # opens seconds after the upload.
@@ -196,10 +212,15 @@ jobs:
       # different pages of the index, and the job only needs the one pip installs from
       # (the wrapper's ledger #476 of 0.50.1 failed the same way; its fix is 299fc9f).
       #
-      # So the question asked here is pip's own: `pip download invisible-core==X`, the
-      # same client, the same index, no cache. Bounded at ten minutes: a forgotten
-      # publish still fails, and it fails HERE, saying that the index does not have the
-      # version, instead of a step later as a test that compares two versions.
+      # So the question asked here is the INSTALLER'S own: the user path below is uv's
+      # (`uv add invisible-core`), so the step sits after uv is installed and asks uv -
+      # `uv pip compile` of `invisible-core==X`, no cache, nothing installed - and goes on only
+      # after it answered yes three times in a row, 15 s apart (one yes proves that one request
+      # saw the version, not that the next is served by the same node of the index); a no
+      # in between starts the count again, and one call that does not answer in two
+      # minutes is a no. Bounded at ten minutes: a forgotten publish still fails, and it
+      # fails HERE, saying that the index does not have the version, instead of a step
+      # later as a test that compares two versions.
       #
       # Only on the ledger pull request. A scheduled or dispatched run is not
       # racing anything, and a wait there would hide a real absence behind ten
@@ -209,7 +230,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import os, subprocess, sys, tempfile, time, tomllib
+          import json, os, subprocess, sys, time, tomllib
           meta = tomllib.load(open("pyproject.toml", "rb"))["project"]
           dist = meta["name"]
           # NOT meta["version"]. This package declares `dynamic = ["version"]` -
@@ -238,40 +259,31 @@ jobs:
           deadline = time.monotonic() + 600
           deadline = min(deadline, time.monotonic() + float(os.environ.get("INDEX_WAIT_SECONDS", "600")))
           poll = float(os.environ.get("INDEX_WAIT_POLL", "15"))
-          n = 0
+          need = int(os.environ.get("INDEX_WAIT_CONFIRMATIONS", "3"))
+          call_limit = float(os.environ.get("INDEX_WAIT_CALL_SECONDS", "120"))
+          uv = json.loads(os.environ.get("INDEX_WAIT_UV", '["uv"]'))
+          n = streak = 0
           said = ""
           while True:
               n += 1
-              r = subprocess.run([sys.executable, "-m", "pip", "download", "--no-deps", "--no-cache-dir",
-                                  "--disable-pip-version-check", "--quiet", "-d", tempfile.mkdtemp(),
-                                  f"{dist}=={version}"], capture_output=True, text=True)
-              if r.returncode == 0:
-                  print(f"::notice::pip downloads {dist} {version} from the index (attempt {n})")
+              try:
+                  r = subprocess.run(uv + ["pip", "compile", "-", "--no-deps", "--no-cache", "--quiet"],
+                                     input=f"{dist}=={version}\n", capture_output=True, text=True, timeout=call_limit)
+                  ok = r.returncode == 0
+                  said = (r.stderr.strip().splitlines() or [""])[-1]
+              except subprocess.TimeoutExpired:
+                  ok, said = False, f"uv did not answer within {call_limit:.0f} s"
+              streak = streak + 1 if ok else 0
+              if streak >= need:
+                  print(f"::notice::uv resolves {dist} {version} from the index, {need} times in a row (attempt {n})")
                   sys.exit(0)
-              said = (r.stderr.strip().splitlines() or [""])[-1]
               if time.monotonic() >= deadline:
                   minutes = int(min(600.0, float(os.environ.get("INDEX_WAIT_SECONDS", "600"))) // 60) or 1
                   print(f"::error::the index does not have {dist} {version} yet, after {minutes} minutes "
-                        f"and {n} attempts (pip said: {said})")
+                        f"and {n} attempts, {streak} of {need} confirmations in a row (uv said: {said})")
                   sys.exit(1)
               time.sleep(poll)
           PY
-
-      # The README's way in is uv, so the user path is uv's: installed the way
-      # its own installer puts it, which is what the README's reader runs. A
-      # venv uv makes has no pip in it, and that is the environment under test.
-      - name: uv, from its own installer (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: uv, from its own installer (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: The user path, end to end
         env:
