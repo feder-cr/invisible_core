@@ -92,7 +92,14 @@ _READ_THROUGH_A_PARAMETER: Dict[str, Tuple[str, str]] = {
     # next line - a call split over two lines, which the reader scan does not join.
     "app.releaseNotesURL.aboutDialog":
         (STR, "browser/base/content"),
+    # TRRService.cpp: Preferences::GetCString(TRR_PREF("bootstrapAddr"), ...), the name built by a macro from "network.trr." and
+    # the suffix, so it is written nowhere whole (the DoH provider the session declares once; the address of the DoH host).
+    "network.trr.bootstrapAddr":
+        (STR, "netwerk/dns"),
 }
+
+#: What the "reader is still there" test searches for when the name is not written whole in the code: the macro that builds it.
+_WRITTEN_AS: Dict[str, str] = {"network.trr.bootstrapAddr": 'TRR_PREF("bootstrapAddr")'}
 
 #: Readers that build the name from a branch and a suffix, so the full name is
 #: written nowhere: GfxInfoBase reads BLOCKLIST_PREF_BRANCH "gfx.blacklist." plus
@@ -292,6 +299,8 @@ def _emitted(monkeypatch) -> Dict[str, list]:
 
     def add(composed):
         for k, v in composed.items():
+            if k.startswith("invisible.server."):
+                continue        # a key of the server (the keyboard layout, the seed, the budget): it is taken out before the engine
             values = out.setdefault(k, [])
             if v not in values:
                 values.append(v)
@@ -362,7 +371,7 @@ def _names_in_directory(name: str, directory: str):
 @pytest.mark.parametrize("name", sorted(_READ_THROUGH_A_PARAMETER))
 def test_every_hand_typed_reader_is_still_there(name):
     kind, directory = _READ_THROUGH_A_PARAMETER[name]
-    assert _names_in_directory(name, directory), (
+    assert _names_in_directory(_WRITTEN_AS.get(name, name), directory), (
         "no code file in %s names %s at %s: the hand-typed reader is gone, so the "
         "entry is a type nobody reads" % (directory, name, _SOURCE.commit))
 
