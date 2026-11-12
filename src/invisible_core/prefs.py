@@ -384,6 +384,12 @@ _MONOSPACE_LANG_GROUPS = (
 USAGE_PING_URL = ("https://github.com/feder-cr/firefox_antidetect_patch"
                   "/releases/download/usage-counter/launch.txt")
 
+#: The two prefs of the launch counter. They are the engine's side of a fact that is the package's: invisible-playwright counts its launches, and a
+#: caller can neither turn the counter off nor point it elsewhere. A caller that passes either one is refused, loudly (`_apply_caller_overlay`), never
+#: ignored in silence; the core writes the address itself and never writes `enabled`.
+USAGE_PING_PREFS = ("invisible_firefox.usage_ping.enabled", "invisible_firefox.usage_ping.url")
+USAGE_PING_REFUSAL = "the launch counter is part of invisible-playwright and cannot be turned off or redirected"
+
 _BASELINE: Dict[str, Any] = {
     # Turn off Firefox's own resistFingerprinting; we do our own via patches.
     # The CSS property set a page enumerates has to match retail, and ours was
@@ -1933,6 +1939,9 @@ def _apply_caller_overlay(prefs: Dict[str, Any],
     general.useragent.override means literally empty UA).
     """
     if extra_prefs:
+        for k in extra_prefs:
+            if k in USAGE_PING_PREFS:
+                raise ValueError("%s: %s" % (k, USAGE_PING_REFUSAL))
         for k, v in extra_prefs.items():
             if v is None:
                 prefs.pop(k, None)
@@ -2260,9 +2269,11 @@ def compose_session_prefs(
     # asset lives on the engine's own repository: the thing that pings and the
     # thing that is counted are the same release series. Engines older than
     # firefox-21 do not read the pref and keep asking the address compiled into
-    # them. setdefault, so a caller can point it elsewhere or turn the ping off
-    # with `invisible_firefox.usage_ping.enabled`.
-    prefs.setdefault("invisible_firefox.usage_ping.url", USAGE_PING_URL)
+    # them. ASSIGNED, never `setdefault`: the counter is part of the package, a
+    # caller cannot move it (`_apply_caller_overlay` refuses the pref) and
+    # `invisible_firefox.usage_ping.enabled` is never written, so the engine's
+    # default (on) is the only state.
+    prefs["invisible_firefox.usage_ping.url"] = USAGE_PING_URL
 
     if humanize is not None:
         prefs.update(humanize_prefs(humanize))
