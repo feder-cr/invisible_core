@@ -181,7 +181,10 @@ def hook_config(root: Path) -> Dict[str, object]:
         raise HookConfigError(
             f"[tool.invisible.hooks] declares {', '.join(unknown)}, which "
             f"nothing reads. Known keys: {', '.join(sorted(_DEFAULTS))}. A "
-            f"misspelt key is a gate whose author believes it is configured.")
+            f"misspelt key is a gate whose author believes it is configured. "
+            f"Or the installed invisible-core is older than this repository's "
+            f"pyproject and does not know the key yet: upgrade it (or move the "
+            f"`invisible-core==` pin to a release that has it).")
 
     cfg = dict(_DEFAULTS)
     cfg.update(declared)
