@@ -17,7 +17,6 @@ import pytest
 
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import (
-    _LINUX_XVFB_WORKAROUNDS,
     _WIN_VIRT_DESKTOP_WORKAROUNDS,
     translate_profile_to_prefs,
 )
@@ -46,5 +45,4 @@ def test_webgl_is_declared_ok_on_every_host(monkeypatch, platform, virtual_displ
 
 def test_no_platform_table_brings_them_back():
     for name in ("webgl.force-enabled", "gfx.blacklist.webgl.angle"):
-        assert name not in _LINUX_XVFB_WORKAROUNDS
         assert name not in _WIN_VIRT_DESKTOP_WORKAROUNDS

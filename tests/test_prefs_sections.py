@@ -50,7 +50,6 @@ def test_the_caller_overlay_can_delete_a_pref_entirely(profile):
 
 
 @pytest.mark.parametrize("platform,table", [
-    ("linux", "_LINUX_XVFB_WORKAROUNDS"),
     ("win32", "_WIN_VIRT_DESKTOP_WORKAROUNDS"),
 ])
 def test_the_platform_workarounds_never_take_a_choice_away(

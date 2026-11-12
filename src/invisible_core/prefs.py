@@ -1042,23 +1042,6 @@ _BASELINE: Dict[str, Any] = {
 
 
 # ──────────────────────────────────────────────────────────────────────
-#  Linux-only Xvfb workarounds - the Linux Firefox build under Xvfb
-#  cannot run WebRender (`ConnectToCompositor` retries forever). We
-#  disable WebRender + force WebGL through the GL software path so
-#  webgl_basics / webgl_extensions still report.
-# ──────────────────────────────────────────────────────────────────────
-
-_LINUX_XVFB_WORKAROUNDS: Dict[str, Any] = {
-    "gfx.webrender.all":                       False,
-    # `gfx.webrender.force-disabled` was here and no file of the engine reads
-    # it ([B171], tests/test_pref_types.py). What this table still does is
-    # A12 of 28-valori-dell-host.md, for the canvas phase.
-    # `webgl.force-enabled` was here, then in _BASELINE for every host until
-    # 2026-11-01: the engine now answers the blocklist from zoom.stealth.gfx.feature_status.
-    # webgl.software-rendering-enabled / webgl.force-layers-readback removed in FF150.
-}
-
-# ──────────────────────────────────────────────────────────────────────
 #  Windows hidden-desktop workarounds - when headless=True on Windows,
 #  Firefox is CREATED on a fresh Win32 desktop (`_headless._WindowsVirtualDesktop`,
 #  named in `STARTUPINFO.lpDesktop` by the wrapper's spawner). Two of the
@@ -1918,10 +1901,9 @@ def _apply_extension_lists(prefs: Dict[str, Any], persona) -> None:
 
 def _apply_platform_workarounds(prefs: Dict[str, Any], *, virtual_display: bool) -> None:
     """`setdefault`, deliberately: anything a section above chose already wins."""
-    # Linux Xvfb workarounds (no-op on Windows).
-    if sys.platform.startswith("linux"):
-        for k, v in _LINUX_XVFB_WORKAROUNDS.items():
-            prefs.setdefault(k, v)
+    # No Linux table. It held `gfx.webrender.all=False`, the engine's own default, which does nothing: WebRender is mandatory in 159 and on
+    # llvmpipe `gfx.webrender.reject-software-driver` (true on GTK) is what sends it to software WebRender. The reason it carried
+    # ("`ConnectToCompositor` retries forever under Xvfb") named a function that is not in 159's gfx/ or widget/. A pref is declared once and only if it does something.
 
     # Windows virtual-desktop workarounds (headless=True on Windows).
     if virtual_display and sys.platform == "win32":
