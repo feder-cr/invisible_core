@@ -544,8 +544,8 @@ def main(
                 _say(f"REFUSED - the lint gate ({cfg['lint']}) needs ruff, and "
                      f"{py} cannot import it. A gate that cannot check must not "
                      f"pass.", err=True)
-                _say(f"Install it there: {py} -m pip install ruff   (or the dev "
-                     f"extras of this repository), or point INVISIBLE_GATE_PYTHON "
+                _say(f"Give that interpreter ruff (it is in the dev extras of "
+                     f"this repository), or point INVISIBLE_GATE_PYTHON "
                      f"at an interpreter that has it. INVISIBLE_LINT_CHECK=skip "
                      f"states on the record that this push goes out unlinted.",
                      err=True)
