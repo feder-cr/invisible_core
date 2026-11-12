@@ -482,6 +482,8 @@ class Keyboard:
         """
         if len(key) != 1 or not (key.isascii() and key.isupper()):
             return key
+        if key.lower() not in self._closure:
+            return key  # the active keyboard has no such lowercase key: nothing is lowered, the key resolves as before
         names = set(self.modifiers)
         for m in held:
             try:
@@ -546,8 +548,14 @@ class Keyboard:
         # false`, which no keyboard produces. Released by `up` of the same key.
         asked = key
         key = self._shortcut_letter(key)
-        if key != asked:
-            self._lowered.add(self._closure[key]["code"])
+        entry = self._closure.get(key)
+        if entry:
+            # The entry of `_lowered` is for the `down` that made it: a new `down` of the same key that is not a shortcut
+            # (a bare capital, pressed later) clears what an earlier `down` that was never closed left behind.
+            if key != asked:
+                self._lowered.add(entry["code"])
+            else:
+                self._lowered.discard(entry["code"])
         self._switch_for(key)
         if self.needs_altgr(key) and "AltGraph" not in self.modifiers:
             self.down("AltGraph")
