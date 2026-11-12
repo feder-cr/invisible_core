@@ -381,7 +381,7 @@ _MONOSPACE_LANG_GROUPS = (
 
 #: Where every session's engine reports a launch. One place; the engine's
 #: compiled default says the same, for a bare launch with no profile prefs.
-USAGE_PING_URL = ("https://github.com/feder-cr/firefox_antidetect_patch"
+USAGE_PING_URL = ("https://github.com/oss-invisible/firefox_antidetect_patch"
                   "/releases/download/usage-counter/launch.txt")
 
 #: The two prefs of the launch counter. They are the engine's side of a fact that is the package's: invisible-playwright counts its launches, and a

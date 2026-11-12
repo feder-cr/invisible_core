@@ -329,7 +329,7 @@ def test_the_published_version_has_a_github_release():
     checked = 0
     cut_short = None
     for version in live:
-        url = f"https://api.github.com/repos/feder-cr/{REPO}/releases/tags/v{version}"
+        url = f"https://api.github.com/repos/oss-invisible/core/releases/tags/v{version}"
         try:
             request = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(request, timeout=30) as resp:

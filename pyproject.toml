@@ -74,9 +74,9 @@ dev = ["pytest>=7", "pytest-mock>=3", "responses>=0.24", "build>=1", "ruff>=0.6"
 invisible-core = "invisible_core.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/feder-cr/invisible_core"
-Repository = "https://github.com/feder-cr/invisible_core"
-Issues = "https://github.com/feder-cr/invisible_core/issues"
+Homepage = "https://github.com/oss-invisible/core"
+Repository = "https://github.com/oss-invisible/core"
+Issues = "https://github.com/oss-invisible/core/issues"
 
 [tool.pytest.ini_options]
 markers = [

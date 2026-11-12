@@ -255,10 +255,10 @@ def test_extract_unknown_format_raises(tmp_path):
 @pytest.mark.unit
 def test_parse_owner_repo_valid():
     owner, repo = _parse_owner_repo(
-        "https://github.com/feder-cr/invisible_core/releases/download/x/y"
+        "https://github.com/oss-invisible/core/releases/download/x/y"
     )
-    assert owner == "feder-cr"
-    assert repo == "invisible_core"
+    assert owner == "oss-invisible"
+    assert repo == "core"
 
 
 @pytest.mark.unit
@@ -307,7 +307,7 @@ def test_github_token_none_when_unset(monkeypatch):
 # mechanisms, and a regression here would surface as 404 / 403 / wrong
 # binary downloaded.
 
-_INDEX = ("https://api.github.com/repos/feder-cr/firefox_antidetect_patch"
+_INDEX = ("https://api.github.com/repos/oss-invisible/firefox_antidetect_patch"
           "/releases/tags/firefox-4")
 
 
@@ -350,7 +350,7 @@ def test_resolve_asset_urls_public_url_format_is_stable(monkeypatch, no_waiting)
     monkeypatch.setattr(download.requests, "get",
                         lambda *a, **k: (_ for _ in ()).throw(requests.ConnectionError("off")))
     assert _resolve_asset_urls("firefox-4", "abc.tar.gz")[-1] == (
-        "https://github.com/feder-cr/firefox_antidetect_patch/releases/"
+        "https://github.com/oss-invisible/firefox_antidetect_patch/releases/"
         "download/firefox-4/abc.tar.gz"
     )
 
@@ -418,7 +418,7 @@ def test_resolve_asset_url_private_uses_api_with_token(monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
     api_url = (
-        "https://api.github.com/repos/feder-cr/firefox_antidetect_patch"
+        "https://api.github.com/repos/oss-invisible/firefox_antidetect_patch"
         "/releases/tags/firefox-4"
     )
     responses.add(
@@ -440,7 +440,7 @@ def test_resolve_asset_url_private_raises_when_asset_missing(monkeypatch):
     with the asset name in the message than to download something else."""
     monkeypatch.setenv("STEALTHFOX_GITHUB_TOKEN", "ghp_fake")
     api_url = (
-        "https://api.github.com/repos/feder-cr/firefox_antidetect_patch"
+        "https://api.github.com/repos/oss-invisible/firefox_antidetect_patch"
         "/releases/tags/firefox-4"
     )
     responses.add(
@@ -459,7 +459,7 @@ def test_resolve_asset_url_private_propagates_api_4xx(monkeypatch):
     don't swallow it silently - raise so the user sees the real reason."""
     monkeypatch.setenv("STEALTHFOX_GITHUB_TOKEN", "ghp_fake")
     api_url = (
-        "https://api.github.com/repos/feder-cr/firefox_antidetect_patch"
+        "https://api.github.com/repos/oss-invisible/firefox_antidetect_patch"
         "/releases/tags/firefox-99"
     )
     responses.add(responses.GET, api_url, status=404)
@@ -474,7 +474,7 @@ def test_resolve_asset_url_private_sends_auth_header(monkeypatch):
     a private repo returns 404 and the user thinks the release is missing."""
     monkeypatch.setenv("STEALTHFOX_GITHUB_TOKEN", "ghp_secret")
     api_url = (
-        "https://api.github.com/repos/feder-cr/firefox_antidetect_patch"
+        "https://api.github.com/repos/oss-invisible/firefox_antidetect_patch"
         "/releases/tags/firefox-4"
     )
 
@@ -584,7 +584,7 @@ def test_download_file_does_not_send_auth_for_non_api_urls(monkeypatch, tmp_path
     Sending an auth header to that URL is unnecessary and would leak the
     token in CDN access logs."""
     monkeypatch.setenv("STEALTHFOX_GITHUB_TOKEN", "ghp_secret")
-    url = "https://github.com/feder-cr/invisible_core/releases/download/firefox-4/x.zip"
+    url = "https://github.com/oss-invisible/core/releases/download/firefox-4/x.zip"
 
     captured = {}
     def callback(request):

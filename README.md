@@ -14,21 +14,21 @@ through it, an MCP server, without either depending on the other.
 
 The shared foundation used by:
 
-- **[invisible_playwright](https://github.com/feder-cr/invisible_playwright)** - the
+- **[invisible_playwright](https://github.com/oss-invisible/playwright)** - the
   Playwright automation wrapper (`InvisiblePlaywright`).
-- **[invisible_selenium](https://github.com/feder-cr/invisible_selenium)** and
-  **[invisible_puppeteer](https://github.com/feder-cr/invisible_puppeteer)** - the
+- **[invisible_selenium](https://github.com/oss-invisible/selenium)** and
+  **[invisible_puppeteer](https://github.com/oss-invisible/puppeteer)** - the
   Selenium and pyppeteer APIs on the same engine.
 
 And through it, for anyone who would rather prompt than script:
 
-- **[invisible-playwright-mcp](https://github.com/feder-cr/invisible-playwright-mcp)**
+- **[invisible-playwright-mcp](https://github.com/oss-invisible/playwright_mcp)**
   - the wrapper as an MCP server, for a client that brings its own model.
 - **[AIHawk](https://github.com/feder-cr/AIHawk)** - an interface and a model, from
   one command.
 
 The engine itself lives in
-[firefox_antidetect_patch](https://github.com/feder-cr/firefox_antidetect_patch),
+[firefox_antidetect_patch](https://github.com/oss-invisible/firefox_antidetect_patch),
 a Firefox patched at the C++ source level so the fingerprint is produced by the
 browser instead of injected into the page.
 
@@ -61,25 +61,25 @@ leaves the retail's behaviour; `True` writes the retail's value; a `browser.newt
 
 Which surfaces a browser fingerprint is made of, what each one gives away, and why
 consistency between them matters more than any single value, is written up at
-**[the invisible_playwright wiki](https://github.com/feder-cr/invisible_playwright/wiki)**.
+**[the invisible_playwright wiki](https://github.com/oss-invisible/playwright/wiki)**.
 Those pages are about the problem, not about this package, and several of them
 record something we got wrong first. A few that document the exact fields this
 package generates:
 
-- [Pinning fingerprint fields](https://github.com/feder-cr/invisible_playwright/blob/main/docs/pinning.md) -
+- [Pinning fingerprint fields](https://github.com/oss-invisible/playwright/blob/main/docs/pinning.md) -
   how `pin=` interacts with the Bayesian sampler, and which combinations it refuses
   because they don't occur on real hardware.
-- [How to make Linux and macOS report real Windows fonts](https://github.com/feder-cr/invisible_playwright/blob/main/docs/bundled-fonts-cross-platform.md) -
+- [How to make Linux and macOS report real Windows fonts](https://github.com/oss-invisible/playwright/blob/main/docs/bundled-fonts-cross-platform.md) -
   the font side of `generate_profile`, and why the family list is bundled rather than
   sampled from the host.
-- [Canvas and WebGL fingerprints, identical across OSes](https://github.com/feder-cr/invisible_playwright/blob/main/docs/canvas-webgl-cross-platform-consistency.md) -
+- [Canvas and WebGL fingerprints, identical across OSes](https://github.com/oss-invisible/playwright/blob/main/docs/canvas-webgl-cross-platform-consistency.md) -
   why the same seed produces a byte-identical hash regardless of what's actually
   running underneath.
-- [Playwright timezone does not match the proxy IP](https://github.com/feder-cr/invisible_playwright/blob/main/docs/timezone-proxy-mismatch.md) -
+- [Playwright timezone does not match the proxy IP](https://github.com/oss-invisible/playwright/blob/main/docs/timezone-proxy-mismatch.md) -
   the surfaces this package's geo/timezone resolution has to keep in agreement.
 
 ---
 
 <p align="center">
-  <a href="https://github.com/feder-cr/invisible_core/actions/workflows/ci.yml"><img src="https://github.com/feder-cr/invisible_core/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="https://github.com/oss-invisible/core/actions/workflows/ci.yml"><img src="https://github.com/oss-invisible/core/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
 </p>
