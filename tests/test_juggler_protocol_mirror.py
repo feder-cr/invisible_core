@@ -47,7 +47,7 @@ def test_the_generated_protocol_has_the_five_domains():
     # starts in the main frame's, across processes; the hit-target check).
     # 81 since the proxy handshake: `Browser.setNoBrowserProxy`, the explicit "this session has no proxy" that the
     # Juggler waits for (with `Browser.setBrowserProxy`) before it lets a proxied channel start.
-    # 82 since the engine after firefox-63: `Page.addBinding` (a binding of one page, for page.expose_function).
+    # 82 since firefox-63: `Page.addBinding` (a binding of one page, for page.expose_function); the published firefox-63 declares it.
     assert len(COMMANDS) == 82, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
@@ -182,3 +182,25 @@ def test_every_type_uses_only_the_eight_known_combinators():
         "the walk only visited %d type nodes: it is not descending any "
         "more, so the assertion below proves almost nothing" % visited)
     assert seen <= known, "unexpected combinators: %s" % (seen - known)
+
+
+def test_the_header_of_the_mirror_counts_what_the_mirror_holds():
+    """The header is written by the generator from the same Protocol.js as the body; a header that disagrees with the body is a
+    mirror edited by hand (63.66.0 said 81 commands over a body of 82, and the e2e job's `--check` against the pinned engine was
+    red: DRIFT)."""
+    import re
+
+    from invisible_core.juggler import protocol
+
+    found = re.search(r"Commands: (\d+)\s+Events: (\d+)", protocol.__doc__)
+    assert found, "the header has no counts"
+    assert (int(found.group(1)), int(found.group(2))) == (len(COMMANDS), len(EVENTS))
+
+
+def test_the_frame_origin_keeps_the_type_reference_of_its_optional_points():
+    """`Page.getFrameOrigin` returns `ex` and `ey` as `t.Optional(pageTypes.DOMPoint)`: the generator writes the reference
+    (`ref`) on the object the Optional wraps, and the mirror of 63.66.0, written by hand, did not."""
+    returns = COMMANDS["Page.getFrameOrigin"]["returns"]["fields"]
+    for name in ("ex", "ey"):
+        assert returns[name]["k"] == "Optional"
+        assert returns[name]["of"].get("ref") == "pageTypes.DOMPoint", returns[name]
