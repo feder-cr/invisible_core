@@ -532,7 +532,23 @@ class Actions:
         if f == self.lifecycle.main_frame:
             return point
         here = self.inj.frame_origin(f)
-        return (point[0] - here["x"], point[1] - here["y"])
+        dx, dy = point[0] - here["x"], point[1] - here["y"]
+        # ⛔ A SHIFT IS ENOUGH ONLY WHILE NOTHING TRANSFORMS THE FRAME. Under a CSS
+        # scale or skew on the `<iframe>` (or on something above it) the main
+        # frame's pixel is not the frame's pixel plus an offset, and the shift
+        # alone asked the frame about another place: `<button r1c0>` or `<html>`
+        # for a click that was aimed, and landed, on the right element. The
+        # engine says where one pixel along the frame's x and y goes in the main
+        # frame (`ex`, `ey`), and the point is taken back through that 2x2.
+        # An engine that does not send them is one that only knows the shift.
+        ex, ey = here.get("ex"), here.get("ey")
+        if not ex or not ey:
+            return (dx, dy)
+        det = ex["x"] * ey["y"] - ey["x"] * ex["y"]
+        if abs(det) < 1e-9:           # a frame flattened to a line shows no point of its own
+            return (dx, dy)
+        return ((dx * ey["y"] - dy * ey["x"]) / det,
+                (ex["x"] * dy - ex["y"] * dx) / det)
 
     def _act_on_target(self, f, element, point, *, approach, commit,
                        force: bool = False,
