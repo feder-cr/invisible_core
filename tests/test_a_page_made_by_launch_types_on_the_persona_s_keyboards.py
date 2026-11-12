@@ -78,6 +78,9 @@ def test_a_page_of_a_russian_persona_types_x_after_the_switch(russian_browser, m
         def wait_for_main_frame(self, timeout=None):
             return "main"
 
+        def wait_for_page_ready(self, timeout=None):
+            return None
+
     class _Injected:
         def __init__(self, *a, **kw):
             pass
