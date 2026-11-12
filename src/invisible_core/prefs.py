@@ -2169,6 +2169,7 @@ def compose_session_prefs(
     humanize: Any = None,
     show_cursor: Any = None,
     survive_hard_kill: bool = False,
+    preload_newtab: Optional[bool] = None,
 ) -> ComposedPrefs:
     """Every pref a session runs with, in one place.
 
@@ -2278,6 +2279,13 @@ def compose_session_prefs(
     # entirely. One composer, one order.
     prefs.update(show_cursor_prefs(
         DEFAULT_SHOW_CURSOR if show_cursor is None else show_cursor))
+    # ⛔ THE ONE DEFAULT THAT STAYS THE RETAIL'S. A retail Firefox keeps a New Tab page preloaded in a process of its own
+    # (a privileged-about process, about 200 MB, and with it a Mozilla site's process): that is what a page's machine looks like,
+    # so the core writes nothing by default. `preload_newtab=False` is a DECLARATION of the caller, asked for by name: it writes
+    # `browser.newtab.preload` false and neither process is born. `True` says the retail's value out loud. A pref of the user's
+    # own (`extra_prefs`) wins over both, as for every other layer.
+    if preload_newtab is not None:
+        prefs.setdefault("browser.newtab.preload", bool(preload_newtab))
     if survive_hard_kill:
         # A persistent profile can be hard-killed - a manager Stop, or a kill
         # mid-startup on a rapid relaunch. Keep Firefox from counting that as a
