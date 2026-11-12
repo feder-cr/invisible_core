@@ -69,3 +69,27 @@ SETTINGS = (ENGINE_DIR, CACHE_DIR, DOWNLOAD_DEADLINE, GITHUB_TOKEN_OWN,
 HANDOFFS = (CORE_AUTOFIX_ATTEMPTED, SESSION_TOKEN, DESKTOP)
 #: Everything the library reads from the environment.
 READ = SETTINGS + HANDOFFS
+
+# --- the engine's MOZ_* variables: what passes, and nothing else -------------
+#
+# The engine reads hundreds of `MOZ_*` variables, and a good part of them change
+# what a page can read: whether ICE runs in the socket process
+# (`MOZ_DISABLE_SOCKET_PROCESS`), the process model, the sandbox, the GL path,
+# the occlusion tracking. A value of the HOST in one of them would be a value a
+# page reads that came from the host, which no declaration of the core covers
+# (the prefs are locked, the environment was not). So `launch.build_launch_env`
+# drops every `MOZ_*` of the environment it starts from, whatever its source
+# (`os.environ` or the caller's `base_env`), except these two lists. They are
+# tuples on purpose: they are not variables the library READS (`READ`), they are
+# the whole of what the engine's environment may carry of the `MOZ_` family.
+
+#: Written by the core, always, over whatever the caller's environment says
+#: (`launch._DISPLAY_BACKEND`, `launch._NO_CRASH_REPORTER`).
+MOZ_SET_BY_THE_CORE = ("MOZ_ENABLE_WAYLAND", "MOZ_CRASHREPORTER_DISABLE")
+#: Diagnostics no page reads: the engine's log (`xpcom/base/Logging.cpp`;
+#: `MOZ_LOG_MODULES` is its deprecated name for `MOZ_LOG`) and the folder some
+#: of its tests write to. They change what the engine WRITES to a file, never
+#: what a page can read, and the measurements of the studies use them.
+MOZ_DIAGNOSTICS = ("MOZ_LOG", "MOZ_LOG_FILE", "MOZ_LOG_MODULES", "MOZ_UPLOAD_DIR")
+#: Everything of the `MOZ_` family the engine's environment may carry.
+MOZ_PASSED = MOZ_SET_BY_THE_CORE + MOZ_DIAGNOSTICS

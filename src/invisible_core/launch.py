@@ -124,6 +124,22 @@ _DISPLAY_BACKEND = {"MOZ_ENABLE_WAYLAND": "0", "GDK_BACKEND": "x11"}
 _NO_CRASH_REPORTER = {"MOZ_CRASHREPORTER_DISABLE": "1"}
 
 
+def _without_the_hosts_moz(env: Dict[str, str]) -> Dict[str, str]:
+    """`env` without any `MOZ_*` variable outside `environment.MOZ_PASSED`.
+
+    "No value a page reads comes from the host": the prefs are locked, the
+    environment of the engine was not, and `MOZ_DISABLE_SOCKET_PROCESS=1` in the
+    shell that starts the library moved ICE out of the socket process. The rule
+    is the same for `os.environ` and for the `base_env` of a caller (an A/B
+    harness that wants a variable names it in `environment.MOZ_DIAGNOSTICS`, or
+    the variable is not one a session may carry). Names compare in upper case:
+    on Windows the environment is case-insensitive, and `moz_log` is `MOZ_LOG`.
+    """
+    passed = frozenset(environment.MOZ_PASSED)
+    return {k: v for k, v in env.items()
+            if not k.upper().startswith("MOZ_") or k.upper() in passed}
+
+
 def build_launch_env(
     prefs: Dict[str, Any],
     *,
@@ -181,7 +197,7 @@ def build_launch_env(
             "engine reads the session's zone from juggler.timezone.override, not "
             "from TZ. It will be removed in the next release.",
             DeprecationWarning, stacklevel=2)
-    env = dict(os.environ if base_env is None else base_env)
+    env = _without_the_hosts_moz(dict(os.environ if base_env is None else base_env))
     if manifest_path is not None:
         # An already-set value in base_env wins, same rule as the network declaration:
         # an A/B harness has to be able to point this somewhere else.
