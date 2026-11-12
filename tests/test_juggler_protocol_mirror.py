@@ -45,7 +45,10 @@ def test_the_generated_protocol_has_the_five_domains():
     # parent), both for invisible_selenium.
     # 80 since firefox-62: `Page.getFrameOrigin` (where the viewport of a frame
     # starts in the main frame's, across processes; the hit-target check).
-    assert len(COMMANDS) == 80, "commands: %d" % len(COMMANDS)
+    # 81 since the proxy handshake: `Browser.setNoBrowserProxy`, the explicit "this session has no proxy" that the
+    # Juggler waits for (with `Browser.setBrowserProxy`) before it lets a proxied channel start.
+    # 82 since the engine after firefox-63: `Page.addBinding` (a binding of one page, for page.expose_function).
+    assert len(COMMANDS) == 82, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
 
@@ -73,6 +76,16 @@ def test_the_commands_the_client_will_use_are_declared():
     # The engine no longer builds `input`/`change` itself: a client still
     # asking for them would be refused at the first `select_option`.
     assert "Page.dispatchTrustedInputEvents" not in COMMANDS
+
+
+def test_both_proxy_commands_declare_the_measured_udp_exit():
+    """The proxy declaration carries the UDP exit the core measured (`_udp_exit`): an optional `udp`, one of three
+    words. The engine is a closed world, so a command sent with `udp` before the field is declared is REFUSED."""
+    for name in ("Browser.setBrowserProxy", "Browser.setContextProxy"):
+        field = COMMANDS[name]["params"]["fields"]["udp"]
+        assert field == {"k": "Optional",
+                         "of": {"k": "Enum", "values": ["coherent", "no", "unmeasured"]}}, name
+    assert len(COMMANDS) == 82, "the field adds no command"
 
 
 def test_every_protocol_name_this_package_writes_is_declared():

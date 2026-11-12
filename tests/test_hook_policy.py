@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from typing import Sequence
@@ -940,3 +941,162 @@ def test_english_false_turns_the_language_gate_off_and_says_so(tmp_path, capsys)
     assert code == 0
     assert "language" in line.split("(SKIPPED:")[1], line
     assert "language" not in line.split("(SKIPPED:")[0], line
+
+
+# ------------------------------------------------------------------------ lint
+#
+# A gate that mirrors a CI step. The incident: a test file with F811 - a test
+# argument named like an imported fixture - passed this hook and turned the CI
+# `tests` job red on a release branch. The hook ran pytest, which does not look
+# at that, while CI ran ruff, which does. The first four tests run the REAL ruff
+# in-process on a real repository (ruff is in the `dev` extras, as CI installs
+# them); the rest drive the decision with a recording runner.
+
+_F811 = (
+    "from conftest_like import a_fixture\n"       # line 1: imported, then
+    "\n"
+    "\n"
+    "def test_uses_it(a_fixture):\n"               # line 4: shadowed by the argument
+    "    assert a_fixture\n"
+)
+_NO_PYTEST_NO_PIN_LINT = _NO_PYTEST_NO_PIN + chr(10) + "english = false" + chr(10)
+
+
+def _lint_repo(tmp_path, lint_line: str):
+    return make_repo(tmp_path, block=_NO_PYTEST_NO_PIN_LINT + lint_line,
+                     workbench=False)
+
+
+def _real_lint(root, **env):
+    """The policy with the default runner and the interpreter running this test."""
+    return hooks.main(root=root, push_refs="", env=env, python=sys.executable)
+
+
+def test_a_known_bad_file_is_refused_with_its_file_and_line(tmp_path, capfd):
+    root = _lint_repo(tmp_path, 'lint = "F821,F811,F601"')
+    (root / "test_bad.py").write_text(_F811, encoding="utf-8")
+    code = _real_lint(root)
+    seen = capfd.readouterr()
+    assert code == 1
+    assert "test_bad.py:4" in seen.out + seen.err, seen
+    assert "F811" in seen.out + seen.err
+    assert "push proceeding" not in seen.out
+
+
+def test_a_clean_repo_passes_the_lint_gate_and_the_summary_names_it(tmp_path, capfd):
+    root = _lint_repo(tmp_path, 'lint = ["F821", "F811", "F601"]')
+    (root / "test_ok.py").write_text("def test_it():\n    assert True\n",
+                                     encoding="utf-8")
+    code = _real_lint(root)
+    out = capfd.readouterr().out
+    line = [row for row in out.splitlines() if "push proceeding" in row][0]
+    assert code == 0
+    assert "lint" in line.split("(SKIPPED:")[0], line
+
+
+def test_the_gate_selects_only_the_declared_rules(tmp_path, capfd):
+    """F811 is not declared, so a file that has only that violation passes: the
+    gate runs the repository's rules, not a list of its own."""
+    root = _lint_repo(tmp_path, 'lint = "F821"')
+    (root / "test_bad.py").write_text(_F811, encoding="utf-8")
+    assert _real_lint(root) == 0
+
+
+def test_a_repo_without_the_key_is_unchanged(tmp_path, capsys):
+    root = make_repo(tmp_path, block=_NO_PYTEST_NO_PIN_LINT, workbench=False)
+    (root / "test_bad.py").write_text(_F811, encoding="utf-8")
+    code, run = run_policy(root)
+    line = [row for row in capsys.readouterr().out.splitlines()
+            if "push proceeding" in row][0]
+    assert code == 0
+    assert run.calls == [], "a gate ran that the repository never declared"
+    assert "lint" not in line, line
+
+
+class _Recording:
+    """Answers per command shape, so the ruff probe and the ruff run differ."""
+
+    def __init__(self, probe: int = 0, check: int = 0):
+        self.probe, self.check, self.calls = probe, check, []
+
+    def __call__(self, cmd, cwd):
+        cmd = [str(c) for c in cmd]
+        self.calls.append(cmd)
+        if cmd[1:2] == ["-c"]:
+            return self.probe
+        if cmd[1:4] == ["-m", "ruff", "check"]:
+            return self.check
+        return 0
+
+
+def test_missing_ruff_refuses_and_says_how_to_fix_it(tmp_path, capsys):
+    root = _lint_repo(tmp_path, 'lint = "F821,F811,F601"')
+    run = _Recording(probe=1)
+    code, _ = run_policy(root, run=run)
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "needs ruff" in err and "dev extras" in err and "INVISIBLE_GATE_PYTHON" in err, err
+    assert "INVISIBLE_GATE_PYTHON" in err
+    assert not any(c[1:4] == ["-m", "ruff", "check"] for c in run.calls), (
+        "the check ran although ruff could not be found")
+
+
+def test_the_command_is_the_one_the_ci_step_runs(tmp_path):
+    root = _lint_repo(tmp_path, 'lint = "F821,F811,F601"')
+    run = _Recording()
+    assert run_policy(root, run=run)[0] == 0
+    assert run.calls[-1] == ["PY", "-m", "ruff", "check", "--select",
+                             "F821,F811,F601", "--no-cache", "--output-format",
+                             "concise", "."]
+
+
+def test_ruff_failing_to_run_is_not_a_pass(tmp_path, capsys):
+    """Exit 2 is ruff's own error (a bad config), not 'violations found'; either
+    way the push does not go out, and the message does not claim violations."""
+    root = _lint_repo(tmp_path, 'lint = "F821"')
+    code, _ = run_policy(root, run=_Recording(check=2))
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "did not run to a verdict" in err and "found violations" not in err
+
+
+def test_skipping_the_lint_says_so_and_never_claims_it(tmp_path, capsys):
+    root = _lint_repo(tmp_path, 'lint = "F821"')
+    run = _Recording(probe=1)               # would refuse, were it not skipped
+    code, _ = run_policy(root, run=run, INVISIBLE_LINT_CHECK="skip")
+    out = capsys.readouterr().out
+    line = [row for row in out.splitlines() if "push proceeding" in row][0]
+    assert code == 0 and run.calls == []
+    assert "lint" in line.split("(SKIPPED:")[1], line
+    assert "lint" not in line.split("(SKIPPED:")[0], line
+
+
+@pytest.mark.parametrize("value", ['"F811 F821"', '["--fix"]', "true", '"f811"', "3"])
+def test_a_value_that_is_not_a_list_of_rule_codes_is_refused(tmp_path, capsys, value):
+    root = _lint_repo(tmp_path, f"lint = {value}")
+    with pytest.raises(hooks.HookConfigError, match="ruff rule codes"):
+        hooks.hook_config(root)
+    assert run_policy(root)[0] == 1
+
+
+@pytest.mark.parametrize("value, expected", [
+    ('"F821,F811,F601"', "F821,F811,F601"),
+    ('["F821", "F811", "F601"]', "F821,F811,F601"),
+    ('"F821, F811"', "F821,F811"),
+    ("false", ""),
+    ('""', ""),
+])
+def test_the_key_comes_out_as_the_select_string(tmp_path, value, expected):
+    assert hooks.hook_config(_lint_repo(tmp_path, f"lint = {value}"))["lint"] == expected
+
+
+def test_an_unknown_key_also_says_the_installed_core_may_be_older(tmp_path, capsys):
+    """A repository that declares a key a newer core added is refused by an older
+    core as a typo. The refusal keeps its typo wording and adds the other cause,
+    with the fix, because the reader of that line has no way to tell them apart."""
+    root = make_repo(tmp_path, block="pytest = false\npin = false\nsome_new_gate = true")
+    assert run_policy(root)[0] == 1
+    err = capsys.readouterr().err
+    assert "nothing reads" in err and "misspelt key" in err
+    assert "installed invisible-core is older" in err
+    assert "upgrade it" in err and "pin" in err

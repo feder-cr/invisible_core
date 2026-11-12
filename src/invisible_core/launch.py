@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from . import environment
 from ._headless import DESKTOP_ENV
+from ._webrtc_network import network_to_declare
 
 
 def _pref_literal(name: str, v: Any) -> str:
@@ -127,13 +128,11 @@ def build_launch_env(
     prefs: Dict[str, Any],
     *,
     timezone: Optional[str] = None,
-    #: The address to DECLARE as srflx, or None to declare nothing. ⛔ It is NOT
-    #: the exit IP, and the old name (`egress_ip`) made it look like one: it is
-    #: the decision `SessionGeo.srflx_to_declare` makes by looking at what the
-    #: exit is CAPABLE of. The twin in the wrapper (`_session.build_env`) carries
-    #: the same name on purpose: there were already two landing points, and two
-    #: different names would have hidden that they are the same thing.
-    srflx_declared: Optional[str] = None,
+    #: The host network to DECLARE (`_webrtc_network.network_to_declare`); every
+    #: session declares it, with or without a proxy. None only for a caller that builds
+    #: an environment by hand.
+    #: A value already in base_env wins.
+    network_declared: Optional[str] = None,
     manifest_path: "Optional[str | os.PathLike[str]]" = None,
     base_env: Optional[Dict[str, str]] = None,
     #: What the session's hidden surface wants in the browser's environment
@@ -153,8 +152,9 @@ def build_launch_env(
     and the hidden-surface half of the contract lived only in the twin, so a
     consumer on this builder could not express a removal at all.
 
-    STEALTHFOX_WEBRTC_PUBLIC_IP feeds nICEr the proxy egress IP; an
-    already-set value in base_env wins.
+    STEALTHFOX_WEBRTC_NETWORK is the one WebRTC variable: the host network a
+    session declares, proxied or not (``network_declared``); an already-set value in
+    base_env wins.
 
     No ``TZ``: the engine takes the session's zone from the prefs
     (``juggler.timezone.override``) in every realm, and ``timezone=`` is
@@ -183,18 +183,11 @@ def build_launch_env(
             DeprecationWarning, stacklevel=2)
     env = dict(os.environ if base_env is None else base_env)
     if manifest_path is not None:
-        # An already-set value in base_env wins, same rule as the WebRTC IP:
+        # An already-set value in base_env wins, same rule as the network declaration:
         # an A/B harness has to be able to point this somewhere else.
         env.setdefault(environment.FONT_MANIFEST, str(manifest_path))
-    webrtc_ip = env.get(environment.WEBRTC_PUBLIC_IP) or srflx_declared
-    if webrtc_ip:
-        env[environment.WEBRTC_PUBLIC_IP] = webrtc_ip
-        # SOLO dietro un proxy. Un Firefox retail dual-stack emette un srflx
-        # IPv6 con l'indirizzo globale VERO in chiaro (l'mDNS offusca solo gli
-        # hosts): behind an IPv4 proxy that would be a leak and an inconsistency,
-        # without a proxy it is simply what an ordinary browser does. Measured
-        # 2026-08-25: retail 6 candidates, us 3, because we always filtered.
-        env[environment.WEBRTC_DISABLE_IPV6] = "1"
+    if network_declared:
+        env.setdefault(environment.WEBRTC_NETWORK, network_declared)
     env.update(_DISPLAY_BACKEND)
     env.update(_NO_CRASH_REPORTER)
     env.pop(DESKTOP_ENV, None)
@@ -344,6 +337,13 @@ class LaunchPlan:
     #: by guessing which firefox is theirs. Defaulted so that anything
     #: constructing a LaunchPlan positionally keeps working.
     session_token: SessionToken = field(default_factory=SessionToken)
+    #: The position this session declares, as the ``geolocation`` object of
+    #: ``Browser.setGeolocationOverride`` (exactly latitude, longitude, accuracy),
+    #: or None when the exit has no point. This path launches the binary with
+    #: subprocess and holds no protocol connection, so it cannot send the
+    #: command: the consumer that drives the browser sends it for every context
+    #: it creates (the wrapper does, from ``SessionGeo.geolocation_override``).
+    geolocation: Optional[Dict[str, float]] = None
 
 
 def build_launch_plan(
@@ -383,6 +383,9 @@ def build_launch_plan(
     # exists only for whoever comes through the wrapper. The default is False as
     # it is over there: the point is the default, not the switch.
     show_cursor: Optional[bool] = None,
+    # Where a SOCKS5 proxy's UDP exit is measured from (`"ip:port"` IPv4 literals; None = the two public defaults).
+    # Python only: nothing of it reaches the browser. (This path takes no proxy; the keyword is validated all the same.)
+    udp_stun_servers: Optional[List[str]] = None,
 ) -> LaunchPlan:
     """The single direct-launch entry point (no Playwright, no Qt).
 
@@ -434,7 +437,8 @@ def build_launch_plan(
     # decides the language, in one call; raises behind a dead proxy
     # (fail-early, by design). No "auto" branch of its own here: the language
     # is the geo decision's, like the timezone.
-    geo = prepare_session_geo(timezone, proxy, locale)
+    geo = prepare_session_geo(timezone, proxy, locale, seed=seed,
+                               udp_stun_servers=udp_stun_servers)
     fp = generate_profile(seed=seed, pin=pin)
     # One composition for all three entry points (prefs.py). This path takes the
     # proxy layer and the hard-kill layer; it does NOT write the humanize prefs,
@@ -446,7 +450,7 @@ def build_launch_plan(
     ).prefs
     pdir = Path(profile_dir)
     write_user_js(pdir, prefs)
-    env = build_launch_env(prefs, srflx_declared=geo.srflx_to_declare())
+    env = build_launch_env(prefs, network_declared=network_to_declare(seed))
     argv = [binary, "-no-remote", "-profile", str(pdir)]
     argv += list(extra_args or [])
     if url:
@@ -456,4 +460,5 @@ def build_launch_plan(
     # part of the plan is a token somebody has to remember to add to the env.
     token = SessionToken.mint()
     return LaunchPlan(binary=binary, profile_dir=pdir, argv=argv,
-                      env=token.stamp(env), session_token=token)
+                      env=token.stamp(env), session_token=token,
+                      geolocation=geo.geolocation_override())

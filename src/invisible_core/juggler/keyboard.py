@@ -326,6 +326,9 @@ class Keyboard:
         #: of the same key releases it; the same for AltGraph.
         self._implicit_shift: set = set()
         self._implicit_altgr: set = set()
+        #: The codes `down` sent as the lowercase key of a shortcut (see `_shortcut_letter`), so `up` of the same
+        #: name releases that key even if Control was let go first.
+        self._lowered: set = set()
         #: The input profiles this persona has (`profiles_for`), the first one
         #: active: which key a character is, and with which modifiers. Windows'
         #: own form (LANGID:KLID joined by semicolons), or KLIDs joined by
@@ -463,6 +466,34 @@ class Keyboard:
         for _ in range(ctrl):
             self._chord("ControlLeft")
 
+    def _shortcut_letter(self, key: str, held=()) -> str:
+        """A capital letter under Control or Meta (and no Shift) is that letter's own key, lowercase.
+
+        ⛔ `press("Control+A")` IS Control+A, NOT Control+Shift+A. The name `A`
+        is a character that only exists with Shift (`needs_shift`), and the
+        floor of B270 held Shift for it, so the browser got Control+Shift+A:
+        `Control+A` did not select all, `Control+C` did not copy, on every
+        field of every page, while `Control+a` worked. A hand that presses the
+        select-all shortcut does not hold Shift, and the key reports `key: "a"`
+        (a capital would need Shift or CapsLock). `Control+Shift+A` is still
+        what it says: with Shift held, by the caller or by `held`, nothing
+        changes. Only A-Z; any other character that needs Shift is a symbol and
+        keeps its Shift.
+        """
+        if len(key) != 1 or not (key.isascii() and key.isupper()):
+            return key
+        if key.lower() not in self._closure:
+            return key  # the active keyboard has no such lowercase key: nothing is lowered, the key resolves as before
+        names = set(self.modifiers)
+        for m in held:
+            try:
+                names.add(self.describe(m)["key"])
+            except UnknownKey:
+                pass  # the press raises for it where it sends the key
+        if "Shift" in names or not names & {"Control", "Meta"}:
+            return key
+        return key.lower()
+
     def describe(self, key: str) -> dict:
         name = "Control" if key == "ControlOrMeta" else key
         d = self._closure.get(name)
@@ -515,6 +546,16 @@ class Keyboard:
         # this hand; this is the floor under every other way in - a raw
         # `keyboard.down("@")` - so no path can send `@` with `shiftKey:
         # false`, which no keyboard produces. Released by `up` of the same key.
+        asked = key
+        key = self._shortcut_letter(key)
+        entry = self._closure.get(key)
+        if entry:
+            # The entry of `_lowered` is for the `down` that made it: a new `down` of the same key that is not a shortcut
+            # (a bare capital, pressed later) clears what an earlier `down` that was never closed left behind.
+            if key != asked:
+                self._lowered.add(entry["code"])
+            else:
+                self._lowered.discard(entry["code"])
         self._switch_for(key)
         if self.needs_altgr(key) and "AltGraph" not in self.modifiers:
             self.down("AltGraph")
@@ -540,6 +581,11 @@ class Keyboard:
                      session=self.session, timeout=None)
 
     def up(self, key: str) -> None:
+        lower = key.lower()
+        if (len(key) == 1 and key.isascii() and key.isupper()
+                and self._closure.get(lower, {}).get("code") in self._lowered):
+            self._lowered.discard(self._closure[lower]["code"])
+            key = lower
         d = self.describe(key)
         if d["key"] in MODIFIERS:
             self.modifiers.discard(d["key"])
@@ -602,6 +648,7 @@ class Keyboard:
         # ⛔ AND ONE THAT ONLY EXISTS WITH ALTGR GETS ALTGRAPH the same way:
         # `press("@")` on an Italian keyboard is AltGr+ò, `press("{")` is
         # AltGr+Shift+è. Each held modifier has its own lead and release.
+        final = self._shortcut_letter(final, held)
         self._switch_for(final)
         holds = [m for m, needed in (("AltGraph", self.needs_altgr(final)),
                                      ("Shift", self.needs_shift(final)))

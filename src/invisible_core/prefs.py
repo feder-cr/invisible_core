@@ -384,6 +384,12 @@ _MONOSPACE_LANG_GROUPS = (
 USAGE_PING_URL = ("https://github.com/feder-cr/firefox_antidetect_patch"
                   "/releases/download/usage-counter/launch.txt")
 
+#: The two prefs of the launch counter. They are the engine's side of a fact that is the package's: invisible-playwright counts its launches, and a
+#: caller can neither turn the counter off nor point it elsewhere. A caller that passes either one is refused, loudly (`_apply_caller_overlay`), never
+#: ignored in silence; the core writes the address itself and never writes `enabled`.
+USAGE_PING_PREFS = ("invisible_firefox.usage_ping.enabled", "invisible_firefox.usage_ping.url")
+USAGE_PING_REFUSAL = "the launch counter is part of invisible-playwright and cannot be turned off or redirected"
+
 _BASELINE: Dict[str, Any] = {
     # Turn off Firefox's own resistFingerprinting; we do our own via patches.
     # The CSS property set a page enumerates has to match retail, and ours was
@@ -438,17 +444,11 @@ _BASELINE: Dict[str, Any] = {
     # obfuscate_host_addresses=true → host candidate is `<uuid>.local` mDNS,
     #   exactly like vanilla Firefox (BrowserLeaks "No Leak", Local IP "-").
     #   The mDNS-IPC hang feared on older builds does NOT reproduce on FF150.
-    # The proxy-egress srflx is injected by our C++ (srflx swap §17 + fallback
-    #   §17.B), fed the egress IP via STEALTHFOX_WEBRTC_PUBLIC_IP from
-    #   launcher._build_env (auto-discovered from the proxy).
-    # IPv6: media.peerconnection.ice.disableIPv6 is DEAD on FF150 (read by no
-    #   ICE-gathering code). The real filter is in nICEr (addrs.cpp), and since
-    #   2026-08-25 it reads ONE source: the environment variable
-    #   STEALTHFOX_WEBRTC_DISABLE_IPV6, written by `launch.build_launch_env`,
-    #   the one composer (the wrapper's `_session.build_env` delegates to it).
-    #   The pref `zoom.stealth.webrtc.disable_ipv6` is NOT written any more: the
-    #   native bridge does not read it, and a pref no C++ reads is precisely what
-    #   `test_no_orphan_prefs_in_baseline` forbids emitting.
+    # UDP and the srflx are the ENGINE's: behind a proxy it sends the STUN over the
+    #   SOCKS5 UDP layer and gathers a real srflx; the core proves and declares neither.
+    # The host network (adapter, private address, IPv6 bit) is declared ONCE, in
+    #   STEALTHFOX_WEBRTC_NETWORK (`_webrtc_network`), written by `launch.build_launch_env`.
+    #   media.peerconnection.ice.disableIPv6 is dead on FF150 (read by no ICE code).
     "media.peerconnection.enabled":                       True,
     "media.peerconnection.ice.no_host":                   False,
     "media.peerconnection.ice.default_address_only":      False,
@@ -457,23 +457,26 @@ _BASELINE: Dict[str, Any] = {
     "media.peerconnection.ice.relay_only":                False,
     "media.peerconnection.use_document_iceservers":       True,
 
-    # Proxy - route DNS through SOCKS proxies to avoid local DNS leaks.
-    #
-    # There are TWO prefs and they are not aliases. `nsProtocolProxyService`
-    # reads `socks_remote_dns` into mSOCKS4ProxyRemoteDNS and
-    # `socks5_remote_dns` into mSOCKS5ProxyRemoteDNS, and `SOCKSRemoteDNS()`
-    # picks between them by the negotiated SOCKS version. This project uses
-    # SOCKS5, so the one declared here drove the branch that never runs, and
-    # the branch that DOES run took Firefox's own compiled default.
-    #
-    # That default is `true`, so nothing leaked - which is exactly why it
-    # survived: the safe behaviour was somebody else's default rather than our
-    # declaration. An upstream flip on a rebase, or a proxy that negotiates
-    # SOCKS4, and local DNS resolution comes back with nothing here asserting
-    # otherwise. Both are declared now. Added 2026-08-09.
-    "network.proxy.socks_remote_dns":                     True,
-    "network.proxy.socks5_remote_dns":                    True,
     "network.proxy.failover_direct":                      False,
+    # Parental controls are declared off by the engine's own service; upstream still reads this cached copy once at
+    # start-up, so a profile that cached `true` would resolve names with the system resolver until the cache is rewritten.
+    "network.parental_controls_cached_state":             False,
+
+    # NAMES: the DNS-over-HTTPS PROVIDER is the core's declaration; the STATE is the engine's.
+    #   The engine (Juggler) derives `network.trr.mode` (3 behind a proxy, the default 0 without one),
+    #   `network.trr.exclude-etc-hosts` and `network.trr.excluded-domains` from the proxies it is given (the browser proxy
+    #   and every context proxy), so the core declares none of those three. The provider is one declaration for every
+    #   session: without a proxy the engine never turns TRR on, so these two keys are inert there.
+    #   Why TRR at all: a name THE PAGE chooses (`iceServers`) must not reach the resolver of the machine, and must still
+    #   resolve: the exit decides where it points. Mode 3 sends every lookup to DoH with no fallback to the system
+    #   resolver, and a DoH request is an ordinary channel, so the proxy road the session already has carries it.
+    #   `bootstrapAddr` is the address of the DoH host, so that finding it needs no DNS. 162.159.61.4 is one of the
+    #   addresses `mozilla.cloudflare-dns.com` answered with on 2026-11-11 (172.64.41.4 is the other); it is Cloudflare's
+    #   anycast and the certificate is still checked against the host name. Both are USER values on purpose: Firefox's DoH
+    #   heuristics (`DoHController`) stand down when `network.trr.mode` or `network.trr.uri` has a user value. A caller
+    #   (an e2e with a local DoH) overrides them through `extra_prefs`, which is applied last.
+    "network.trr.uri":                                    "https://mozilla.cloudflare-dns.com/dns-query",
+    "network.trr.bootstrapAddr":                          "162.159.61.4",
 
     # TLS ClientHello fingerprint - match stock Firefox byte-for-byte.
     # The Playwright/Juggler Firefox build this binary derives from re-enables
@@ -680,18 +683,18 @@ _BASELINE: Dict[str, Any] = {
     #: asked says `prompt`, and ours has never been asked - so the fix for one
     #: tell had quietly introduced a smaller one.
     #:
-    #: Nothing replaces it. The provider URL below is empty, so a call cannot
+    #: Nothing replaces it. The engine ships no network geolocation URL (its
+    #: default is empty on every OS, so the core declares none), so a call cannot
     #: reach the network even if a page makes one, and Playwright grants no
     #: permissions by default, so the call is refused exactly as it is for a
     #: user who dismisses the prompt.
-    "geo.provider.network.url":                           "",
     #: ⛔ `browser.region.network.url` and `browser.region.update.enabled` are
     #: NOT emitted any more - owner decision, 2026-08-17. It is not an
     #: oversight: it is the case where suppressing moves AWAY from retail.
     #:
     #: They are Firefox's REGION service, which has nothing to do with a page's
-    #: geolocation - that one is stopped by the line above, which stays and is
-    #: load-bearing. A standard Firefox asks for the region ONCE per session,
+    #: geolocation - that one is stopped by the engine's empty provider URL, which
+    #: stays and is load-bearing. A standard Firefox asks for the region ONCE per session,
     #: and we were doing it anyway: measured 2026-08-17, the product sends that
     #: request even with the empty pref emitted, while a bare launch with the
     #: same pref zeroes it. So we were shipping a declaration that promised
@@ -1899,15 +1902,6 @@ def _apply_render_seed(prefs: Dict[str, Any], profile: Profile) -> None:
     prefs["zoom.stealth.fpp.hw_seed"] = render_noise_seed(profile.seed)
 
 
-def _apply_webrtc_host_ip(prefs: Dict[str, Any], profile: Profile) -> None:
-    # Synthetic host ICE candidate - injected by C++ when addr_ct==0 (SOCKS5
-    # proxy suppresses all local addresses so Firefox can't gather host cands).
-    # LAN IP is seed-derived so it's consistent per session and looks like a
-    # real home router assignment (192.168.x.x range).
-    _s = profile.seed
-    prefs["zoom.stealth.webrtc.host_ip"] = f"192.168.{(_s >> 8) % 254 + 1}.{_s % 254 + 1}"
-
-
 def _apply_extension_lists(prefs: Dict[str, Any], persona) -> None:
     """Windows/mac extension list.
 
@@ -1945,6 +1939,9 @@ def _apply_caller_overlay(prefs: Dict[str, Any],
     general.useragent.override means literally empty UA).
     """
     if extra_prefs:
+        for k in extra_prefs:
+            if k in USAGE_PING_PREFS:
+                raise ValueError("%s: %s" % (k, USAGE_PING_REFUSAL))
         for k, v in extra_prefs.items():
             if v is None:
                 prefs.pop(k, None)
@@ -2004,7 +2001,6 @@ def translate_profile_to_prefs(
     _apply_voices(prefs, profile, session_locale)
     _apply_timezone(prefs, timezone)
     _apply_render_seed(prefs, profile)
-    _apply_webrtc_host_ip(prefs, profile)
     _apply_extension_lists(prefs, persona)
     _apply_platform_workarounds(prefs, virtual_display=virtual_display)
     _apply_caller_overlay(prefs, extra_prefs)
@@ -2182,6 +2178,7 @@ def compose_session_prefs(
     humanize: Any = None,
     show_cursor: Any = None,
     survive_hard_kill: bool = False,
+    preload_newtab: Optional[bool] = None,
 ) -> ComposedPrefs:
     """Every pref a session runs with, in one place.
 
@@ -2272,9 +2269,11 @@ def compose_session_prefs(
     # asset lives on the engine's own repository: the thing that pings and the
     # thing that is counted are the same release series. Engines older than
     # firefox-21 do not read the pref and keep asking the address compiled into
-    # them. setdefault, so a caller can point it elsewhere or turn the ping off
-    # with `invisible_firefox.usage_ping.enabled`.
-    prefs.setdefault("invisible_firefox.usage_ping.url", USAGE_PING_URL)
+    # them. ASSIGNED, never `setdefault`: the counter is part of the package, a
+    # caller cannot move it (`_apply_caller_overlay` refuses the pref) and
+    # `invisible_firefox.usage_ping.enabled` is never written, so the engine's
+    # default (on) is the only state.
+    prefs["invisible_firefox.usage_ping.url"] = USAGE_PING_URL
 
     if humanize is not None:
         prefs.update(humanize_prefs(humanize))
@@ -2291,6 +2290,13 @@ def compose_session_prefs(
     # entirely. One composer, one order.
     prefs.update(show_cursor_prefs(
         DEFAULT_SHOW_CURSOR if show_cursor is None else show_cursor))
+    # ⛔ THE ONE DEFAULT THAT STAYS THE RETAIL'S. A retail Firefox keeps a New Tab page preloaded in a process of its own
+    # (a privileged-about process, about 200 MB, and with it a Mozilla site's process): that is what a page's machine looks like,
+    # so the core writes nothing by default. `preload_newtab=False` is a DECLARATION of the caller, asked for by name: it writes
+    # `browser.newtab.preload` false and neither process is born. `True` says the retail's value out loud. A pref of the user's
+    # own (`extra_prefs`) wins over both, as for every other layer.
+    if preload_newtab is not None:
+        prefs.setdefault("browser.newtab.preload", bool(preload_newtab))
     if survive_hard_kill:
         # A persistent profile can be hard-killed - a manager Stop, or a kill
         # mid-startup on a rapid relaunch. Keep Firefox from counting that as a

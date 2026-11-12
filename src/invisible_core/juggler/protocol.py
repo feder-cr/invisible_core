@@ -2,7 +2,7 @@
 Do not edit by hand.
 
 Source: omni.ja!modules/juggler/protocol/Protocol.js
-Commands: 80   Events: 35
+Commands: 81   Events: 35
 
 The browser enforces this schema in a CLOSED WORLD: an undeclared field is
 REJECTED at runtime, not ignored. It therefore serves to verify what WE
@@ -103,6 +103,11 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                                        'https',
                                                                        'socks',
                                                                        'socks4']},
+                                                   'udp': {'k': 'Optional',
+                                                           'of': {'k': 'Enum',
+                                                                  'values': ['coherent',
+                                                                             'no',
+                                                                             'unmeasured']}},
                                                    'username': {'k': 'Optional',
                                                                 'of': {'k': 'String'}}},
                                         'k': 'Object'},
@@ -140,6 +145,11 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                                        'https',
                                                                        'socks',
                                                                        'socks4']},
+                                                   'udp': {'k': 'Optional',
+                                                           'of': {'k': 'Enum',
+                                                                  'values': ['coherent',
+                                                                             'no',
+                                                                             'unmeasured']}},
                                                    'username': {'k': 'Optional',
                                                                 'of': {'k': 'String'}}},
                                         'k': 'Object'},
@@ -284,6 +294,7 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                                                 'of': {'k': 'String'}}},
                                           'k': 'Object'},
                                'returns': None},
+ 'Browser.setNoBrowserProxy': {'params': None, 'returns': None},
  'Browser.setOnlineOverride': {'params': {'fields': {'browserContextId': {'k': 'Optional',
                                                                           'of': {'k': 'String'}},
                                                      'override': {'k': 'Nullable',
@@ -376,6 +387,12 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
  'Network.setRequestInterception': {'params': {'fields': {'enabled': {'k': 'Boolean'}},
                                                'k': 'Object'},
                                     'returns': None},
+ 'Page.addBinding': {'params': {'fields': {'name': {'k': 'String'},
+                                           'script': {'k': 'String'},
+                                           'worldName': {'k': 'Optional',
+                                                         'of': {'k': 'String'}}},
+                                'k': 'Object'},
+                     'returns': None},
  'Page.adoptNode': {'params': {'fields': {'executionContextId': {'k': 'String'},
                                           'frameId': {'k': 'String'},
                                           'objectId': {'k': 'Optional',
@@ -518,7 +535,15 @@ COMMANDS = {'Browser.addBinding': {'params': {'fields': {'browserContextId': {'k
                                       'k': 'Object'}},
  'Page.getFrameOrigin': {'params': {'fields': {'frameId': {'k': 'String'}},
                                     'k': 'Object'},
-                         'returns': {'fields': {'x': {'k': 'Number'},
+                         'returns': {'fields': {'ex': {'k': 'Optional',
+                                                       'of': {'fields': {'x': {'k': 'Number'},
+                                                                         'y': {'k': 'Number'}},
+                                                              'k': 'Object'}},
+                                                'ey': {'k': 'Optional',
+                                                       'of': {'fields': {'x': {'k': 'Number'},
+                                                                         'y': {'k': 'Number'}},
+                                                              'k': 'Object'}},
+                                                'x': {'k': 'Number'},
                                                 'y': {'k': 'Number'}},
                                      'k': 'Object'}},
  'Page.goBack': {'params': {'fields': {'frameId': {'k': 'String'}}, 'k': 'Object'},

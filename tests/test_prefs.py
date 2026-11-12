@@ -462,40 +462,6 @@ def test_virtual_display_workaround_absent_when_disabled(monkeypatch):
 # ──────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.unit
-def test_lan_ip_matches_192_168_pattern():
-    # LI1
-    p = generate_profile(seed=42)
-    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
-    ip = prefs["zoom.stealth.webrtc.host_ip"]
-    m = re.match(r"^192\.168\.(\d+)\.(\d+)$", ip)
-    assert m, f"unexpected LAN IP format: {ip!r}"
-    o3, o4 = int(m.group(1)), int(m.group(2))
-    assert 1 <= o3 <= 254
-    assert 1 <= o4 <= 254
-
-
-@pytest.mark.unit
-def test_lan_ip_deterministic_per_seed():
-    # LI2
-    a = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")["zoom.stealth.webrtc.host_ip"]
-    b = translate_profile_to_prefs(generate_profile(seed=42), timezone="America/New_York")["zoom.stealth.webrtc.host_ip"]
-    assert a == b
-
-
-@pytest.mark.unit
-def test_lan_ip_seed_zero_has_no_zero_octets():
-    # LI3: code adds +1 so neither dynamic octet should ever be 0.
-    p = generate_profile(seed=0)
-    prefs = translate_profile_to_prefs(p, timezone="America/New_York")
-    ip = prefs["zoom.stealth.webrtc.host_ip"]
-    octets = ip.split(".")
-    assert octets[0] == "192"
-    assert octets[1] == "168"
-    assert int(octets[2]) >= 1
-    assert int(octets[3]) >= 1
-
-
 # ──────────────────────────────────────────────────────────────────────
 #  Linux-specific tests - exercise the branches that only fire when
 #  ``sys.platform.startswith("linux")``. Patched via ``monkeypatch`` so

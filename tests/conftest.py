@@ -200,3 +200,30 @@ def _no_egress_discovery(monkeypatch, request):
                 "monkeypatch invisible_core._geo.discover_egress_ip to give it one")
 
     monkeypatch.setattr(_geo, "requests", _GeoNetwork(_geo.requests))
+
+
+@pytest.fixture(autouse=True)
+def _udp_exit_is_measured_only_through_loopback(monkeypatch, request):
+    """The sibling of the two above, for the UDP half of the exit.
+
+    `prepare_session_geo` measures a SOCKS5 proxy's UDP exit beside the TCP one (`invisible_core._udp_exit`), and a
+    hermetic test that gives it `socks5://gw.example:1080` would look the name up on the network, or wait for a
+    connection to a documentation address that never answers. So a hermetic test measures only through a gateway ON
+    LOOPBACK (the fakes of `_udp_gateway.py`); any other proxy yields an `error` outcome, i.e. `unmeasured`, without
+    a socket. An `e2e` test gets the network."""
+    if request.node.get_closest_marker("e2e"):
+        return
+    import ipaddress
+
+    from invisible_core import _udp_exit
+
+    real = _udp_exit.probe_udp_exit
+
+    def probe(endpoint, *args, **kwargs):
+        try:
+            loopback = ipaddress.ip_address(endpoint.host).is_loopback
+        except ValueError:
+            loopback = False
+        return real(endpoint, *args, **kwargs) if loopback else _udp_exit.UdpProbe("error")
+
+    monkeypatch.setattr(_udp_exit, "probe_udp_exit", probe)

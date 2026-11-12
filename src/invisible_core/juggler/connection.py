@@ -1142,7 +1142,10 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     None is no limit, which is what Playwright's `launch(timeout=0)` asks.
 
     `proxy` is the `Browser.setBrowserProxy` command
-    (`parse_proxy(...).as_engine_command()`), sent before any page exists.
+    (`parse_proxy(...).as_engine_command()`), sent before any page exists and
+    FIRST; without one the explicit `Browser.setNoBrowserProxy` is sent
+    instead, because the engine holds its proxied channels until it hears
+    which of the two the session is.
     ⛔ A PROXY THAT CANNOT BE SET CLOSES THE BROWSER: until 2026-08-30 `proxy=`
     was accepted and dropped for every scheme the engine prefs do not carry,
     and a page resolved its own DNS and went out on the host address while the
@@ -1200,18 +1203,25 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     c.ready_seen = seen
     c.output = output
     c._startup = deadline
-    if proxy is not None:
-        try:
+    # ⛔ THE FIRST COMMAND, ALWAYS. The engine's Juggler holds every proxied channel until it has been told what the
+    # session's proxy is: `Browser.setBrowserProxy`, or the explicit `Browser.setNoBrowserProxy` for a session without
+    # one. Both travel on the pipe only: a credential in the browser's environment or command line is readable by other
+    # processes of the user.
+    try:
+        if proxy is not None:
             c.startup_send("Browser.setBrowserProxy", proxy)
-        except ReplyTimeout:
-            c.close()
-            raise
-        except ProtocolError as exc:
-            c.close()
-            raise ProtocolError(
-                "the engine refused the proxy, so the browser was closed "
-                "rather than left running without one: %s" % exc) from exc
-        except BaseException:
-            c.close()
-            raise
+        else:
+            c.startup_send("Browser.setNoBrowserProxy", {})
+    except ReplyTimeout:
+        c.close()
+        raise
+    except ProtocolError as exc:
+        c.close()
+        what = "the proxy" if proxy is not None else "the session's 'no proxy'"
+        raise ProtocolError(
+            "the engine refused %s, so the browser was closed "
+            "rather than left running without one: %s" % (what, exc)) from exc
+    except BaseException:
+        c.close()
+        raise
     return c

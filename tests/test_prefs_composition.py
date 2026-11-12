@@ -71,7 +71,7 @@ def no_network(monkeypatch):
     # The fake decides the language the way the real one does for an explicit
     # tag (no network), so the direct path really declares LOCALE.
     monkeypatch.setattr(_geo, "prepare_session_geo",
-                        lambda tz, proxy, locale="auto": SessionGeo(
+                        lambda tz, proxy, locale="auto", **_kw: SessionGeo(
                             TZ, "198.51.100.4", locale=decide_session_locale(locale)))
 
 
@@ -144,8 +144,7 @@ def test_the_public_api_declares_the_leak_prefs_and_NO_endpoint(tmp_path):
                 "network.proxy.ssl_port"}
     assert not (endpoint & set(prefs)), sorted(endpoint & set(prefs))
     assert prefs["network.proxy.allow_bypass"] is False
-    assert prefs["zoom.stealth.dns.no_local_resolution"] is True
-    assert prefs["zoom.stealth.webrtc.no_direct_udp"] is True
+    assert {k for k in prefs if k.startswith("network.trr.")} == {"network.trr.uri", "network.trr.bootstrapAddr"}  # names: the provider is the core's, the engine derives the state
 
 
 def test_no_proxy_still_means_no_endpoint_prefs():
@@ -153,8 +152,8 @@ def test_no_proxy_still_means_no_endpoint_prefs():
     behind an endpoint the caller never named.
 
     Asserted on the keys that NAME an endpoint, not on the `network.proxy.`
-    prefix: `socks_remote_dns` and `failover_direct` are part of the baseline
-    fingerprint and are set whether or not a proxy is in play. Written the broad
+    prefix: `failover_direct` is part of the baseline
+    fingerprint and is set whether or not a proxy is in play. Written the broad
     way first, and those two are why it went red.
     """
     prefs = get_default_stealth_prefs(SEED, timezone="America/New_York", locale="en-US")

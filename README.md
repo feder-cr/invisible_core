@@ -49,6 +49,14 @@ binary  = ensure_binary()                   # path to the patched Firefox binary
 Same seed → same fingerprint, every time. The timezone is required: a session
 without one would run on the host's own zone.
 
+## Asking for less than the retail does
+
+The core describes a retail Firefox, and where the retail does something the core does not change it. A caller can ask for less, by name, and
+the core writes that as a declaration. `compose_session_prefs(profile, preload_newtab=False)` (in the Playwright wrapper:
+`InvisiblePlaywright(preload_newtab=False)`) turns off the New Tab page that every retail Firefox keeps preloaded in a process of its own (about 200 MB,
+and a second process for a Mozilla site beside it): the core writes `browser.newtab.preload` false. `None`, the default, writes nothing and
+leaves the retail's behaviour; `True` writes the retail's value; a `browser.newtab.preload` in `extra_prefs` wins over the option.
+
 ## What the fields actually mean
 
 Which surfaces a browser fingerprint is made of, what each one gives away, and why

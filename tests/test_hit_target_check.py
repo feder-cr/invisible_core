@@ -257,3 +257,49 @@ def test_the_origin_of_a_frame_is_the_engines_not_the_pages():
     inj.session = "s"
     assert inj.frame_origin(CHILD) == {"x": 68.0, "y": 68.0}
     assert inj.c.sent == [("Page.getFrameOrigin", {"frameId": CHILD}, "s")]
+
+
+def _frame_point(origin, point):
+    log: list = []
+    actions = _actions(origins={CHILD: origin}, log=log)
+    approach, commit = _halves(log, actions)
+    actions._act_on_target(CHILD, "element", point, approach=approach, commit=commit)
+    return actions.inj.points[0]
+
+
+def test_a_frame_under_a_css_scale_is_asked_about_the_point_it_shows_there():
+    """⛔ A SHIFT IS NOT A MAP. An `<iframe>` shown at half size (`transform: scale(0.5)`)
+    has its viewport starting at (100, 50) in the main frame, and one pixel of the
+    frame is half a pixel of the main frame: the main point (200, 125) is the frame's
+    (200, 150). Taking only the origin from it asked the frame about (100, 75), a
+    different element, and a click aimed and landed on the right one was refused
+    ("the event would have landed elsewhere").
+
+    To watch this fail, return `(dx, dy)` before the axes are used in `_hit_point`.
+    """
+    scaled = {"x": 100.0, "y": 50.0, "ex": {"x": 0.5, "y": 0.0}, "ey": {"x": 0.0, "y": 0.5}}
+    assert _frame_point(scaled, (200.0, 125.0)) == pytest.approx((200.0, 150.0))
+    # scaled up 2x: the same main point is the frame's (50, 37.5)
+    bigger = {"x": 100.0, "y": 50.0, "ex": {"x": 2.0, "y": 0.0}, "ey": {"x": 0.0, "y": 2.0}}
+    assert _frame_point(bigger, (200.0, 125.0)) == pytest.approx((50.0, 37.5))
+
+
+def test_a_skewed_frame_is_asked_about_the_point_that_maps_to_the_click():
+    """The frame's point (200, 150) is at origin + 200*ex + 150*ey in the main frame;
+    asking about that main point must give (200, 150) back."""
+    skew = {"x": 10.0, "y": 20.0, "ex": {"x": 1.0, "y": 0.25}, "ey": {"x": 0.2, "y": 1.0}}
+    main = (10.0 + 200 * 1.0 + 150 * 0.2, 20.0 + 200 * 0.25 + 150 * 1.0)
+    assert _frame_point(skew, main) == pytest.approx((200.0, 150.0))
+
+
+def test_an_engine_that_sends_no_axes_is_still_a_shift():
+    """An engine from before the axes answers `{x, y}` only: the shift, as it always was. A core
+    newer than its engine must not break on it (they do not ship together)."""
+    assert _frame_point({"x": 30.0, "y": 60.0}, (10.0, 20.0)) == (-20.0, -40.0)
+
+
+def test_a_frame_flattened_to_a_line_falls_back_to_the_shift():
+    """Axes with no inverse (scale(0)) have no point to give; the shift is as good a guess as any
+    and the click is not made by this number."""
+    flat = {"x": 30.0, "y": 60.0, "ex": {"x": 0.0, "y": 0.0}, "ey": {"x": 0.0, "y": 0.0}}
+    assert _frame_point(flat, (10.0, 20.0)) == (-20.0, -40.0)

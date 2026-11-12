@@ -295,3 +295,23 @@ def test_a_picked_value_is_committed_by_the_engine():
             {"frameId": "main", "objectId": "element",
              "value": "2026-01-15"}) in rec.sent
     assert "Page.dispatchTrustedInputEvents" not in [m for m, _ in rec.sent]
+
+
+def test_a_click_in_a_frame_asks_the_engine_to_scroll_even_when_the_point_is_inside_the_main_viewport():
+    """A frame's element can be out of its own viewport (or its frame out of the parent's) while its point, in the main frame's
+    space, is inside the main viewport. The check against the main viewport alone then never scrolls, and the click aims at a place the
+    frame does not show. The engine's scrollIntoViewIfNeeded is "only if needed", so a frame's element always asks it."""
+    a, rec = _recording_actions()
+    scrolled = []
+    rec.scroll_into_view = lambda frame, element, rect=None: scrolled.append((frame, element))
+    rec.frame_origin = lambda frame: {"x": 0, "y": 0}
+    a.click("#x", frame_id="child-frame", timeout=1.0, trial=True)
+    assert scrolled and scrolled[0][0] == "child-frame", scrolled
+
+
+def test_a_click_in_the_main_frame_still_scrolls_only_outside_the_viewport():
+    a, rec = _recording_actions()
+    scrolled = []
+    rec.scroll_into_view = lambda frame, element, rect=None: scrolled.append((frame, element))
+    a.click("#x", timeout=1.0, trial=True)         # the recorder's quad is inside its 1280x800 viewport
+    assert scrolled == []

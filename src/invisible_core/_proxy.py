@@ -37,6 +37,9 @@ from urllib.parse import unquote
 _PROXY_TYPES = {"http": "http", "https": "https",
                 "socks": "socks", "socks5": "socks", "socks4": "socks4"}
 
+#: What the `udp` field of the proxy declaration may say (`_udp_exit` measures it).
+UDP_EXIT_VALUES = ("coherent", "no", "unmeasured")
+
 #: The port Playwright documents as the default for each scheme.
 _DEFAULT_PORT = {"http": 80, "https": 443, "socks": 1080, "socks4": 1080}
 
@@ -50,6 +53,10 @@ class ProxyEndpoint(NamedTuple):
     username: str
     password: str
     bypass: tuple
+    #: The measured UDP exit of a SOCKS5 proxy: ``coherent``, ``no`` or ``unmeasured``. ``parse_proxy`` NEVER sets it
+    #: (a ``udp`` key in what the caller wrote is not read, whatever road it came by): only `_udp_exit` does, from its
+    #: measurement, with ``_replace``. None means nothing was measured, and the command then has no field.
+    udp: Optional[str] = None
 
     @property
     def is_socks(self) -> bool:
@@ -71,6 +78,9 @@ class ProxyEndpoint(NamedTuple):
             params["username"] = self.username
         if self.password:
             params["password"] = self.password
+        # The measured UDP exit travels WITH the proxy, for a SOCKS5 one only; absent means `no` to the engine.
+        if self.udp is not None and self.type == "socks":
+            params["udp"] = self.udp
         return params
 
 
@@ -145,6 +155,9 @@ def parse_proxy(proxy: Optional[Dict[str, Any]]) -> Optional[ProxyEndpoint]:
     bypass = proxy.get("bypass")
     if isinstance(bypass, str):
         bypass = [b.strip() for b in bypass.split(",") if b.strip()]
+    # ⛔ `proxy.get("udp")` IS NOT READ, HERE OR ANYWHERE: this function is the one entry every road to the engine's
+    # proxy command passes through (the launch, a context, a hand-made dict), so the caller cannot declare where the
+    # UDP leaves from. The value is measured (`_udp_exit`) and attached to the endpoint after this returns.
     return ProxyEndpoint(type=kind, host=host, port=port,
                          username=username,
                          password=password,
@@ -177,9 +190,7 @@ def configure_proxy(
     # ⛔ `network.dns.disableIPv6 = True` WAS TRIED HERE AND REMOVED: IT IS INERT
     # BEHIND A PROXY, and a patch that moves no measurement is not a patch.
     #
-    # The idea was to make the profile IPv4-only throughout: IPv6 WebRTC
-    # candidates are already dropped behind a proxy (an IPv6 srflx is not
-    # obscured by mDNS and would carry the REAL global address), but HTTP could
+    # The idea was to make the profile IPv4-only throughout, but HTTP could
     # still leave over IPv6 - measured 2026-08-25 on a dual-stack residential
     # peer: we declared `73.209.132.45` while the same page reached an echo
     # service on `2603:300a:92e:8600:...`.
@@ -194,9 +205,8 @@ def configure_proxy(
     #
     # Worth knowing: **the address family behind a proxy is not ours to decide.**
     # If the peer has IPv6 and the site is dual-stack, we leave over IPv6 while
-    # WebRTC announces an IPv4. Actually closing that means ALSO declaring an
-    # IPv6 srflx with the proxy's IPv6 exit (discoverable: `api6.ipify.org`
-    # answers through the proxy), not switching IPv6 off from this side.
+    # WebRTC announces an IPv4. The IPv6 of the session is the `v6` bit of the
+    # declared network (`_webrtc_network`), not a switch from this side.
 
     result = dict(proxy)
 
@@ -244,63 +254,8 @@ def configure_proxy(
     # in those words instead of with `prefs == {}`.
     prefs["network.proxy.allow_bypass"] = False
 
-    # ⛔ AND THE SECOND HALF, BECAUSE THE FIRST IS NOT ENOUGH ON HTTP.
-    #
-    # `allow_bypass` closes the CHANNELS that fall back to direct. But three
-    # surfaces are not channels and call `AsyncResolveNative` without passing any
-    # filter: `NetworkConnectivityService`, the DoH heuristic's probes, and the
-    # ICE resolver. The engine's own gate
-    # (`netwerk/dns/DNSServiceBase.cpp`, `DNSForbiddenByActiveProxy`) would stop
-    # them, but it can only recognise a proxy written into the `network.proxy.*`
-    # prefs - and on the HTTP branch we write none, because Playwright routes
-    # per channel. So `network.proxy.type` stays 5 and the gate never arms.
-    #
-    # The engine cannot deduce it: we tell it. That is rule 1 - the core
-    # declares, the engine obeys - applied to DNS.
-    #
-    # MEASURED 2026-08-25 behind an HTTP proxy, two identical rounds, with only
-    # `allow_bypass` already active: `example.org` 28 remained, `ipv4only.arpa`
-    # 12, `cloudflare-dns.com` 6 and - the worst - `stunprobe.invalid` 6, which
-    # is a name chosen BY THE PAGE through `iceServers`. Behind SOCKS the same
-    # names were already at 0.
-    #
-    # The proxy's own endpoint still resolves: both the SOCKS layer
-    # (`nsSOCKSIOLayer`) and `DnsAndConnectSocket` ask for their resolution with
-    # `RESOLVE_IGNORE_SOCKS_DNS`, which the gate exempts first. That is not an
-    # exception we add: it is the one already holding up the SOCKS branch.
-    prefs["zoom.stealth.dns.no_local_resolution"] = True
-
-    # ⛔ AND ICE's UDP LEAVES ANYWAY, if the server is written as a NUMERIC
-    # ADDRESS rather than a name. The DNS gate above cannot stop it, because a
-    # literal never reaches the resolver.
-    #
-    # Measured 2026-08-26 across three providers and two schemes: with a numeric
-    # STUN the engine receives the MAPPED-ADDRESS carrying the machine's REAL
-    # address, while the page sees the proxy's exit because the real candidate is
-    # rewritten. A leak no page-side check can see, and that only whoever runs
-    # the STUN does.
-    #
-    # The two prefs sit here together on purpose: they tell the engine the same
-    # thing from two sides - behind a proxy nothing leaves by a road the proxy
-    # does not cover - and one decision emits both.
-    prefs["zoom.stealth.webrtc.no_direct_udp"] = True
+    # NAMES: not declared here. The engine (Juggler) derives the DNS-over-HTTPS STATE (`network.trr.mode`,
+    # `exclude-etc-hosts`, `excluded-domains`) from the proxies it is given, the browser proxy and every context proxy, so a
+    # proxy given per context is covered too. The PROVIDER (`network.trr.uri`, `bootstrapAddr`) is declared once for every
+    # session in `prefs.py`, with or without a proxy; this function writes no `network.trr.` key.
     return result
-
-
-#: ⛔ NO, and this constant exists because the answer is not obvious and a
-#: decision depends on it. The engine has the code for it
-#: (`netwerk/socket/nsSOCKSUDPIOLayer.{h,cpp}`, hooked up in `nsUDPSocket.cpp`)
-#: but it sits behind `network.proxy.socks_remote_udp`, which we do not set.
-#: Without it, **UDP goes around the proxy**, and a STUN reached that way answers
-#: with the machine's REAL address.
-#:
-#: Who reads it: `_geo._srflx_suppressed`. Giving up on declaring an srflx only
-#: makes sense if the REAL one will be born with the right address, and with UDP
-#: going around the proxy it would be born with the home address. In other words
-#: the condition "the exit carries coherent UDP" is NOT enough: the browser also
-#: has to send that UDP over there.
-#:
-#: The day the pref is switched on, this constant moves with it - and they are
-#: one fact written in one place.
-UDP_GOES_THROUGH_SOCKS = False
-

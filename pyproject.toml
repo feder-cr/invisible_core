@@ -154,9 +154,13 @@ include = ["src/invisible_core", "tests", "README.md", "LICENSE", "LICENSE-APACH
 # main for two hours) while the two repos that depend on it could not.
 #
 # `release-` is accepted alongside `v` because this repo's tag history has both.
+# `lint`: the ruff rules the CI `ruff check` step refuses on, run by the hook
+# before the suite. tests/test_lint_gate_matches_ci.py keeps this string equal to
+# that step's `--select` in .github/workflows/ci.yml.
 [tool.invisible.hooks]
 pytest = true
 pin = false
+lint = "F821,F811,F601"
 release_tags = ["v", "release-"]
 
 # What this repository declares about ITSELF to the shared language gate

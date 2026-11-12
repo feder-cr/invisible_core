@@ -23,17 +23,23 @@ cause and the remedy: an explicit IANA zone, or a writable cache.
 """
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import re
+import socket
+import threading
 import time
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, NamedTuple, Optional, Sequence
 from urllib.parse import quote
 # At import, as in prefs.py: zoneinfo resolves its search path from the real
 # platform the first time it is imported.
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
+import urllib3.util.connection as _u3conn
 
+from . import _udp_exit
+from ._geoposition import DeclaredPosition, position_to_declare
 from ._locale import SessionLocale, _decide
 
 
@@ -59,6 +65,15 @@ _IP_ECHO_ENDPOINTS = (
     "https://icanhazip.com",
     "https://checkip.amazonaws.com",
 )
+
+# Echo endpoints that answer over IPv6 ONLY (an AAAA record and no A record). Used
+# for one question after the IPv4 echo could not connect: does this host have
+# IPv6 and no IPv4 route?
+_IPV6_ECHO_ENDPOINTS = (
+    "https://api6.ipify.org",
+    "https://ipv6.icanhazip.com",
+)
+_IPV6_PROBE_BUDGET = 6.0
 
 _SOCKS_SCHEMES = ("socks5://", "socks4://", "socks://")
 
@@ -142,6 +157,15 @@ _REMEDY = {
         "network - the proxy is not routing to the internet",
         "the reply was a PRIVATE address, so the request never left the local "
         "network - something here answered on the endpoint's behalf"),
+    # Never paired with a proxy: with one, the exit is the proxy's and the host's
+    # own address family does not matter.
+    "ipv6_only_no_proxy": (
+        "an IPv6-only host without a proxy is not supported: this host reaches the "
+        "internet only over IPv6, and a browser session here uses IPv4, so it would "
+        "have no connectivity. Use a proxy, or run on a host that has IPv4",
+        "an IPv6-only host without a proxy is not supported: this host reaches the "
+        "internet only over IPv6, and a browser session here uses IPv4, so it would "
+        "have no connectivity. Use a proxy, or run on a host that has IPv4"),
     "no_endpoint_tried": (
         "the budget expired before a single endpoint could be contacted, so "
         "nothing below was measured - raise `budget`, or find what delayed the "
@@ -348,17 +372,21 @@ def _proxy_is_set(proxy: Optional[Dict[str, str]]) -> bool:
 def _proxies_for_requests(proxy: Dict[str, str]) -> Dict[str, str]:
     """Translate our proxy dict into a ``requests`` proxies mapping.
 
-    SOCKS5 uses the ``socks5h`` scheme so DNS is resolved proxy-side (matches
-    ``network.proxy.socks_remote_dns=True`` in the Firefox path). HTTP/HTTPS
-    pass through unchanged. Credentials are URL-encoded.
+    Every SOCKS scheme maps to the spelling of the library that sends the NAME to
+    the proxy: ``socks5h`` for SOCKS5 and ``socks4a`` for SOCKS4 (urllib3 /
+    PySocks ``rdns=True``). The plain ``socks5`` and ``socks4`` spellings resolve
+    the target on THIS host, which would put the echo hostnames on the host's
+    resolver before the browser exists. HTTP/HTTPS pass through unchanged.
+    Credentials are URL-encoded.
     """
     server = (proxy.get("server") or "").strip()
     low = server.lower()
-    if low.startswith("socks5://") or low.startswith("socks://"):
+    given = low.split("://", 1)[0] if "://" in low else ""
+    if given in ("socks5", "socks5h", "socks"):
         scheme = "socks5h"
-    elif low.startswith("socks4://"):
-        scheme = "socks4"
-    elif low.startswith("https://"):
+    elif given in ("socks4", "socks4a"):
+        scheme = "socks4a"
+    elif given == "https":
         scheme = "https"
     else:
         scheme = "http"
@@ -383,6 +411,51 @@ def _proxies_for_requests(proxy: Dict[str, str]) -> Dict[str, str]:
     return {"http": url, "https": url}
 
 
+_family_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _only_family(family: "socket.AddressFamily"):
+    """Make the connections THIS thread opens use one address family, for the
+    duration of the block, through urllib3's own hook (``allowed_gai_family``,
+    read by ``create_connection`` on every connect). Other threads keep the
+    original answer; the lock keeps two blocks from overwriting each other's
+    restore. Opens no socket by itself."""
+    owner = threading.get_ident()
+    original = _u3conn.allowed_gai_family
+
+    def gated() -> "socket.AddressFamily":
+        return family if threading.get_ident() == owner else original()
+
+    with _family_lock:
+        _u3conn.allowed_gai_family = gated
+        try:
+            yield
+        finally:
+            _u3conn.allowed_gai_family = original
+
+
+def _host_is_ipv6_only() -> bool:
+    """True when an IPv6-only echo answers with an IPv6 address. Asked only after
+    the IPv4 echo could not connect, so a True here means: IPv6 yes, IPv4 route no.
+    Any failure is False (an offline machine stays an offline machine)."""
+    deadline = time.monotonic() + _IPV6_PROBE_BUDGET
+    for url in _IPV6_ECHO_ENDPOINTS:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            with _only_family(socket.AF_INET6):
+                resp = requests.get(url, proxies=None,
+                                    timeout=(remaining / 2, remaining / 2))
+            resp.raise_for_status()
+            if ipaddress.ip_address(resp.text.strip()).version == 6:
+                return True
+        except Exception:  # noqa: BLE001 - not proof of anything
+            continue
+    return False
+
+
 def discover_egress_ip(
     proxy: Optional[Dict[str, str]] = None,
     *,
@@ -405,6 +478,13 @@ def discover_egress_ip(
     budget is now handed to each request, so a slow first endpoint shortens the
     second rather than adding to it, and the step returns or raises within
     ``budget`` however many endpoints the list grows to.
+
+    Without a proxy the echo is made over IPv4 ONLY: the persona is IPv4-only
+    (``v6=0``), so the address that matters is the one the session will use. If no
+    IPv4 echo can connect while an IPv6-only echo answers, the host has no IPv4
+    route and a direct session on it would have no connectivity: that raises
+    ``GeoTimezoneError`` with ``kind="ipv6_only_no_proxy"`` (see
+    ``_webrtc_network.py``). If both fail, the failure is the usual one.
     """
     proxies = _proxies_for_requests(proxy) if proxy else None
     attempts: "list[_Attempt]" = []
@@ -430,9 +510,11 @@ def discover_egress_ip(
             # so the loop really does reach the second and third endpoint when
             # the first goes quiet.
             slice_ = min(timeout, remaining)
-            resp = requests.get(
-                url, proxies=proxies, timeout=(slice_ / 2, slice_ / 2)
-            )
+            with (contextlib.nullcontext() if proxies
+                  else _only_family(socket.AF_INET)):
+                resp = requests.get(
+                    url, proxies=proxies, timeout=(slice_ / 2, slice_ / 2)
+                )
             resp.raise_for_status()
             ip = resp.text.strip()
             parsed = ipaddress.ip_address(ip)  # raises ValueError if not an IP
@@ -462,6 +544,10 @@ def discover_egress_ip(
 
     proxied = bool(proxies)
     kinds = {a.kind for a in attempts}
+    if not proxied and kinds == {"connect_failed"} and _host_is_ipv6_only():
+        raise GeoTimezoneError(
+            _remedy("ipv6_only_no_proxy", False),
+            kind="ipv6_only_no_proxy", attempts=tuple(attempts))
     if not attempts:
         # NOT "mixed". Nothing failed for differing reasons, because nothing ran
         # at all - the budget was already spent when this step started. The old
@@ -709,47 +795,27 @@ class SessionGeo(NamedTuple):
 
     ``timezone`` follows the precedence in the module docstring.
 
-    ⛔ ``egress_ip`` IS A FACT, NOT A DECISION: the address this session really
-    leaves from, discovered once, with or without a proxy. Whether that value is
-    then DECLARED to the engine as an srflx is decided by
-    :meth:`srflx_to_declare`, and without a proxy the answer is no.
-
-    Until 2026-08-26 this field was ``None`` without a proxy, and the "no" was
-    expressed by that very ``None``. One field for two meanings: the effect was
-    that ``prepare_session_geo`` discovered the address for the timezone, **threw
-    it away**, and ``resolve_session_locale`` had to discover it again. Two
-    identical requests to an external service, from the real address, before the
-    browser exists - where a real user makes zero. The fact is carried now, and
-    the "no" lives where the decision already lived.
+    ``egress_ip`` is the address this session really leaves from, discovered once,
+    with or without a proxy: the timezone, the language and the position come from
+    it. Nothing here is declared to the engine as an srflx: the engine decides UDP.
     """
 
     timezone: str
     egress_ip: Optional[str]
-    #: The declared position, from the SAME record of the exit IP the timezone
-    #: and the language come from. ``None`` when there is no IP to derive it from
-    #: (no proxy, or discovery failed): in that case the engine receives NO
-    #: declaration and refuses, rather than asking the hardware.
+    #: The DECLARED position of the session, the one the engine is told
+    #: (``Browser.setGeolocationOverride {latitude, longitude, accuracy}``): the
+    #: exit IP's point from the SAME geoip record the timezone and the language
+    #: come from, moved by the session seed and given the accuracy of an
+    #: IP-based fix (:mod:`invisible_core._geoposition`). ``None`` when there is
+    #: nothing to declare it from (no seed, the egress discovery failed - it runs
+    #: with or without a proxy - or the record has no point): in that case NO
+    #: override is sent and nothing is invented.
     #:
     #: They have defaults because ``SessionGeo`` is built positionally with two
     #: arguments in six places across code and tests: adding them without
     #: defaults would have been a breaking change to an exported type.
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    #: ⛔ A SWITCH, AND ITS DEFAULT IS THE CAUTIOUS ONE.
-    #:
-    #: The first draft was a field carrying the ADDRESS to declare, defaulting to
-    #: ``None``. Wrong, and a test caught it immediately: ``SessionGeo`` is built
-    #: positionally in six places across code and tests, and everyone who did not
-    #: know about the new field stopped declaring the srflx **by accident**. That
-    #: is, the default fell on the side that leads to the worst sentence a
-    #: detector can write.
-    #:
-    #: Inverted: ``False`` means "declare", which is the behaviour it has always
-    #: had, and switching it off has to be said. It is ``True`` ONLY when the exit
-    #: has UDP both demonstrated AND coherent, because there the real srflx is
-    #: already born with the right address and declaring one would add a
-    #: candidate with no matching allocation.
-    srflx_suppressed: bool = False
     #: The session language, decided from the SAME egress as the timezone, by
     #: the one decision (`invisible_core._locale.decide_session_locale`).
     #: :func:`prepare_session_geo` always fills it; a consumer reads it and
@@ -758,75 +824,23 @@ class SessionGeo(NamedTuple):
     #: is why it has a default at all: the type is built positionally in
     #: tests, and a field without one would have broken every such call.
     locale: Optional["SessionLocale"] = None
+    #: The accuracy of the declared position, in metres (see ``latitude``);
+    #: ``None`` exactly when the position is.
+    accuracy: Optional[float] = None
+    #: The MEASURED UDP exit of a SOCKS5 proxy (:mod:`invisible_core._udp_exit`): ``coherent``, ``no`` or
+    #: ``unmeasured``. It travels in the proxy's declaration on the pipe (``configure_proxy(..., udp=)``). ``None``
+    #: when nothing was measured: no proxy, or one that is not SOCKS5.
+    udp_exit: Optional[str] = None
 
-    def srflx_to_declare(self) -> Optional[str]:
-        """The address the engine must announce as its srflx, or ``None``.
-
-        ⛔ THE ONE PLACE where this question is answered. The two env builders -
-        ``launch.build_launch_env`` in the core and ``_session.build_env`` in the
-        wrapper - call it rather than recomputing it: they were already two
-        landing points, and the same rule written twice could have drifted.
-        """
-        return None if self.srflx_suppressed else self.egress_ip
-
-
-def _srflx_suppressed(proxy: Optional[Dict[str, str]],
-                     egress_ip: Optional[str]) -> bool:
-    """Declare a synthetic srflx, or let the real one through?
-
-    The criterion comes from a real detector's code, read rather than deduced:
-    its configuration contains no STUN at all, only TURN, and the allocation's
-    username is the same identifier its verification POST sends to the backend.
-    So in an honest browser **an srflx can only come from a successful
-    allocation**, and the client-side candidate and the server-side proof
-    coincide by construction. It is that implication a declared candidate
-    breaks.
-
-    Da qui la regola, che ha tre rami:
-
-    * **no proxy**: the real STUN answers with the address traffic actually
-      leaves from, so the srflx is born correct and with its own allocation.
-      Nothing is declared. Until 2026-08-26 this branch was not written here: the
-      same outcome fell out of ``egress_ip`` being ``None`` without a proxy - the
-      decision was encoded in the ABSENCE of a fact. The two are separated now,
-      and this branch says out loud what used to be obtained as a side effect.
-    * **UDP demonstrated and coherent** (UDP leaves from the same address as
-      TCP): the real srflx will already be born with the right address. Nothing
-      is declared: declaring would add a candidate with no matching allocation.
-    * **everything else**: the exit IP is declared, which is the behaviour it has
-      always had. Without an srflx the detector writes *"Javascript is
-      manipulated"*, which accuses the browser; with one it writes *"VPN/PROXY
-      detected"*, which accuses the network. The difference between those two
-      sentences is this line.
-
-    ⛔ AND THE PROBE CANNOT FAIL A LAUNCH. Whatever goes wrong - network, a
-    timeout, a field that is not there - falls back to the cautious branch. A
-    capability is only exploited once it is DEMONSTRATED.
-    """
-    if not egress_ip:
-        return False  # nothing to declare anyway: the cautious branch
-    if not _proxy_is_set(proxy):
-        return True  # direct connection: the real srflx already IS the truth
-    # ⛔ BEFORE THE PROBE, because if this is false the probe is pointless.
-    #
-    # That the EXIT carries coherent UDP is not enough: the BROWSER has to be the
-    # one sending us the UDP. With `network.proxy.socks_remote_udp` off, UDP goes
-    # around the proxy, so a real srflx would be born with the HOME address - and
-    # to stop declaring there would be a real leak instead of a remedy.
-    #
-    # The first draft of this function, on 2026-08-25, did not check it. The
-    # branch was unreachable by luck (no provider has usable UDP) and not by
-    # construction, which is exactly the shape of defect this project pays for: a
-    # condition whose safety rests on a fact it does not verify.
-    from ._proxy import UDP_GOES_THROUGH_SOCKS
-    if not UDP_GOES_THROUGH_SOCKS:
-        return False
-    try:
-        from ._capability import capability
-        c = capability(proxy, known_tcp_exit=egress_ip)
-    except Exception:  # noqa: BLE001
-        return False
-    return c.get("udp") is True and c.get("udp_matches_tcp") is True
+    def geolocation_override(self) -> "Optional[Dict[str, float]]":
+        """The ``geolocation`` object of ``Browser.setGeolocationOverride``:
+        exactly ``latitude``, ``longitude`` and ``accuracy`` (the command has no
+        field for altitude, heading or speed), or ``None`` when nothing is
+        declared."""
+        if self.latitude is None or self.longitude is None or self.accuracy is None:
+            return None
+        return {"latitude": self.latitude, "longitude": self.longitude,
+                "accuracy": self.accuracy}
 
 
 def _geoip_database(ip: str, proxied: bool) -> Any:
@@ -863,14 +877,15 @@ def _geoip_database(ip: str, proxied: bool) -> Any:
 
 def prepare_session_geo(
     timezone: str, proxy: Optional[Dict[str, str]], locale: Optional[str] = "auto",
+    *, seed: Optional[int] = None, udp_stun_servers: Optional[Sequence[str]] = None,
 ) -> SessionGeo:
     """Resolve the session timezone, egress IP AND language in ONE round-trip.
 
     The egress IP is discovered once and reused for the timezone mapping (when
-    ``timezone`` is ``""``/``"auto"``), the WebRTC public-IP override and the
+    ``timezone`` is ``""``/``"auto"``) and the
     language. Timezone precedence is identical to
-    :func:`resolve_session_timezone`; the egress IP is best-effort for the
-    WebRTC side (a discovery failure that the timezone path doesn't need won't
+    :func:`resolve_session_timezone`; the egress IP is best-effort
+    (a discovery failure that the timezone path doesn't need won't
     break the launch - but if the timezone path *does* need it behind a proxy,
     that path still fails loudly).
 
@@ -880,9 +895,22 @@ def prepare_session_geo(
     that must agree with one another, instead of repeating an
     ``if locale == "auto"`` branch of its own: until 36.x every consumer did,
     five copies across four packages.
+
+    ``seed`` is the session seed. The position is declared FROM it
+    (:func:`invisible_core._geoposition.declared_position`): the exit city's
+    point moved per seed, with the accuracy of an IP-based fix. Without a seed
+    there is no machine to place, so NOTHING is declared (``latitude``,
+    ``longitude`` and ``accuracy`` stay ``None``); the same when the exit has
+    no point.
+
+    ``udp_stun_servers`` is where a SOCKS5 proxy's UDP exit is measured from: a list of ``"ip:port"`` IPv4
+    literals, ``None`` for the two public defaults (:data:`invisible_core._udp_exit.DEFAULT_STUN_SERVERS`). A name or
+    a bad port raises ``ValueError`` naming the parameter, with or without a proxy. It is a parameter of the Python
+    launch alone: it goes nowhere near the browser's environment, argv, prefs or pipe.
     """
     from .download import ensure_geoip_mmdb
 
+    stun_servers = _udp_exit.stun_servers(udp_stun_servers)
     tz = (timezone or "").strip()
     proxy_set = _proxy_is_set(proxy)
 
@@ -897,13 +925,23 @@ def prepare_session_geo(
     # address, and the "auto" branch below raises with it.
     egress_ip: Optional[str] = None
     egress_err: Optional[Exception] = None
+    # ⛔ THE UDP EXIT IS MEASURED BESIDE THE TCP EXIT, through the same proxy, on a thread: the two are independent
+    # until they are compared, so a launch pays the longer of the two and not their sum. SOCKS5 only; None otherwise.
+    pending = _udp_exit.start_measurement(proxy, stun_servers) if proxy_set else None
     try:
         egress_ip = discover_egress_ip(proxy if proxy_set else None)
+    except GeoTimezoneError as exc:
+        if exc.kind == "ipv6_only_no_proxy":
+            raise  # no route for the browser: not a geo gap an explicit zone covers
+        egress_err = exc
     except Exception as exc:  # noqa: BLE001
         egress_err = exc
+    udp_exit = pending.result(egress_ip) if pending is not None else None
+    if egress_ip is not None:
+        _udp_exit.remember(proxy, udp_exit, stun_servers)   # a context given this proxy later does not measure it again
 
     # Timezone resolution - same precedence as resolve_session_timezone.
-    def _coordinate(ip: "Optional[str]") -> "tuple[Optional[float], Optional[float]]":
+    def _coordinate(ip: "Optional[str]") -> "Optional[DeclaredPosition]":
         """Coordinates are BEST-EFFORT, the zone is not, and the gap is meant.
 
         A wrong timezone behind a proxy is the `tz_mismatch` trap and has to fail
@@ -912,34 +950,42 @@ def prepare_session_geo(
         engine refuses it cleanly. Failing a launch over that would be more
         brittle without being more faithful.
         """
-        if not ip:
-            return None, None
+        if not ip or seed is None:
+            return None
         try:
-            return ip_to_coordinates(ip, ensure_geoip_mmdb())
+            base_lat, base_lon = ip_to_coordinates(ip, ensure_geoip_mmdb())
         except Exception:  # noqa: BLE001
-            return None, None
+            return None
+        return position_to_declare(seed, base_lat, base_lon)
 
     if tz and tz.lower() != "auto":
-        lat, lon = _coordinate(egress_ip)
+        where = _coordinate(egress_ip)
         # The address was asked once above; the language reuses it and never
         # asks again, and a failure there is the en-US fallback it announces.
-        return SessionGeo(tz, egress_ip, lat, lon,
-                          _srflx_suppressed(proxy, egress_ip),  # explicit IANA wins
+        return SessionGeo(tz, egress_ip,  # explicit IANA wins
+                          where.latitude if where else None,
+                          where.longitude if where else None,
                           _decide(locale, egress_ip=egress_ip, proxy=proxy,
-                                  may_discover=False, discovery_failure=egress_err))
+                                  may_discover=False, discovery_failure=egress_err),
+                          where.accuracy if where else None,
+                          udp_exit)
     ip: Optional[str] = egress_ip
     try:
         if ip is None:  # the discovery above failed
             raise egress_err or GeoTimezoneError("egress IP discovery failed")
-        lat, lon = _coordinate(ip)
+        where = _coordinate(ip)
         zone = ip_to_timezone(ip, _geoip_database(ip, proxy_set))
     except GeoTimezoneError:
         raise  # "auto" could not be honoured: see the module docstring
     except Exception as exc:  # noqa: BLE001
         raise GeoTimezoneError(f"the egress timezone could not be resolved: {exc}",
                                kind="geoip_unavailable") from exc
-    return SessionGeo(zone, ip, lat, lon, _srflx_suppressed(proxy, ip),
-                      _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False))
+    return SessionGeo(zone, ip,
+                      where.latitude if where else None,
+                      where.longitude if where else None,
+                      _decide(locale, egress_ip=ip, proxy=proxy, may_discover=False),
+                      where.accuracy if where else None,
+                      udp_exit)
 
 
 def resolve_session_timezone(

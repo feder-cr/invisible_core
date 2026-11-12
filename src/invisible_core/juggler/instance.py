@@ -37,6 +37,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from invisible_core import SessionLocale, parse_proxy
+from invisible_core._udp_exit import context_proxy_command, launch_proxy_command
 
 from invisible_core.juggler import connection
 from invisible_core import write_user_js
@@ -134,8 +135,13 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
            env: Optional[Dict[str, str]] = None,
            args: Optional[List[str]] = None, headless: bool = True,
            proxy: Optional[Dict[str, str]] = None,
-           ready_timeout: Optional[float] = 60.0) -> "Browser":
+           ready_timeout: Optional[float] = 60.0,
+           udp_stun_servers: Optional[List[str]] = None) -> "Browser":
     """Start the patched Firefox and hand back a `Browser` ready to open pages.
+
+    `udp_stun_servers` (`"ip:port"` IPv4 literals; None = the two public defaults) is where a SOCKS5 proxy's UDP exit
+    is measured from, for the session's proxy and for every context proxy it is later given. It is a parameter of
+    this Python call alone: nothing of it reaches the browser's environment, argv, prefs or pipe.
 
     `env` is the WHOLE environment the browser gets, or None to inherit this
     process's. ⛔ A given environment is not a patch on top of `os.environ`:
@@ -174,7 +180,7 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
         proxy_command = None
         if proxy:
             try:
-                proxy_command = parse_proxy(proxy).as_engine_command()
+                proxy_command = launch_proxy_command(proxy, udp_stun_servers)
             except ValueError as exc:
                 raise EngineError("the proxy cannot be applied: %s" % exc)
         # ⛔ THE PROXY IS SET BY THE CORE'S `launch`, before any page exists,
@@ -206,7 +212,7 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
         return Browser(conn, read_version(executable),
                        session_seed=session_seed,
                        motion_budget_s=motion_budget_s, files=files,
-                       layout=layout)
+                       layout=layout, udp_stun_servers=udp_stun_servers)
     except BaseException:
         conn.close()
         files.remove()
@@ -260,8 +266,11 @@ class Browser:
     def __init__(self, conn: Any, version: str, *, session_seed: Any = None,
                  motion_budget_s: Any = None,
                  files: Optional[SessionFiles] = None,
-                 layout: str = "us") -> None:
+                 layout: str = "us",
+                 udp_stun_servers: Optional[List[str]] = None) -> None:
         self.conn = conn
+        #: Where a context proxy's UDP exit is measured from (the launch's `udp_stun_servers`; None = the defaults).
+        self.udp_stun_servers = udp_stun_servers
         self.version = version
         #: ⛔ THE SESSION'S SEED, and the reason it lives on the BROWSER rather
         #: than on a module: a process can hold two sessions with two seeds,
@@ -512,7 +521,10 @@ class Browser:
         # expressed must not come back usable.
         if options.get("proxy"):
             try:
-                proxy = parse_proxy(options["proxy"]).as_engine_command()
+                # ⛔ MEASURED BEFORE IT IS SENT: a SOCKS5 proxy's UDP exit travels in this very command (`udp`),
+                # and without it the engine drops the UDP of every SOCKS5 proxy. The STUN servers are the launch's.
+                proxy = context_proxy_command(
+                    options["proxy"], getattr(self, "udp_stun_servers", None))
             except ValueError as exc:
                 raise EngineError(
                     "the context proxy cannot be applied: %s" % exc)

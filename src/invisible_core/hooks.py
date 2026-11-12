@@ -43,6 +43,13 @@ WHAT EACH REPOSITORY DECLARES, in its own pyproject under
     identity     = true|false     refuse author/committer/tagger addresses that
                                   are not GitHub noreply ones (default true)
     release_tags = ["v"]          tag prefixes that mean "this is a release"
+    lint         = "F821,F811"    ruff rules the repository's CI job refuses on;
+                                  a string of comma-separated codes or a list of
+                                  codes. Absent or false = no lint gate. The same
+                                  list, in the same words, as the CI step's
+                                  `--select`: a test in the repository keeps them
+                                  equal, because a local gate that checks less
+                                  than CI is a push that goes red after it left.
 
 The block is REQUIRED. A missing one is a refusal rather than a default,
 because a default here is a policy nobody chose: the wrong one silently skips a
@@ -66,6 +73,7 @@ scanned" on every push, correctly, and with no coverage. It is read once, here.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -113,8 +121,20 @@ _DISCLOSURE_CHECKER = "check_internal_disclosure.py"
 #: package both consumers pin, is the one nobody remembered. It went a year
 #: unchecked and carried Italian into two messages a user reads. A gate that
 #: arrives only on request is a gate the next repository will not have.
+#:
+#: `lint` is the one gate that defaults to OFF, because it has no meaningful
+#: default: which rules to refuse on is a fact about the repository's own CI
+#: step, and a rule list guessed here would be a policy nobody chose. A
+#: repository that wants it names the rules; one that does not says nothing and
+#: is unchanged.
 _DEFAULTS: Dict[str, object] = {"pytest": True, "pin": True, "english": True,
-                                "identity": True, "release_tags": ["v"]}
+                                "identity": True, "release_tags": ["v"],
+                                "lint": False}
+
+#: A ruff rule selector: a prefix of letters, then optional digits (`F`, `F8`,
+#: `F811`). Checked because the value goes onto a command line, and a typo such
+#: as `F811 F821` or `--fix` must be refused by name, not handed to ruff.
+_RULE_CODE = re.compile(r"^[A-Z]{1,5}[0-9]{0,4}$")
 
 
 class HookConfigError(Exception):
@@ -147,7 +167,7 @@ def hook_config(root: Path) -> Dict[str, object]:
         raise HookConfigError(
             f"{pyproject} has no [tool.invisible.hooks] block, so this hook "
             f"does not know which gates this repository wants. Declare it - "
-            f"pytest / pin / english / identity / release_tags - rather than "
+            f"pytest / pin / english / identity / lint / release_tags - rather than "
             f"letting a default decide, because the wrong default silently skips a gate and a "
             f"skipped gate reads exactly like a passed one.")
 
@@ -161,13 +181,43 @@ def hook_config(root: Path) -> Dict[str, object]:
         raise HookConfigError(
             f"[tool.invisible.hooks] declares {', '.join(unknown)}, which "
             f"nothing reads. Known keys: {', '.join(sorted(_DEFAULTS))}. A "
-            f"misspelt key is a gate whose author believes it is configured.")
+            f"misspelt key is a gate whose author believes it is configured. "
+            f"Or the installed invisible-core is older than this repository's "
+            f"pyproject and does not know the key yet: upgrade it (or move the "
+            f"`invisible-core==` pin to a release that has it).")
 
     cfg = dict(_DEFAULTS)
     cfg.update(declared)
     if isinstance(cfg["release_tags"], str):        # a bare "v" is what a human writes
         cfg["release_tags"] = [cfg["release_tags"]]
+    cfg["lint"] = _lint_rules(cfg["lint"], pyproject)
     return cfg
+
+
+def _lint_rules(value: object, pyproject: Path) -> str:
+    """`lint` as the comma-joined `--select` string, or "" when the gate is off.
+
+    A string ("F821,F811") and a list (["F821", "F811"]) both mean the same
+    thing, and both come out as the string, because that is the form the CI step
+    spells and the form a test compares. `true` is refused: it names no rules,
+    and "lint, with whatever rules" is exactly a default nobody chose.
+    """
+    if value is False or value is None or value == "" or value == []:
+        return ""
+    if isinstance(value, str):
+        codes = [c.strip() for c in value.split(",")]
+    elif isinstance(value, list):
+        codes = [c.strip() if isinstance(c, str) else c for c in value]
+    else:
+        codes = [value]
+    bad = [c for c in codes if not (isinstance(c, str) and _RULE_CODE.match(c))]
+    if bad:
+        raise HookConfigError(
+            f"{pyproject}: [tool.invisible.hooks] lint = {value!r} is not a list "
+            f"of ruff rule codes ({', '.join(map(repr, bad))} is not one). Write "
+            f'it as lint = "F821,F811" or lint = ["F821", "F811"], the same rules '
+            f"the CI step passes to `ruff check --select`.")
+    return ",".join(codes)
 
 
 def read_push_refs(stdin=None) -> str:
@@ -430,6 +480,11 @@ def _subprocess_run(cmd: Sequence[str], cwd: Path) -> int:
 
 Runner = Callable[[Sequence[str], Path], int]
 
+#: Silent both ways, so that "no ruff" is told apart from "ruff found something"
+#: by this hook's own message rather than by a traceback.
+_RUFF_PROBE = ("import importlib.util, sys; "
+               "sys.exit(0 if importlib.util.find_spec('ruff') else 1)")
+
 
 def main(
     argv: Optional[Sequence[str]] = None,
@@ -461,6 +516,56 @@ def main(
     ran: List[str] = []
     skipped: List[str] = []
     workbench = workbench_scripts(root)
+
+    # --- lint: the rules CI refuses on -----------------------------------
+    # First, because it is the cheap one: a duplicate definition takes seconds to
+    # find and the suite takes minutes, so the push that CI would turn red for a
+    # lint error should not have to wait for the suite to say so. This mirrors a
+    # CI step that runs the same command on the same tree - a test file with F811
+    # (an argument named like an imported fixture) once passed this hook and
+    # turned the CI `tests` job red on a release branch, because the hook ran
+    # pytest, which does not look at it, and CI ran ruff, which does.
+    if cfg["lint"]:
+        setting = env.get("INVISIBLE_LINT_CHECK")
+        if setting == "skip":
+            _say("WARNING: INVISIBLE_LINT_CHECK=skip. The lint rules "
+                 f"({cfg['lint']}) were NOT checked this push. CI runs them and "
+                 "will refuse the branch if they fail.")
+            skipped.append("lint")
+        else:
+            # A gate that cannot run is a refusal, and "ruff is not installed in
+            # THIS interpreter" is the likeliest way not to: the hook runs under
+            # whichever python the stub found, which is not always the one the
+            # dev extras went into. Asked separately from the check, because
+            # `python -m ruff` exits 1 both for "no module named ruff" and for
+            # "found violations", and those must not read alike.
+            if run([py, "-c", _RUFF_PROBE], root):
+                _say("", err=True)
+                _say(f"REFUSED - the lint gate ({cfg['lint']}) needs ruff, and "
+                     f"{py} cannot import it. A gate that cannot check must not "
+                     f"pass.", err=True)
+                _say(f"Give that interpreter ruff (it is in the dev extras of "
+                     f"this repository), or point INVISIBLE_GATE_PYTHON "
+                     f"at an interpreter that has it. INVISIBLE_LINT_CHECK=skip "
+                     f"states on the record that this push goes out unlinted.",
+                     err=True)
+                return 1
+            _say(f"linting for {cfg['lint']} ...")
+            rc = run([py, "-m", "ruff", "check", "--select", str(cfg["lint"]),
+                      "--no-cache", "--output-format", "concise", "."], root)
+            if rc == 1:
+                _say("", err=True)
+                _say("REFUSED - ruff found violations (file and line above). CI "
+                     "runs this same command and refuses the branch on them.",
+                     err=True)
+                return 1
+            if rc:
+                _say("", err=True)
+                _say(f"REFUSED - ruff did not run to a verdict (exit {rc}): see "
+                     f"its own message above. A gate that could not check must "
+                     f"not pass.", err=True)
+                return 1
+            ran.append("lint")
 
     # --- the suite -----------------------------------------------------
     if cfg["pytest"]:
