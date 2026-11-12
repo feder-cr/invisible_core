@@ -126,7 +126,7 @@ jobs:
           python - <<'PY'
           import io, json, os, sys, tempfile, urllib.error, urllib.request, zipfile
 
-          REPO = "feder-cr/firefox_antidetect_patch"
+          REPO = "oss-invisible/firefox_antidetect_patch"
           DIST = "invisible-core"
 
           def gh(url):

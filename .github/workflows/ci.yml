@@ -304,7 +304,7 @@ jobs:
             # A seal from the patch series: the sealed commit is the Mozilla tag with
             # the series applied, on no remote. Rebuild it the way the engine's CI did.
             git init -q series
-            git -C series fetch -q --depth 1 https://github.com/feder-cr/firefox_antidetect_patch "${{ steps.seal.outputs.series }}"
+            git -C series fetch -q --depth 1 https://github.com/oss-invisible/firefox_antidetect_patch "${{ steps.seal.outputs.series }}"
             git -C series checkout -q FETCH_HEAD
             python series/tools/engine.py materialize --into engine
             test "$(git -C engine rev-parse HEAD)" = "${{ steps.seal.outputs.source }}" || {
@@ -313,7 +313,7 @@ jobs:
           else
           git init -q engine
           cd engine
-          git remote add origin https://github.com/feder-cr/firefox_antidetect_patch
+          git remote add origin https://github.com/oss-invisible/firefox_antidetect_patch
           git sparse-checkout set --no-cone /scripts/ /python/mozbuild/
           git fetch -q --depth 1 --filter=blob:none origin "${{ steps.seal.outputs.source }}"
           git checkout -q FETCH_HEAD

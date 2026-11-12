@@ -142,7 +142,7 @@ BINARY_ENTRY_REL = dict(DEFAULT_ENTRY_REL)
 # its 2026-08-18 deletion, the direct-launch profile-manager too. (firefox-13
 # and earlier lived on invisible_playwright.)
 RELEASE_URL_TEMPLATE = (
-    "https://github.com/feder-cr/firefox_antidetect_patch/releases/download/{tag}/{asset}"
+    "https://github.com/oss-invisible/firefox_antidetect_patch/releases/download/{tag}/{asset}"
 )
 
 # ─────────────────────────────────────────────────────────────────────────

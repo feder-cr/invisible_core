@@ -35,7 +35,7 @@ def test_every_session_declares_where_to_report_a_launch():
 
 def test_the_address_is_the_engine_repository():
     assert USAGE_PING_URL == (
-        "https://github.com/feder-cr/firefox_antidetect_patch"
+        "https://github.com/oss-invisible/firefox_antidetect_patch"
         "/releases/download/usage-counter/launch.txt")
 
 

@@ -878,7 +878,7 @@ def cmd_publish(args) -> int:
             print("  ship a core whose every first launch fails at ensure_binary. Roll",
                   file=sys.stderr)
             print("  the published release seal in first, then publish:", file=sys.stderr)
-            print("    gh release download <firefox-N> --repo feder-cr/firefox_antidetect_patch \\",
+            print("    gh release download <firefox-N> --repo oss-invisible/firefox_antidetect_patch \\",
                   file=sys.stderr)
             print("      -p seal.json -O src/invisible_core/seal.json --clobber", file=sys.stderr)
             return EXIT_REFUSED
