@@ -73,7 +73,7 @@ def test_what_the_core_sets_is_set_over_the_hosts_value():
 
 def test_every_moz_variable_the_core_writes_is_in_the_declared_list():
     """The list of what the core sets is what the core really sets: nothing else of the family leaves it."""
-    env = build_launch_env({}, base_env={}, srflx_declared="203.0.113.9", manifest_path="/m.json",
+    env = build_launch_env({}, base_env={}, manifest_path="/m.json",
                            display_env={"DISPLAY": ":9", "WAYLAND_DISPLAY": None})
     written = {k for k in env if k.upper().startswith("MOZ_")}
     assert written == set(SET_BY_THE_CORE), sorted(written)
