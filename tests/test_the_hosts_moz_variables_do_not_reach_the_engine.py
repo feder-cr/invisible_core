@@ -144,3 +144,48 @@ def test_the_theme_of_the_host_does_not_reach_the_engine():
     """GTK_THEME decides the system colors (`CSS system colors`, `prefers-color-scheme`) of a GTK engine."""
     env = build_launch_env({}, base_env={"GTK_THEME": "Adwaita:dark"})
     assert "GTK_THEME" not in env, env
+
+
+# --- the zone and the language of the host: declared by the core, never inherited -------------------
+
+HOST_LOCALE = {"TZ": "Asia/Tokyo", "LANG": "ja_JP.UTF-8", "LC_ALL": "ja_JP.UTF-8", "LC_CTYPE": "ja_JP.UTF-8",
+               "LC_TIME": "ja_JP.UTF-8", "LANGUAGE": "ja:zh_CN:ko"}
+
+
+@pytest.mark.parametrize("name", sorted(HOST_LOCALE))
+def test_the_zone_and_the_language_of_the_host_do_not_reach_the_engine(name, monkeypatch):
+    monkeypatch.setenv(name, HOST_LOCALE[name])
+    env = build_launch_env({})
+    assert name not in env, "%s=%s of the host reached the engine" % (name, HOST_LOCALE[name])
+
+
+def test_the_core_writes_the_language_of_the_session_over_the_hosts():
+    env = build_launch_env({"intl.locale.requested": "it-IT"}, base_env=dict(HOST_LOCALE))
+    assert env["LANG"] == env["LC_ALL"] == "it_IT.UTF-8"
+    assert env["LANGUAGE"] == "it"
+    assert "TZ" not in env and "LC_CTYPE" not in env and "LC_TIME" not in env
+
+
+@pytest.mark.parametrize("tag, posix, language", [
+    ("en-US", "en_US.UTF-8", "en"),
+    ("ja-JP", "ja_JP.UTF-8", "ja"),
+    ("zh-TW", "zh_TW.UTF-8", "zh"),
+    ("pt_BR", "pt_BR.UTF-8", "pt"),
+    ("es-419", "es_419.UTF-8", "es"),
+    ("de", "de.UTF-8", "de"),
+    ("sr-Latn-RS", "sr_RS.UTF-8", "sr"),
+])
+def test_the_language_of_the_session_as_the_machine_declares_it(tag, posix, language):
+    env = build_launch_env({"intl.locale.requested": tag}, base_env={})
+    assert (env["LANG"], env["LC_ALL"], env["LANGUAGE"]) == (posix, posix, language)
+
+
+def test_a_session_that_declares_no_language_writes_none_and_inherits_none():
+    env = build_launch_env({}, base_env=dict(HOST_LOCALE, PATH="/usr/bin"))
+    assert not [k for k in env if k.upper() in HOST_LOCALE or k.upper() in ("LANG", "LC_ALL", "LANGUAGE")], env
+    assert env["PATH"] == "/usr/bin"
+
+
+def test_a_name_that_only_starts_like_the_zone_is_not_the_zone():
+    env = build_launch_env({}, base_env={"TZDIR": "/usr/share/zoneinfo", "LANGEXT": "x"})
+    assert env["TZDIR"] == "/usr/share/zoneinfo" and env["LANGEXT"] == "x"

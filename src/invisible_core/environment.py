@@ -112,9 +112,17 @@ MOZ_PASSED = MOZ_SET_BY_THE_CORE + MOZ_DIAGNOSTICS
 #: `MOZ_` is the one with a way in (`MOZ_PASSED`); the others have only what
 #: the core writes itself (`TOOLKIT_SET_BY_THE_CORE`).
 HOST_FAMILIES = ("MOZ_", "MESA_", "LIBGL_", "GALLIUM_", "GALLIVM_", "LP_", "__GL", "__EGL",
-                 "EGL_", "DRI_", "GDK_", "GTK_")
+                 "EGL_", "DRI_", "GDK_", "GTK_", "LC_")
+#: Variables of the host's zone and language, by exact name (a prefix would take `TZDIR` and `LANGEXT` along). The
+#: engine's own paths read them before the session's declaration is asked: ICU's default zone and locale
+#: (`intl/icu/source/common/putil.cpp`), fontconfig's default language, the language of text with no `lang`
+#: (`gfxFcPlatformFontList.cpp`). The core writes the language itself, from the session's locale
+#: (`launch._declared_locale`); the zone is the pref `juggler.timezone.override`, and `TZ` is never written.
+HOST_NAMES = ("TZ", "LANG", "LANGUAGE")
 #: Written by the core, always, over whatever the caller's environment says
 #: (`launch._DISPLAY_BACKEND`).
 TOOLKIT_SET_BY_THE_CORE = ("GDK_BACKEND",)
+#: Written by the core from the session's locale (`launch._declared_locale`), after the host's are gone.
+LOCALE_SET_BY_THE_CORE = ("LANG", "LANGUAGE", "LC_ALL")
 #: Everything of `HOST_FAMILIES` the engine's environment may carry.
 FAMILIES_PASSED = MOZ_PASSED + TOOLKIT_SET_BY_THE_CORE

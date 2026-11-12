@@ -41,6 +41,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from .. import _engine_env
 from .deadline import Deadline
 
 NUL = b"\x00"
@@ -1132,9 +1133,17 @@ LAUNCH_EVENT = "invisible_core.engine.launch"
 def launch(executable: str, profile_dir: str, *, headless: bool = True,
           argv_extra: Optional[list] = None, env: Optional[dict] = None,
           ready_timeout: Optional[float] = 60.0,
-          proxy: Optional[dict] = None) -> Connection:
+          proxy: Optional[dict] = None,
+          locale: Optional[str] = None) -> Connection:
     """Launches Firefox over the pipe and returns an already-ready
     connection.
+
+    ⛔ `env` IS RAW MATERIAL, and this is where the environment of the process is BORN
+    (`_engine_env.compose`): what the host's carries of the engine's families (`MOZ_*`, the GL and
+    toolkit ones), of the zone and of the language never reaches the engine, whoever built `env`
+    (`None` is `os.environ`; the served path hands the client's), and the core writes its own over it.
+    `locale` is the session's language (`intl.locale.requested`), from which `LANG`, `LC_ALL` and
+    `LANGUAGE` are written; none declared, none written.
 
     `ready_timeout` is the caller's launch timeout, in seconds, and it bounds
     the whole startup: the readiness line, the proxy below, and whatever the
@@ -1164,7 +1173,7 @@ def launch(executable: str, profile_dir: str, *, headless: bool = True,
     argv += list(argv_extra or [])
     argv.append("-silent")
 
-    full_env = dict(os.environ if env is None else env)
+    full_env = _engine_env.compose(os.environ if env is None else env, locale)
     spawn = _spawn_windows if sys.platform == "win32" else _spawn_posix
     to_browser, from_browser, p = spawn(executable, argv, full_env)
 

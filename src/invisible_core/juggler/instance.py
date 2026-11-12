@@ -196,7 +196,8 @@ def launch(executable: str, *, prefs: Optional[Dict] = None,
                                  headless=bool(headless), env=files.env,
                                  argv_extra=list(args or []),
                                  ready_timeout=ready_timeout,
-                                 proxy=proxy_command)
+                                 proxy=proxy_command,
+                                 locale=browser_prefs.get("intl.locale.requested"))
     except connection.ReplyTimeout:
         files.remove()
         raise
