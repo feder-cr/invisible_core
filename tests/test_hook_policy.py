@@ -1035,7 +1035,7 @@ def test_missing_ruff_refuses_and_says_how_to_fix_it(tmp_path, capsys):
     code, _ = run_policy(root, run=run)
     err = capsys.readouterr().err
     assert code == 1
-    assert "needs ruff" in err and "pip install ruff" in err, err
+    assert "needs ruff" in err and "dev extras" in err and "INVISIBLE_GATE_PYTHON" in err, err
     assert "INVISIBLE_GATE_PYTHON" in err
     assert not any(c[1:4] == ["-m", "ruff", "check"] for c in run.calls), (
         "the check ran although ruff could not be found")
