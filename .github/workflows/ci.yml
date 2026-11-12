@@ -1,12 +1,28 @@
 name: ci
 
 on:
+  # ONE run per commit. A branch with a pull request is covered by
+  # `pull_request`; `push` stays only for main, where the merge commit has no
+  # pull request of its own. `push: branches: ["**"]` ran this workflow twice
+  # (fifteen jobs each) for every commit pushed to a branch with an open pull
+  # request. Tags were never in the filter: the publish workflow runs the suite
+  # itself. A branch without a pull request runs nothing here: open a draft pull
+  # request (drafts run too) and the pre-push hook still runs the suite locally.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+# A new push to a pull request cancels the run of the commit it supersedes.
+# Anywhere else (a push to main, a tag, a manual run) the group is unique to the
+# run (`github.run_id`) and nothing is cancelled: the run of every commit of
+# main must finish, and a pending run of main must not be replaced either (a
+# group with a fixed name drops the older pending run, cancel or not).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Engine and GeoIP downloads go through the release API with this token.
 # Anonymous requests share a 60-an-hour limit per runner address and are the
