@@ -87,9 +87,34 @@ READ = SETTINGS + HANDOFFS
 #: (`launch._DISPLAY_BACKEND`, `launch._NO_CRASH_REPORTER`).
 MOZ_SET_BY_THE_CORE = ("MOZ_ENABLE_WAYLAND", "MOZ_CRASHREPORTER_DISABLE")
 #: Diagnostics no page reads: the engine's log (`xpcom/base/Logging.cpp`;
-#: `MOZ_LOG_MODULES` is its deprecated name for `MOZ_LOG`) and the folder some
-#: of its tests write to. They change what the engine WRITES to a file, never
-#: what a page can read, and the measurements of the studies use them.
-MOZ_DIAGNOSTICS = ("MOZ_LOG", "MOZ_LOG_FILE", "MOZ_LOG_MODULES", "MOZ_UPLOAD_DIR")
+#: `MOZ_LOG_MODULES` is its deprecated name for `MOZ_LOG`), the folder some of
+#: its tests write to, and `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS`, which only opens the
+#: chrome context to Marionette/BiDi (`remote/components/RemoteAgent.sys.mjs`),
+#: both off by themselves: no page reads it. They change what the engine WRITES
+#: or what a debugging client may reach, never what a page can read, and the
+#: measurements of the studies and the chrome-scope tests of the wrapper use them.
+MOZ_DIAGNOSTICS = ("MOZ_LOG", "MOZ_LOG_FILE", "MOZ_LOG_MODULES", "MOZ_UPLOAD_DIR",
+                   "MOZ_REMOTE_ALLOW_SYSTEM_ACCESS")
 #: Everything of the `MOZ_` family the engine's environment may carry.
 MOZ_PASSED = MOZ_SET_BY_THE_CORE + MOZ_DIAGNOSTICS
+
+# --- the GL and toolkit families of Linux: the same rule -----------------------
+#
+# On Linux the engine draws on its own Mesa, which reads none of these (its
+# options are compiled in), but the toolkit still maps the host's GLX at startup
+# for the X11 visuals, and GTK itself reads the scale (`GDK_SCALE`,
+# `GDK_DPI_SCALE`), the theme (`GTK_THEME`), the portal, the decorations and
+# the input method from the environment. A value of the host in any of them is a
+# host value on the road to what a page reads, so the prefixes below go the way
+# of the host's `MOZ_*`: out of the engine's environment, whatever its source.
+
+#: Prefixes of the host's variables that never reach the engine (upper case).
+#: `MOZ_` is the one with a way in (`MOZ_PASSED`); the others have only what
+#: the core writes itself (`TOOLKIT_SET_BY_THE_CORE`).
+HOST_FAMILIES = ("MOZ_", "MESA_", "LIBGL_", "GALLIUM_", "GALLIVM_", "LP_", "__GL", "__EGL",
+                 "EGL_", "DRI_", "GDK_", "GTK_")
+#: Written by the core, always, over whatever the caller's environment says
+#: (`launch._DISPLAY_BACKEND`).
+TOOLKIT_SET_BY_THE_CORE = ("GDK_BACKEND",)
+#: Everything of `HOST_FAMILIES` the engine's environment may carry.
+FAMILIES_PASSED = MOZ_PASSED + TOOLKIT_SET_BY_THE_CORE

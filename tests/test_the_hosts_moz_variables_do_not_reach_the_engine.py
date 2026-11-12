@@ -22,7 +22,7 @@ pytestmark = pytest.mark.unit
 
 #: The declared lists, spelled here too: the test states the contract, the registry must agree with it.
 SET_BY_THE_CORE = ("MOZ_ENABLE_WAYLAND", "MOZ_CRASHREPORTER_DISABLE")
-DIAGNOSTICS = ("MOZ_LOG", "MOZ_LOG_FILE", "MOZ_LOG_MODULES", "MOZ_UPLOAD_DIR")
+DIAGNOSTICS = ("MOZ_LOG", "MOZ_LOG_FILE", "MOZ_LOG_MODULES", "MOZ_UPLOAD_DIR", "MOZ_REMOTE_ALLOW_SYSTEM_ACCESS")
 
 #: Variables of the engine that change what a page reads, or how the browser is built around it.
 HOST_MOZ = {
@@ -82,3 +82,65 @@ def test_every_moz_variable_the_core_writes_is_in_the_declared_list():
 def test_the_registry_declares_exactly_these_lists():
     assert environment.MOZ_SET_BY_THE_CORE == SET_BY_THE_CORE
     assert environment.MOZ_DIAGNOSTICS == DIAGNOSTICS
+    assert environment.TOOLKIT_SET_BY_THE_CORE == ("GDK_BACKEND",)
+
+
+# --- the GL and toolkit families of Linux: the same rule ------------------------------------------
+
+#: What drives the GL and the toolkit on a Linux host, and a page can read through them: the scale
+#: (devicePixelRatio), the theme (system colors), the GL stack the toolkit maps at startup.
+HOST_TOOLKIT = {
+    "MESA_GL_VERSION_OVERRIDE": "4.5",
+    "MESA_EXTENSION_OVERRIDE": "-GL_EXT_texture_filter_anisotropic",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "LIBGL_DRIVERS_PATH": "/opt/host-mesa",
+    "GALLIUM_DRIVER": "zink",
+    "LP_NUM_THREADS": "1",
+    "__GL_THREADED_OPTIMIZATIONS": "1",
+    "__EGL_VENDOR_LIBRARY_FILENAMES": "/opt/host/10_nvidia.json",
+    "EGL_PLATFORM": "wayland",
+    "DRI_PRIME": "1",
+    "GDK_SCALE": "2",
+    "GDK_DPI_SCALE": "1.5",
+    "GTK_THEME": "Adwaita:dark",
+    "GTK_USE_PORTAL": "1",
+    "GTK_IM_MODULE": "ibus",
+}
+
+
+@pytest.mark.parametrize("name", sorted(HOST_TOOLKIT))
+def test_a_gl_or_toolkit_variable_of_the_host_does_not_reach_the_engine(name, monkeypatch):
+    monkeypatch.setenv(name, HOST_TOOLKIT[name])
+    env = build_launch_env({})
+    assert name not in env, "%s=%s of the host reached the engine" % (name, HOST_TOOLKIT[name])
+
+
+def test_the_toolkit_families_are_dropped_from_a_callers_environment_too():
+    env = build_launch_env({}, base_env={"PATH": "/usr/bin", "HOME": "/home/x", **HOST_TOOLKIT})
+    assert not [k for k in env if k in HOST_TOOLKIT], sorted(k for k in env if k in HOST_TOOLKIT)
+    assert env["PATH"] == "/usr/bin" and env["HOME"] == "/home/x", "only the declared families are filtered"
+
+
+def test_the_one_toolkit_variable_the_core_writes_is_written_over_the_hosts():
+    env = build_launch_env({}, base_env={"GDK_BACKEND": "wayland"})
+    assert env["GDK_BACKEND"] == "x11"
+
+
+def test_the_display_of_a_session_is_not_a_family_variable():
+    """DISPLAY and XAUTHORITY are the session's surface (`display_env`), not the host's."""
+    env = build_launch_env({}, base_env={"DISPLAY": ":0"}, display_env={"DISPLAY": ":99", "XAUTHORITY": "/tmp/x"})
+    assert env["DISPLAY"] == ":99" and env["XAUTHORITY"] == "/tmp/x"
+
+
+# --- the three a page reads, by name ---------------------------------------------------------------
+
+def test_the_scale_of_the_host_does_not_reach_the_engine():
+    """GDK_SCALE and GDK_DPI_SCALE set the scale GTK reports, so `devicePixelRatio` and every CSS length."""
+    env = build_launch_env({}, base_env={"GDK_SCALE": "2", "GDK_DPI_SCALE": "1.5"})
+    assert "GDK_SCALE" not in env and "GDK_DPI_SCALE" not in env, env
+
+
+def test_the_theme_of_the_host_does_not_reach_the_engine():
+    """GTK_THEME decides the system colors (`CSS system colors`, `prefers-color-scheme`) of a GTK engine."""
+    env = build_launch_env({}, base_env={"GTK_THEME": "Adwaita:dark"})
+    assert "GTK_THEME" not in env, env
