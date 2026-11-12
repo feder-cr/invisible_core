@@ -45,7 +45,8 @@ def test_the_generated_protocol_has_the_five_domains():
     # parent), both for invisible_selenium.
     # 80 since firefox-62: `Page.getFrameOrigin` (where the viewport of a frame
     # starts in the main frame's, across processes; the hit-target check).
-    assert len(COMMANDS) == 80, "commands: %d" % len(COMMANDS)
+    # 81 since the engine after firefox-63: `Page.addBinding` (a binding of one page, for page.expose_function).
+    assert len(COMMANDS) == 81, "commands: %d" % len(COMMANDS)
     assert len(EVENTS) == 35, "events: %d" % len(EVENTS)
 
 
