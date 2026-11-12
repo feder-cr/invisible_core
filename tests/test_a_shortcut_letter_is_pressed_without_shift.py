@@ -93,3 +93,38 @@ def test_the_floor_of_the_shifted_character_is_where_it_was():
         kb.press(chord)
         assert ("keydown", "Shift") in _keys(c.events), "%s: Shift was not held: %r" % (chord, _keys(c.events))
         assert ("keydown", key) in _keys(c.events), "%s: %r" % (chord, _keys(c.events))
+
+
+def test_a_keyboard_without_the_lowercase_key_resolves_the_capital_as_before_and_never_raises_a_key_error(monkeypatch):
+    full = _kb()[1]._closure
+    reduced = {k: v for k, v in full.items() if k != "a"}
+    monkeypatch.setattr(Keyboard, "_closure", property(lambda self: reduced))
+    c, kb = _kb()
+    kb.press("Control+A")  # nothing is lowered: the capital keeps resolving, with the Shift of B270, as it did
+    assert ("keydown", "A") in _keys(c.events)
+    assert ("keydown", "Shift") in _keys(c.events)
+    c, kb = _kb()
+    kb.down("Control")
+    kb.down("A")
+    kb.up("A")
+    kb.up("Control")
+    assert ("keydown", "A") in _keys(c.events) and not kb._lowered
+
+
+def test_a_down_that_was_never_closed_does_not_change_the_key_of_a_bare_capital_pressed_later():
+    c, kb = _kb()
+    kb.down("Control")
+    kb.down("A")  # the shortcut key, never released
+    kb.up("Control")
+    assert kb._lowered, "the lowered key is remembered for its up"
+    c.events.clear()
+    kb.press("A")  # a bare capital: Shift, the capital key, and its up is the capital too
+    assert _keys(c.events) == [("keydown", "Shift"), ("keydown", "A"), ("keyup", "A"), ("keyup", "Shift")]
+    assert not kb._lowered
+    # The entry is for the `down` that made it: a later `down` of the same key that is not a shortcut clears it at once.
+    c, kb = _kb()
+    kb.down("Control")
+    kb.down("A")
+    kb.up("Control")
+    kb.down("A")
+    assert not kb._lowered, "the entry of a down that was never closed outlived the next down of the same key"
