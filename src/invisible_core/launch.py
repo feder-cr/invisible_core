@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import _engine_env
 from . import environment
 from ._headless import DESKTOP_ENV
 from ._webrtc_network import network_to_declare
@@ -101,29 +102,6 @@ def tz_env(timezone: str) -> str:
     return timezone
 
 
-#: The display backend of EVERY session, hidden or headed (A9 of
-#: 28-valori-dell-host.md). Until 49.46.0 only the hidden session's Xvfb
-#: carried these two, so a headed Linux session inherited the host's: on a
-#: Wayland desktop (WSLg, GNOME) the browser ran on Wayland, with a window
-#: geometry, a scale and a clipboard of a different backend from the one every
-#: other session declares. One declaration for both modes, here, where the
-#: environment is composed; a headed X11 session draws through the desktop's
-#: XWayland, as `DISPLAY` says. Written on every platform, not in a
-#: `sys.platform` branch: the Windows build has no GTK and reads neither, and
-#: one environment for both builds is the thing that cannot drift.
-_DISPLAY_BACKEND = {"MOZ_ENABLE_WAYLAND": "0", "GDK_BACKEND": "x11"}
-
-#: The browser never opens its crash reporter. The engine refuses a launch whose declarations
-#: are incomplete (StealthRefuse), and that refusal ends in an abort on purpose: with the reporter
-#: on, Windows starts crashreporter.exe, which shows a "Crash Reporter" window on the desktop of
-#: whoever runs the browser and waits there for a click (313 windows in one e2e run of the wrapper).
-#: A crash of a headless session has no one to read the dialog and nothing to send, and the
-#: reason of a refusal is in the browser's output, which the launcher already reads. Written
-#: here, in the one place the environment is composed, so every launch carries it, and over
-#: whatever the caller's environment says: a session that opens a dialog is not a session.
-_NO_CRASH_REPORTER = {"MOZ_CRASHREPORTER_DISABLE": "1"}
-
-
 def build_launch_env(
     prefs: Dict[str, Any],
     *,
@@ -181,15 +159,14 @@ def build_launch_env(
             "engine reads the session's zone from juggler.timezone.override, not "
             "from TZ. It will be removed in the next release.",
             DeprecationWarning, stacklevel=2)
-    env = dict(os.environ if base_env is None else base_env)
+    env = _engine_env.without_the_hosts(dict(os.environ if base_env is None else base_env))
     if manifest_path is not None:
         # An already-set value in base_env wins, same rule as the network declaration:
         # an A/B harness has to be able to point this somewhere else.
         env.setdefault(environment.FONT_MANIFEST, str(manifest_path))
     if network_declared:
         env.setdefault(environment.WEBRTC_NETWORK, network_declared)
-    env.update(_DISPLAY_BACKEND)
-    env.update(_NO_CRASH_REPORTER)
+    env.update(_engine_env.declared(prefs.get("intl.locale.requested")))
     env.pop(DESKTOP_ENV, None)
     for k, v in (display_env or {}).items():
         if v is None:
@@ -197,7 +174,6 @@ def build_launch_env(
         else:
             env[k] = v
     return env
-
 
 
 class FontManifestMismatch(RuntimeError):
