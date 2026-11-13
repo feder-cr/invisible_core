@@ -128,6 +128,15 @@ class Actions:
     #: outside a commit. See `_act_on_target`.
     _landing_target = None
 
+    #: ⛔ THE BUTTONS THE MOUSE HOLDS DOWN, as the `buttons` bitmask (left 1,
+    #: right 2, middle 4). It is the state of the mouse, so it lives here: set
+    #: by `mouse_down`, cleared by `mouse_up`, and carried by every move that
+    #: does not name its own. Without it a drag (down, move, up) reached the
+    #: page as moves with `event.buttons === 0` - sliders and canvases never
+    #: followed, and no real device or stock Playwright says that. A class
+    #: default for a bench that builds this object without `__init__`.
+    _pressed = 0
+
     def __init__(self, connection, session: str, lifecycle, injected, *,
                  acts, session_seed=None, motion_budget_s=None,
                  engine_approach: bool = False, layout: str = "us"):
@@ -1036,7 +1045,7 @@ class Actions:
         return self._retry(selector, run, timeout=timeout,
                            frame_id=frame_id, position=position, **opts)
 
-    def _approach(self, point, *, buttons: int = 0, modifiers: int = 0,
+    def _approach(self, point, *, buttons: Optional[int] = None, modifiers: int = 0,
                   stop_short: bool = False) -> int:
         """Bring the pointer to *point* before an action.
 
@@ -1060,12 +1069,12 @@ class Actions:
         return self._glide(point, buttons=buttons, modifiers=modifiers,
                            stop_short=stop_short)
 
-    def glide_to(self, x: float, y: float, *, buttons: int = 0) -> int:
+    def glide_to(self, x: float, y: float, *, buttons: Optional[int] = None) -> int:
         """Move the pointer to (x, y) along a drawn path. For callers that
         drive the pointer directly, such as Selenium's ActionChains."""
         return self._glide((x, y), buttons=buttons)
 
-    def _glide(self, to_point, *, buttons: int = 0, modifiers: int = 0,
+    def _glide(self, to_point, *, buttons: Optional[int] = None, modifiers: int = 0,
                stop_short: bool = False) -> int:
         """Move the pointer to *to_point* along a path a hand could have drawn.
 
@@ -1202,15 +1211,22 @@ class Actions:
         for i in range(1, max(1, steps) + 1):
             self._mouse_event("mousemove",
                               (x0 + (x - x0) * i / steps,
-                               y0 + (y - y0) * i / steps))
+                               y0 + (y - y0) * i / steps),
+                              buttons=self._pressed)
 
     def mouse_down(self, *, button: int = 0, clicks: int = 1) -> None:
+        pressed = self._pressed | BUTTON_MASK[button]
         self._mouse_event("mousedown", self.position, button=button,
-                          buttons=BUTTON_MASK[button], click_count=clicks)
+                          buttons=pressed, click_count=clicks)
+        self._pressed = pressed
 
     def mouse_up(self, *, button: int = 0, clicks: int = 1) -> None:
+        # The release's `buttons` is what stays pressed AFTERWARD: with the
+        # left and the right down, letting go of one leaves the other.
+        pressed = self._pressed & ~BUTTON_MASK[button]
         self._mouse_event("mouseup", self.position, button=button,
-                          buttons=0, click_count=clicks)
+                          buttons=pressed, click_count=clicks)
+        self._pressed = pressed
 
     def click_at(self, x: float, y: float, *, button: int = 0,
                 clicks: int = 1, delay_ms: Optional[float] = None):
@@ -1247,11 +1263,12 @@ class Actions:
         for n in range(1, clicks + 1):
             dwell_ms, gap_ms = plan[n - 1]
             self._mouse_event("mousedown", point, button=button,
-                              buttons=BUTTON_MASK[button], click_count=n,
-                              modifiers=modifiers)
+                              buttons=self._pressed | BUTTON_MASK[button],
+                              click_count=n, modifiers=modifiers)
             if dwell_ms > 0.0:
                 time.sleep(dwell_ms / 1000.0)
-            self._mouse_event("mouseup", point, button=button, buttons=0,
+            self._mouse_event("mouseup", point, button=button,
+                              buttons=self._pressed & ~BUTTON_MASK[button],
                               click_count=n, modifiers=modifiers)
             if gap_ms > 0.0:
                 time.sleep(gap_ms / 1000.0)
@@ -1435,8 +1452,10 @@ class Actions:
 
     # ── the tools ───────────────────────────────────────────────────────────
     def _mouse_event(self, event_type: str, point, *, button: int = 0,
-                     buttons: int = 0, click_count: Optional[int] = None,
+                     buttons: Optional[int] = None, click_count: Optional[int] = None,
                      modifiers: int = 0):
+        if buttons is None:
+            buttons = self._pressed
         p = {"type": event_type, "x": point[0], "y": point[1],
              "button": button, "buttons": buttons,
              # The modifiers come from the KEYBOARD unless the caller
