@@ -352,6 +352,11 @@ class EventListeners:
         a stand-in that is never closed, when the connection is collected."""
         with self._deadlines_lock:
             if self._deadlines is None:
+                # The rule, enforced and not only described: the clock is never STARTED on the reader. A page built on the reader one
+                # day would start it there and make the reader wait for the new thread; it is refused, and the listener's failure is
+                # recorded in `handler_errors` by `dispatch_event`.
+                if threading.current_thread() is getattr(self, "_reader", None):
+                    raise RuntimeError("the deadline clock of a connection is not started on its reader thread")
                 clock = DeadlineClock()
                 weakref.finalize(self, clock.stop)
                 self._deadlines = clock

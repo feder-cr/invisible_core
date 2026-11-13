@@ -132,3 +132,50 @@ def test_a_detached_page_has_no_check_left_and_the_clock_ends_with_the_connectio
     thread.join(5)
     assert not thread.is_alive(), "the thread of deadlines outlived its connection"
     engine.close()
+
+
+def test_two_pages_built_at_once_share_one_clock_thread(starts):
+    """Two pages born together on two threads (the client's `new_page` and an adoption): ONE `juggler-deadlines` thread is started
+    for the connection, made under its lock."""
+    engine = _Engine()
+    try:
+        go = threading.Barrier(2)
+        made = []
+
+        def build(session):
+            go.wait()
+            made.append(Lifecycle(engine.connection, session))
+        threads = [threading.Thread(target=build, args=(s,)) for s in ("S1", "S2")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5)
+        assert len(made) == 2
+        assert made[0]._clock is made[1]._clock
+        assert [c for c in starts if c[1] == "juggler-deadlines"] != [] and             len([c for c in starts if c[1] == "juggler-deadlines"]) == 1, starts
+    finally:
+        engine.close()
+
+
+def test_a_page_built_on_the_reader_does_not_start_the_clock_there(starts):
+    """Known-bad input: a listener that builds the connection's first page ON the reader. The clock is refused there (no start from
+    the reader), and the refusal is recorded, not swallowed."""
+    engine = _Engine()
+    try:
+        built = []
+
+        def on_event(method, params, session):
+            if method == "Page.frameAttached" and not built:
+                built.append(True)
+                Lifecycle(engine.connection, "S9")
+        engine.connection.add_listener(on_event)
+        engine.send("Page.frameAttached", {"frameId": "F9"})
+        assert _wait(lambda: built), "the event never reached the listener"
+        assert _wait(lambda: engine.connection.handler_errors), "the refusal was not recorded"
+        assert "not started on its reader thread" in engine.connection.handler_errors[0], engine.connection.handler_errors
+        reader = engine.connection._reader.name
+        assert [c for c in starts if c[0] == reader] == [], starts
+        assert engine.connection._deadlines is None
+    finally:
+        engine.close()
+
