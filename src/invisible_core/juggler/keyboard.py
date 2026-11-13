@@ -68,9 +68,20 @@ FIREFOX_OVERRIDES = {
 }
 
 
-def _sleep_ms(ms: float) -> None:
-    if ms > 0.0:
-        time.sleep(ms / 1000.0)
+def _now() -> float:
+    """The clock every key's time is read from: the module's `time`, looked up at each call, so a test can stand a clock in its place."""
+    return time.monotonic()
+
+
+def _wait(seconds: float) -> None:
+    time.sleep(seconds)
+
+#: ⛔ THE FLOOR UNDER A KEY THAT IS LATE. A key whose planned time has already passed (a reply that came back after the next deadline, a
+#: stalled host) goes at once, in order, and the keys after it keep THEIR OWN planned times: nothing that follows is shifted by the
+#: lateness. What stops a stall from coming out as a burst of keys 2 ms apart (no hand does that) is this floor: an event is never sent
+#: less than the plan's own spacing from the one before it, up to this many milliseconds. Below the spacing the plan drew there is no
+#: floor to keep; above it, 20 ms is what a hand needs between releasing one key and pressing the next.
+MIN_KEY_SPACING_MS = 20.0
 
 
 class UnknownKey(ValueError):
@@ -385,6 +396,13 @@ class Keyboard:
         #: (`_behaviour.InputLatency`, [B299]), drawn per key event; None
         #: sends none, and the engine hands the key over as it is born.
         self.latency = latency
+        #: When (`_now`) the last key event was SENT, stamped just before it goes out: the hold of a key and the floor under a late
+        #: event are measured from here, never from the reply (which the engine delays by the event's `latency`).
+        self._last_send = 0.0
+        #: The planned time (ms from the start of the action) of the last event `_due` waited for.
+        self._planned_last = 0.0
+        #: The start of the action in `_now` terms, set by `type`; None outside it.
+        self._origin = None
 
     # ── the resolution ──────────────────────────────────────────────────────
     @property
@@ -429,11 +447,11 @@ class Keyboard:
         (widget/windows hands every key message it gets to the page)."""
         lead_ms, lag_ms = self._plan_shift(1)[0]
         self.down(first)
-        _sleep_ms(lead_ms)
+        self._hold(lead_ms)
         self.down("ShiftLeft")
-        _sleep_ms(self._dwell_ms())
+        self._hold(self._dwell_ms())
         self.up("ShiftLeft")
-        _sleep_ms(lag_ms)
+        self._hold(lag_ms)
         self.up(first)
 
     def _steps(self, board: int, active: int, current: dict) -> tuple:
@@ -573,6 +591,7 @@ class Keyboard:
         # it twice. Read in `RawKeyboardImpl3.keydown`.
         if text == "\r":
             text = ""
+        self._last_send = _now()
         self.c.send("Page.dispatchKeyEvent", self._born(
                      {"type": "keydown", "key": d["key"], "code": d["code"],
                       "keyCode": d["keyCodeWithoutLocation"],
@@ -592,6 +611,7 @@ class Keyboard:
         self.pressed.discard(d["code"])
         # ⛔ NO `text` here: Juggler raises `keyup does not support text
         # option` and typing dies halfway through.
+        self._last_send = _now()
         self.c.send("Page.dispatchKeyEvent", self._born(
                      {"type": "keyup", "key": d["key"], "code": d["code"],
                       "keyCode": d["keyCodeWithoutLocation"],
@@ -612,7 +632,31 @@ class Keyboard:
         from ._behaviour import born
         return born(params, self.latency, self.acts)
 
-    def press(self, key: str, *, dwell_ms: Optional[float] = None) -> None:
+    def _hold(self, ms: float) -> None:
+        """Keep a key (or Shift) down `ms` milliseconds counted from when its event was SENT.
+
+        ⛔ NOT FROM ITS REPLY. The engine answers a key event after it has held it for its `latency` (PageAgent `_dispatchKeyEvent`), and
+        a loaded host answers later still; sleeping `ms` after the reply made every hold, and everything after it, that much longer."""
+        left = ms / 1000.0 - (_now() - self._last_send)
+        if left > 0.0:
+            _wait(left)
+
+    def _due(self, planned_ms: float, floor_ms: Optional[float] = None) -> None:
+        """Wait until the event planned `planned_ms` after the start of the action (`type`), and no longer.
+
+        The time is absolute: the start of the action plus the plan, so what an earlier reply cost is not paid again. If it has already
+        passed, nothing is slept: the event goes now, after the one before it (the calls are sequential, so the order is the plan's),
+        but never closer to the last event sent than `floor_ms` (default: the plan's own spacing, at most `MIN_KEY_SPACING_MS`)."""
+        if floor_ms is None:
+            floor_ms = min(max(planned_ms - self._planned_last, 0.0), MIN_KEY_SPACING_MS)
+        self._planned_last = planned_ms
+        due = max(self._origin + planned_ms / 1000.0, self._last_send + floor_ms / 1000.0)
+        left = due - _now()
+        if left > 0.0:
+            _wait(left)
+
+    def press(self, key: str, *, dwell_ms: Optional[float] = None,
+              _start_ms: Optional[float] = None) -> None:
         """`press("a")`, `press("Enter")`, `press("Control+Shift+KeyA")`.
 
         The modifiers are held down for the whole final key and released
@@ -659,14 +703,16 @@ class Keyboard:
         try:
             for m, (lead_ms, _) in zip(holds, timings):
                 self.down(m)
-                _sleep_ms(lead_ms)
+                self._hold(lead_ms)
             try:
+                if _start_ms is not None:
+                    self._due(_start_ms)
                 self.down(final)
-                _sleep_ms(dwell_ms)
+                self._hold(dwell_ms)
                 self.up(final)
             finally:
                 for m, (_, lag_ms) in reversed(list(zip(holds, timings))):
-                    _sleep_ms(lag_ms)
+                    self._hold(lag_ms)
                     self.up(m)
         finally:
             for m in reversed(held):
@@ -732,29 +778,38 @@ class Keyboard:
                 lead_at[i], lag = next(timing)
             if ends[i]:
                 lag_at[i] = lag
-        for i, ch in enumerate(text):
-            dwell_ms, gap_ms = plan[i]
-            self._switch_to(boards[i])
-            if starts[i]:
-                self.down("Shift")
-                _sleep_ms(lead_at[i])
-            if boards[i] is not None:
-                self.press(ch, dwell_ms=dwell_ms)
-            else:
-                self.insert_text(ch)
-            if i == len(text) - 1:
+        # ⛔ EVERY EVENT IS SENT AT ITS PLANNED TIME FROM THE START OF THE ACTION, not at "the previous reply plus the gap". The engine
+        # holds the reply of a key event for its `latency` (about 11 ms, PageAgent `_dispatchKeyEvent`) and a loaded host answers later
+        # still: sleeping the plan after each reply made the last key of a 19-character address go 450-600 ms late on a quiet host and
+        # seconds on a busy one, so what a page read as the rhythm was the host's. Key i goes down at `start`, the sum of the plan's
+        # `dwell + gap` before it (the same instants the relative sleeps hit when every reply was instant); its keyup `dwell_ms` after
+        # its keydown was SENT (`_hold`); a Shift run's Shift goes down `lead` before its first key and up `lag` after its last keyup.
+        # An event whose time has passed goes at once and the next ones keep their own times (`_due`).
+        # The first key is at 0; a first Shift run's Shift goes down `lead` before it, so the clock starts that much later.
+        self._origin = _now() + (lead_at[0] / 1000.0 if starts and starts[0] else 0.0)
+        self._planned_last = -(lead_at[0] if starts and starts[0] else 0.0)
+        start = 0.0
+        try:
+            for i, ch in enumerate(text):
+                dwell_ms, gap_ms = plan[i]
+                wait_ms = delay_ms if delay_ms else gap_ms
+                # A keyboard switch (Alt+Shift, `_switch_to`) is not in the plan: it happens when this character's turn comes and, if it
+                # takes longer than the lead, the key is late by the difference, as it always was; the keys after it are not.
+                self._due(start - (lead_at[i] if starts[i] else 0.0))
+                self._switch_to(boards[i])
+                if starts[i]:
+                    self.down("Shift")
+                if boards[i] is not None:
+                    self.press(ch, dwell_ms=dwell_ms, _start_ms=start)
+                else:
+                    self._due(start)
+                    self.insert_text(ch)
                 if ends[i]:
-                    _sleep_ms(lag_at[i])
+                    self._due(start + dwell_ms + lag_at[i])
                     self.up("Shift")
-                break
-            wait_ms = delay_ms if delay_ms else gap_ms
-            if ends[i]:
-                _sleep_ms(lag_at[i])
-                self.up("Shift")
-                wait_ms -= lag_at[i]
-            if starts[i + 1]:
-                wait_ms -= lead_at[i + 1]
-            _sleep_ms(wait_ms)
+                start += dwell_ms + wait_ms
+        finally:
+            self._origin = None
 
     def _dwell_ms(self) -> float:
         """How long ONE key stays down, for a press that is not part of typed
