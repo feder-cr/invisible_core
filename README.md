@@ -72,9 +72,11 @@ package generates:
 - [How to make Linux and macOS report real Windows fonts](https://github.com/oss-invisible/playwright/blob/main/docs/bundled-fonts-cross-platform.md) -
   the font side of `generate_profile`, and why the family list is bundled rather than
   sampled from the host.
-- [Canvas and WebGL fingerprints, identical across OSes](https://github.com/oss-invisible/playwright/blob/main/docs/canvas-webgl-cross-platform-consistency.md) -
-  why the same seed produces a byte-identical hash regardless of what's actually
-  running underneath.
+- [Canvas and WebGL fingerprints across OSes](https://github.com/oss-invisible/playwright/blob/main/docs/canvas-webgl-cross-platform-consistency.md) -
+  how the same seed gives the same canvas output on every host: 2D canvas is drawn on the CPU
+  (`gfx.canvas.accelerated` is always false) and noise is projected only when WebGL and WebGPU
+  pixels are read back, deterministically from the seed. Text and GPU raster can still differ
+  slightly between Linux and Windows hosts; the PNG itself is not rewritten.
 - [Playwright timezone does not match the proxy IP](https://github.com/oss-invisible/playwright/blob/main/docs/timezone-proxy-mismatch.md) -
   the surfaces this package's geo/timezone resolution has to keep in agreement.
 
