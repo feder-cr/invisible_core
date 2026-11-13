@@ -226,8 +226,10 @@ class Lifecycle:
         #: this object's, and a client that keeps frames of its own builds and
         #: retires them from these alone.
         self.announce = None
-        #: The one pending silence check, or None. See `_settle`.
-        self._settle_timer: Optional[threading.Timer] = None
+        #: Whether a silence check is pending on the connection's clock (`DeadlineClock`). See `_settle`.
+        self._settle_pending = False
+        #: The connection's one thread of deadlines, taken HERE (never on the reader, which only writes a deadline into it).
+        self._clock = connection.deadlines()
         #: The connection has ended (`_on_close`): no event will come, and a
         #: wait - with a limit or without one - says so instead of waiting.
         self._gone = False
@@ -254,9 +256,8 @@ class Lifecycle:
         self.c.remove_close_listener(self._on_close)
         with self._cv:
             self.announce = None
-            if self._settle_timer is not None:
-                self._settle_timer.cancel()
-                self._settle_timer = None
+            self._clock.cancel(self)
+            self._settle_pending = False
             # A wait on this page, with or without a limit, ends now (a page closed before it was ready, a target that went away).
             self._detached = True
             self._cv.notify_all()
@@ -326,8 +327,12 @@ class Lifecycle:
         current document.
 
         ⛔ AND IT IS BORN ON A SILENCE DEADLINE, when NOTHING happens, so no
-        event can deliver it: a timer does, one at a time. A check that finds
-        activity since it was scheduled schedules the remainder.
+        event can deliver it: the connection's clock does (`DeadlineClock`: one
+        thread for every page of the connection, started before the first
+        event; a thread started here would be started ON THE READER, and
+        `Thread.start` waits for the new thread to run), one check at a time
+        per page. A check that finds activity since it was scheduled schedules
+        the remainder.
 
         Once given it stays until the next document, as in Playwright: a
         request the page makes later does not take it back.
@@ -352,14 +357,13 @@ class Lifecycle:
                 f.states.add(state)
                 self._tell(state, f.id)
             self._cv.notify_all()
-        if later is not None and self._settle_timer is None:
-            self._settle_timer = threading.Timer(later, self._settle_later)
-            self._settle_timer.daemon = True
-            self._settle_timer.start()
+        if later is not None and not self._settle_pending:
+            self._settle_pending = True
+            self._clock.set(self, later, self._settle_later)
 
     def _settle_later(self) -> None:
         with self._cv:
-            self._settle_timer = None
+            self._settle_pending = False
             self._settle()
 
     def _apply(self, method: str, p: dict):
