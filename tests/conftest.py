@@ -231,6 +231,14 @@ def _udp_exit_is_measured_only_through_loopback(monkeypatch, request):
 
 @pytest.fixture(autouse=True)
 def _geoip_check_memory_is_per_test(monkeypatch):
-    """`ensure_geoip_mmdb` asks GitHub at most once per process: a test is a process of its own as far as that memory goes."""
-    import invisible_core._geoip_db as geoip_db
-    monkeypatch.setattr(geoip_db, "_CHECKED_THIS_PROCESS", False, raising=False)
+    """`ensure_geoip_mmdb` asks GitHub at most once per process: a test is a process of its own as far as that memory goes.
+
+    The memory lives in the module, so there is one to clear only once the module is loaded. It is read from
+    `sys.modules` and never imported here: the user-install job runs with pytest alone on the runner (the package under
+    test is in a venv the test builds from the index), and an import in an autouse fixture fails the setup of every
+    test of that job."""
+    import sys
+
+    geoip_db = sys.modules.get("invisible_core._geoip_db")
+    if geoip_db is not None:
+        monkeypatch.setattr(geoip_db, "_CHECKED_THIS_PROCESS", False, raising=False)
