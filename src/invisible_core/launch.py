@@ -259,7 +259,20 @@ def cached_font_manifest_path(manifest: str) -> "Path | None":
         # never let one read the half-written file of the other.
         tmp = out.with_suffix(f".{os.getpid()}.tmp")
         tmp.write_bytes(raw)
-        os.replace(tmp, out)
+        try:
+            os.replace(tmp, out)
+        except PermissionError:
+            # Windows refuses to replace a file another process holds open without FILE_SHARE_DELETE, and a browser
+            # holds this one open: two sessions starting together on a fresh cache, the second one's rename came after
+            # the first one's browser opened the file (the Windows e2e of 13/11, 16 launches refused with WinError 5 in
+            # one job). The file is addressed by the hash of its own bytes, so the one there is the same; it is kept,
+            # and checked, rather than replaced. A file that is NOT the same is a real failure and still raises.
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            if not (out.is_file() and out.read_bytes() == raw):
+                raise
     return out
 
 
