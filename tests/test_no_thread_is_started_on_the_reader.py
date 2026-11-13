@@ -41,12 +41,20 @@ class _Engine:
         os.write(self._to_us_w, json.dumps({"method": method, "params": params, "sessionId": S}).encode() + b"\0")
 
     def close(self):
-        self.connection.close(timeout=0)
-        for fd in (self._to_us_w, self._from_us_r):
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        # Every end released before the test returns, the reader's included: a read end closed later by a reader still running
+        # would free a descriptor number under the next test of this process (test_a_connection_releases_its_pipe_once reuses
+        # the numbers it just freed, and failed in the full suite when this closed with timeout=0 and left the reader behind).
+        try:
+            os.close(self._to_us_w)          # the engine's end: the reader sees the end of its pipe and releases its read end
+        except OSError:
+            pass
+        self.connection.close(timeout=5)
+        self.connection._reader.join(5)
+        assert not self.connection._reader.is_alive(), "the reader did not end"
+        try:
+            os.close(self._from_us_r)
+        except OSError:
+            pass
 
 
 def _wait(condition, seconds=5.0):
