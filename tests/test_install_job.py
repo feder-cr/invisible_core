@@ -96,3 +96,49 @@ def test_an_install_job_that_leaves_the_world_plugin_its_conftest_loads_is_refus
         (tmp_path / test.relative_to(_ROOT)).write_bytes(test.read_bytes())
     found = install_job.judge(tmp_path)
     assert any("-p no:invisible_core.testing.world" in what for _, what in found), found
+
+
+def _autouse_fixtures_that_import_the_package(text):
+    """Names of the autouse fixtures that import `invisible_core` for a test of the install job.
+
+    The install job runs e2e tests with pytest alone on the runner, so an autouse fixture may import the package
+    only after it has returned for an e2e test (`if request.node.get_closest_marker("e2e"): return`)."""
+    import ast
+
+    def is_autouse(function):
+        return any(isinstance(d, ast.Call) and any(k.arg == "autouse" and getattr(k.value, "value", None) is True
+                                                   for k in d.keywords) for d in function.decorator_list)
+
+    def leaves_for_e2e(statement):
+        return (isinstance(statement, ast.If) and "get_closest_marker" in ast.dump(statement.test)
+                and "'e2e'" in ast.dump(statement.test) and any(isinstance(n, ast.Return) for n in statement.body))
+
+    offenders = []
+    for function in ast.parse(text).body:
+        if not isinstance(function, ast.FunctionDef) or not is_autouse(function):
+            continue
+        for statement in function.body:
+            if leaves_for_e2e(statement):
+                break
+            imported = [n for n in ast.walk(statement) if isinstance(n, (ast.Import, ast.ImportFrom))]
+            names = [a.name for n in imported if isinstance(n, ast.Import) for a in n.names]
+            names += [n.module or "" for n in imported if isinstance(n, ast.ImportFrom)]
+            if any(name.split(".")[0] == "invisible_core" for name in names):
+                offenders.append(function.name)
+                break
+    return offenders
+
+
+def test_no_autouse_fixture_imports_the_package_for_a_test_of_the_install_job():
+    """The fixture that cleared the GeoIP memory imported the package for every test: the install job of 63.68.0,
+    which has pytest and nothing else on the runner, failed the setup of all its tests with ModuleNotFoundError."""
+    old = "\n".join((
+        "import pytest",
+        "@pytest.fixture(autouse=True)",
+        "def _geoip_check_memory_is_per_test(monkeypatch):",
+        "    import invisible_core._geoip_db as geoip_db",
+        "    monkeypatch.setattr(geoip_db, '_CHECKED_THIS_PROCESS', False, raising=False)",
+    ))
+    assert _autouse_fixtures_that_import_the_package(old) == ["_geoip_check_memory_is_per_test"]
+    conftest = (_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
+    assert _autouse_fixtures_that_import_the_package(conftest) == []
