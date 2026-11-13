@@ -230,8 +230,9 @@ class DeadlineClock:
     `Thread.start` does not return until the new thread is running (`self._started.wait()`): on Windows under load that wait is
     milliseconds, measured as 75% of the reader's delay, and each millisecond the reader is late moves the quiet that `networkidle` is
     measured from (7 misses in 400 with four browsers at once; none in 400 when the start did not wait). The rule is that no thread is
-    started on the reader: the thread that serves the deadlines exists before the first event (`Connection.__init__`, or the first
-    `Lifecycle` of a stand-in connection), and a listener only writes a deadline and wakes it.
+    started on the reader: the thread that serves the deadlines is made with the connection's first page (`Lifecycle.__init__`, on the
+    thread that builds the page: `Context.adopt` / `new_page` in the core, the adoption thread in the wrapper, never the reader), and a
+    listener only writes a deadline and wakes it.
 
     A deadline belongs to a key (the lifecycle that asked): setting it again moves it, `cancel` takes it away. The function is called
     OUTSIDE this lock, on this thread, one at a time, in the order of the deadlines; one that raises does not stop the others.
@@ -344,8 +345,10 @@ class EventListeners:
     def deadlines(self) -> DeadlineClock:
         """The connection's ONE thread of deadlines (`DeadlineClock`), made on the first call.
 
-        ⛔ NEVER FIRST CALLED FROM THE READER: `Connection` makes it before its reader exists, and a stand-in connection (the tests'
-        fakes) makes it when its first page is built, on the caller's thread. It ends with the connection (`announce_closed`) or, for
+        ⛔ NEVER FIRST CALLED FROM THE READER: it is made when the connection's first page is built (`Lifecycle.__init__`), on the
+        thread that builds it, and a page is never built on the reader. Not made in `Connection.__init__`: a connection with no page
+        (most of the unit tests) has no deadline to serve, and a thread started there for nothing moved the moment the readers of
+        those tests released their pipe ends (test_a_connection_releases_its_pipe_once failed in the full suite). It ends with the connection (`announce_closed`) or, for
         a stand-in that is never closed, when the connection is collected."""
         with self._deadlines_lock:
             if self._deadlines is None:
@@ -524,7 +527,6 @@ class Connection(EventListeners):
         #: The launch's deadline, from `launch`; no limit for a connection
         #: that `launch` did not make. Read by `startup_send`.
         self._startup = Deadline(None)
-        self.deadlines()        # before the reader exists: the reader never starts a thread (`DeadlineClock`)
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
