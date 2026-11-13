@@ -102,8 +102,6 @@ def tz_env(timezone: str) -> str:
     return timezone
 
 
-
-
 def build_launch_env(
     prefs: Dict[str, Any],
     *,
@@ -176,7 +174,6 @@ def build_launch_env(
         else:
             env[k] = v
     return env
-
 
 
 class FontManifestMismatch(RuntimeError):

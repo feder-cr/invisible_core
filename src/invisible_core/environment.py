@@ -84,7 +84,7 @@ READ = SETTINGS + HANDOFFS
 # the whole of what the engine's environment may carry of the `MOZ_` family.
 
 #: Written by the core, always, over whatever the caller's environment says
-#: (`launch._DISPLAY_BACKEND`, `launch._NO_CRASH_REPORTER`).
+#: (`_engine_env.DISPLAY_BACKEND`, `_engine_env.NO_CRASH_REPORTER`).
 MOZ_SET_BY_THE_CORE = ("MOZ_ENABLE_WAYLAND", "MOZ_CRASHREPORTER_DISABLE")
 #: Diagnostics no page reads: the engine's log (`xpcom/base/Logging.cpp`;
 #: `MOZ_LOG_MODULES` is its deprecated name for `MOZ_LOG`), the folder some of
@@ -117,12 +117,12 @@ HOST_FAMILIES = ("MOZ_", "MESA_", "LIBGL_", "GALLIUM_", "GALLIVM_", "LP_", "__GL
 #: engine's own paths read them before the session's declaration is asked: ICU's default zone and locale
 #: (`intl/icu/source/common/putil.cpp`), fontconfig's default language, the language of text with no `lang`
 #: (`gfxFcPlatformFontList.cpp`). The core writes the language itself, from the session's locale
-#: (`launch._declared_locale`); the zone is the pref `juggler.timezone.override`, and `TZ` is never written.
+#: (`_engine_env.declared_locale`); the zone is the pref `juggler.timezone.override`, and `TZ` is never written.
 HOST_NAMES = ("TZ", "LANG", "LANGUAGE")
 #: Written by the core, always, over whatever the caller's environment says
-#: (`launch._DISPLAY_BACKEND`).
+#: (`_engine_env.DISPLAY_BACKEND`).
 TOOLKIT_SET_BY_THE_CORE = ("GDK_BACKEND",)
-#: Written by the core from the session's locale (`launch._declared_locale`), after the host's are gone.
+#: Written by the core from the session's locale (`_engine_env.declared_locale`), after the host's are gone.
 LOCALE_SET_BY_THE_CORE = ("LANG", "LANGUAGE", "LC_ALL")
 #: Everything of `HOST_FAMILIES` the engine's environment may carry.
 FAMILIES_PASSED = MOZ_PASSED + TOOLKIT_SET_BY_THE_CORE

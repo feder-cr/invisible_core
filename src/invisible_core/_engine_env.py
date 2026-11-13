@@ -63,7 +63,7 @@ def declared_locale(tag: Optional[str]) -> Dict[str, str]:
     """The language of the machine, as the session declares it, in the three variables a process reads it from.
 
     Fontconfig's default language, the language the engine gives to text with no `lang`, and the C library's
-    locale come from `LANG`/`LC_ALL`/`LANGUAGE`; the host's are gone (`_without_the_hosts_families`), so what
+    locale come from `LANG`/`LC_ALL`/`LANGUAGE`; the host's are gone (`without_the_hosts`), so what
     they say is the session's `intl.locale.requested` (`tag`) (`it-IT` -> `it_IT.UTF-8`, `it`). Nothing declared, nothing
     written. A process has ONE value of each, a context may have its own language: the engine answers a context
     from the context's declaration, this is the floor under it."""
