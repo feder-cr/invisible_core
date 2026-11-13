@@ -15,7 +15,6 @@ import pytest
 
 from invisible_core._fpforge import generate_profile
 from invisible_core.prefs import (
-    _LINUX_XVFB_WORKAROUNDS,
     _WIN_VIRT_DESKTOP_WORKAROUNDS,
     translate_profile_to_prefs,
 )
@@ -34,5 +33,4 @@ def test_canvas_is_not_accelerated_on_any_host(monkeypatch, platform, virtual_di
 
 
 def test_declared_once_not_in_a_platform_table():
-    assert "gfx.canvas.accelerated" not in _LINUX_XVFB_WORKAROUNDS
     assert "gfx.canvas.accelerated" not in _WIN_VIRT_DESKTOP_WORKAROUNDS

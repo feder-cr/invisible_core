@@ -533,15 +533,16 @@ def test_webgl_extensions_preserved_on_linux(monkeypatch):
 
 @pytest.mark.unit
 def test_xvfb_workarounds_applied_on_linux(monkeypatch):
-    # XW1: Linux Firefox under Xvfb can't run WebRender, so we force the
-    # software path. These are added via ``setdefault`` so callers can
-    # still override them via ``extra_prefs``.
+    # XW1: there is no Linux table any more (it held one dead pref, see _apply_platform_workarounds):
+    # nothing of it reaches the prefs, and what a caller passes in ``extra_prefs`` still wins.
     monkeypatch.setattr(sys, "platform", "linux")
     p = generate_profile(seed=42)
     prefs = translate_profile_to_prefs(p, timezone="America/New_York")
-    assert prefs["gfx.webrender.all"] is False
-    # `gfx.webrender.force-disabled` is gone since 49.46.0: no file of the
+    # `gfx.webrender.all=False` is gone: it was the engine's default and did nothing
+    # (WebRender is mandatory in 159; on llvmpipe `gfx.webrender.reject-software-driver`
+    # decides). `gfx.webrender.force-disabled` is gone since 49.46.0: no file of the
     # engine reads it ([B171], tests/test_pref_types.py).
+    assert "gfx.webrender.all" not in prefs
     assert "gfx.webrender.force-disabled" not in prefs
 
 
