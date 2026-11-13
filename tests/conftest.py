@@ -227,3 +227,10 @@ def _udp_exit_is_measured_only_through_loopback(monkeypatch, request):
         return real(endpoint, *args, **kwargs) if loopback else _udp_exit.UdpProbe("error")
 
     monkeypatch.setattr(_udp_exit, "probe_udp_exit", probe)
+
+
+@pytest.fixture(autouse=True)
+def _geoip_check_memory_is_per_test(monkeypatch):
+    """`ensure_geoip_mmdb` asks GitHub at most once per process: a test is a process of its own as far as that memory goes."""
+    import invisible_core._geoip_db as geoip_db
+    monkeypatch.setattr(geoip_db, "_CHECKED_THIS_PROCESS", False, raising=False)
