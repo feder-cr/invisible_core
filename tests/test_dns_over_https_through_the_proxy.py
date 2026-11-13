@@ -1,4 +1,4 @@
-"""The DoH PROVIDER is a declaration of the core: exactly two ``network.trr.*`` keys, for every session.
+"""The DoH PROVIDER and the names DoH never carries are declarations of the core: exactly three ``network.trr.*`` keys, for every session.
 
 Behind a proxy every name must be resolved by Firefox's own DNS-over-HTTPS, through the proxy, and nothing local. The STATE
 (``network.trr.mode``, ``exclude-etc-hosts``, ``excluded-domains``) is derived by the ENGINE (Juggler) from the proxies it is
@@ -7,6 +7,11 @@ core's: ``network.trr.uri`` and ``network.trr.bootstrapAddr``, declared once for
 engine turns TRR on only when a proxy is present, so without one mode stays the default 0). They are USER values on purpose,
 because Firefox's DoH heuristics (``DoHController``) stand down when ``network.trr.mode`` or ``network.trr.uri`` has a user
 value. ``extra_prefs`` overrides them like any other pref.
+
+The third key, ``network.trr.builtin-excluded-domains``, is ``localhost`` and nothing else. Firefox's own value is
+``localhost,local``, and ``local`` would send every ``*.local`` name of a proxied session to the HOST's resolver (hosts file,
+DNS, a multicast query on the host's LAN): a page asking for ``x.local`` would read the host. Without a proxy the list is
+inert (mode 0, every lookup native); with one, ``*.local`` goes to DoH through the proxy like any other name.
 
 What the core still owns besides: ``network.proxy.allow_bypass`` (False with a proxy, absent without) and
 ``network.parental_controls_cached_state`` (False). ``socks_remote_dns`` and ``socks5_remote_dns`` are not declared: a Juggler
@@ -36,6 +41,10 @@ _NO_PROXY = (None, {}, {"server": ""}, {"server": "direct://"})
 #: the provider, declared by the core; the address is one of the two `mozilla.cloudflare-dns.com` answered with on 2026-11-11
 _PROVIDER = {"network.trr.uri": "https://mozilla.cloudflare-dns.com/dns-query",
              "network.trr.bootstrapAddr": "162.159.61.4"}
+#: the names DoH never carries; Firefox's own value is "localhost,local", and `local` is what this declaration removes
+_BUILTIN = {"network.trr.builtin-excluded-domains": "localhost"}
+#: everything of ``network.trr.`` the core declares
+_DECLARED = {**_PROVIDER, **_BUILTIN}
 #: the state, written by the engine from the proxies it is given: the core never writes these
 _ENGINE_OWNED = ("network.trr.mode", "network.trr.exclude-etc-hosts", "network.trr.excluded-domains")
 
@@ -85,7 +94,7 @@ def test_the_bypass_pref_is_absent_without_a_proxy(proxy):
 def test_the_composed_prefs_of_a_proxied_session_declare_exactly_the_provider(server):
     proxied = compose_session_prefs(generate_profile(seed=7), timezone="America/New_York",
                                     proxy={"server": server}).prefs
-    assert _trr(proxied) == _PROVIDER, _trr(proxied)
+    assert _trr(proxied) == _DECLARED, _trr(proxied)
     assert proxied["network.proxy.allow_bypass"] is False
     assert proxied["network.parental_controls_cached_state"] is False
 
@@ -94,7 +103,7 @@ def test_the_composed_prefs_of_a_proxied_session_declare_exactly_the_provider(se
 def test_the_composed_prefs_of_a_direct_session_declare_the_same_provider(proxy):
     """One declaration for every session: harmless without a proxy, where the engine leaves TRR at mode 0."""
     direct = compose_session_prefs(generate_profile(seed=7), timezone="America/New_York", proxy=proxy).prefs
-    assert _trr(direct) == _PROVIDER, _trr(direct)
+    assert _trr(direct) == _DECLARED, _trr(direct)
     assert "network.proxy.allow_bypass" not in direct
 
 
@@ -104,7 +113,7 @@ def test_the_provider_is_the_same_for_every_seed(seed):
     plain = compose_session_prefs(generate_profile(seed=seed), timezone="America/New_York").prefs
     proxied = compose_session_prefs(generate_profile(seed=seed), timezone="America/New_York",
                                     proxy={"server": "socks5://203.0.113.9:1080"}).prefs
-    assert _trr(plain) == _PROVIDER == _trr(proxied)
+    assert _trr(plain) == _DECLARED == _trr(proxied)
 
 
 @pytest.mark.parametrize("server", [None, *_PROXIES])
@@ -118,20 +127,32 @@ def test_the_engine_owned_keys_never_appear(server):
             assert name not in prefs, name
 
 
-def test_the_translated_profile_declares_exactly_the_provider():
+def test_the_translated_profile_declares_exactly_the_provider_and_the_builtin_exclusion():
     prefs = translate_profile_to_prefs(generate_profile(seed=7), timezone="America/New_York")
-    assert _trr(prefs) == _PROVIDER, _trr(prefs)
+    assert _trr(prefs) == _DECLARED, _trr(prefs)
 
 
 @pytest.mark.parametrize("server", [None, *_PROXIES])
-def test_the_default_prefs_declare_exactly_the_provider(server):
+def test_the_default_prefs_declare_exactly_the_provider_and_the_builtin_exclusion(server):
     proxy = {"server": server} if server else None
     base = get_default_stealth_prefs(7, proxy=proxy, timezone="America/New_York", locale="en-US")
-    assert _trr(base) == _PROVIDER, _trr(base)
+    assert _trr(base) == _DECLARED, _trr(base)
+
+
+@pytest.mark.parametrize("server", [None, *_PROXIES])
+def test_local_is_not_excluded_from_doh_so_no_dot_local_name_reaches_the_host(server):
+    """The page-visible reason: with `local` in the list a proxied `x.local` is answered by the host's resolver
+    (nsHostResolver::ComputeEffectiveTRRMode turns an excluded name into a native lookup). The value is exactly
+    `localhost`: not Firefox's `localhost,local`, and no `.local` entry in any spelling."""
+    proxy = {"server": server} if server else None
+    base = get_default_stealth_prefs(7, proxy=proxy, timezone="America/New_York", locale="en-US")
+    value = base["network.trr.builtin-excluded-domains"]
+    assert value == "localhost", value
+    assert [t.strip().lstrip(".") for t in value.split(",")] == ["localhost"]
 
 
 def test_the_provider_is_declared_in_one_place_only():
-    """One declaration: each of the two names is spelled by exactly one string constant of the package."""
+    """One declaration: each of the three names is spelled by exactly one string constant of the package."""
     import ast
 
     spelled = {}
@@ -139,7 +160,8 @@ def test_the_provider_is_declared_in_one_place_only():
         for n in ast.walk(ast.parse(p.read_bytes())):
             if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.startswith("network.trr."):
                 spelled.setdefault(n.value, []).append(p.name)
-    assert spelled == {"network.trr.uri": ["prefs.py"], "network.trr.bootstrapAddr": ["prefs.py"]}, spelled
+    assert spelled == {"network.trr.uri": ["prefs.py"], "network.trr.bootstrapAddr": ["prefs.py"],
+                       "network.trr.builtin-excluded-domains": ["prefs.py"]}, spelled
 
 
 def test_an_extra_prefs_override_wins_for_each_provider_key():
@@ -149,29 +171,29 @@ def test_an_extra_prefs_override_wins_for_each_provider_key():
         proxy = {"server": server} if server else None
         both = compose_session_prefs(generate_profile(seed=7), timezone="America/New_York", proxy=proxy,
                                      extra_prefs=dict(local)).prefs
-        assert _trr(both) == local, _trr(both)
+        assert _trr(both) == {**local, **_BUILTIN}, _trr(both)
         one = compose_session_prefs(generate_profile(seed=7), timezone="America/New_York", proxy=proxy,
                                     extra_prefs={"network.trr.uri": local["network.trr.uri"]}).prefs
         assert _trr(one) == {"network.trr.uri": local["network.trr.uri"],
-                             "network.trr.bootstrapAddr": _PROVIDER["network.trr.bootstrapAddr"]}
+                             "network.trr.bootstrapAddr": _PROVIDER["network.trr.bootstrapAddr"], **_BUILTIN}
 
 
 def test_a_none_extra_prefs_value_removes_the_declaration():
     """The overlay's own sentinel (None deletes) works on these keys like on any other."""
     prefs = compose_session_prefs(generate_profile(seed=7), timezone="America/New_York",
                                   extra_prefs={"network.trr.bootstrapAddr": None}).prefs
-    assert _trr(prefs) == {"network.trr.uri": _PROVIDER["network.trr.uri"]}
+    assert _trr(prefs) == {"network.trr.uri": _PROVIDER["network.trr.uri"], **_BUILTIN}
 
 
-def test_a_launch_plan_writes_the_provider_and_no_engine_owned_line(tmp_path):
-    """The direct launch has no proxy (it refuses one); its user.js carries the two provider lines and nothing else."""
+def test_a_launch_plan_writes_the_declared_trr_lines_and_no_engine_owned_line(tmp_path):
+    """The direct launch has no proxy (it refuses one); its user.js carries the three declared lines and nothing else."""
     from invisible_core.launch import build_launch_plan
 
     plan = build_launch_plan(7, profile_dir=tmp_path / "p", binary_path="/fake/firefox",
                              timezone="America/New_York", locale="en-US")
     text = (plan.profile_dir / "user.js").read_text(encoding="utf-8")
     lines = [ln for ln in text.splitlines() if "network.trr." in ln]
-    assert sorted(ln.split('"')[1] for ln in lines) == sorted(_PROVIDER), lines
+    assert sorted(ln.split('"')[1] for ln in lines) == sorted(_DECLARED), lines
     for name in _ENGINE_OWNED:
         assert name not in text
     assert "network.parental_controls_cached_state" in text

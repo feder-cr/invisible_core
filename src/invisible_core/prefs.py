@@ -477,6 +477,12 @@ _BASELINE: Dict[str, Any] = {
     #   (an e2e with a local DoH) overrides them through `extra_prefs`, which is applied last.
     "network.trr.uri":                                    "https://mozilla.cloudflare-dns.com/dns-query",
     "network.trr.bootstrapAddr":                          "162.159.61.4",
+    # Names the DoH service never sends over DoH: `localhost` only (Firefox answers it itself, 127.0.0.1 and ::1, and no
+    # lookup of it reaches the host). Firefox's own list also holds `local`, which would send every `*.local` name of a
+    # proxied session to the HOST's resolver (hosts file, DNS, and on Windows possibly a multicast query on its LAN): a
+    # page that asks for `x.local` would then read the host. Without a proxy no lookup is DoH (mode 0), so the list is
+    # inert and the lookup is native as in retail; with a proxy `*.local` goes to DoH through the proxy like any other name.
+    "network.trr.builtin-excluded-domains":               "localhost",
 
     # TLS ClientHello fingerprint - match stock Firefox byte-for-byte.
     # The Playwright/Juggler Firefox build this binary derives from re-enables
