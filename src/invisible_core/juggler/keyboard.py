@@ -392,8 +392,17 @@ class Keyboard:
         #: When (`_now`) the last key event was SENT, stamped just before it goes out: the hold of a key and the floor under a late
         #: event are measured from here, never from the reply (which the engine delays by the event's `latency`).
         self._last_send = 0.0
-        #: When (`_now`) the last keydown of a key that is not a modifier was sent: the floor under a late keydown is measured from it.
-        self._last_key_down = None
+        #: ⛔ WHEN THE PAGE SAW THE LAST EVENT, as best the reply says (`_seen`): the floors under a late event are measured from here.
+        #: The engine answers after it has dispatched the event, so the reply bounds when the page saw it, and a delivery that was late
+        #: shows as a late reply. An event sent right behind a late one, as soon as its own plan allowed, would reach the page right
+        #: behind it too: the gap the page sees, compressed below the plan (keydown gaps of 117 ms asked for 150). The reply is not used
+        #: whole: it also carries the hold the engine was asked for (`latency`) and the round trip, which are there when nothing is late,
+        #: so the time the page saw an event is the reply minus the smallest round trip this action has seen (`_rtt0`).
+        self._last_visible = None
+        self._last_key_down_visible = None
+        self._rtt0 = None
+        #: The `latency` drawn for the next event before it is sent (`_peek_latency`), to know how long the page will wait for it.
+        self._pending_latency = None
         #: The start of the action in `_now` terms, set by `type`; None outside it.
         self._origin = None
 
@@ -584,15 +593,13 @@ class Keyboard:
         # it twice. Read in `RawKeyboardImpl3.keydown`.
         if text == "\r":
             text = ""
+        params = self._born({"type": "keydown", "key": d["key"], "code": d["code"],
+                             "keyCode": d["keyCodeWithoutLocation"],
+                             "location": d["location"], "repeat": repeat,
+                             "text": text})
         self._last_send = _now()
-        if d["key"] not in MODIFIERS:
-            self._last_key_down = self._last_send
-        self.c.send("Page.dispatchKeyEvent", self._born(
-                     {"type": "keydown", "key": d["key"], "code": d["code"],
-                      "keyCode": d["keyCodeWithoutLocation"],
-                      "location": d["location"], "repeat": repeat,
-                      "text": text}),
-                     session=self.session, timeout=None)
+        self.c.send("Page.dispatchKeyEvent", params, session=self.session, timeout=None)
+        self._seen(params, d["key"] not in MODIFIERS)
 
     def up(self, key: str) -> None:
         lower = key.lower()
@@ -606,12 +613,12 @@ class Keyboard:
         self.pressed.discard(d["code"])
         # ⛔ NO `text` here: Juggler raises `keyup does not support text
         # option` and typing dies halfway through.
+        params = self._born({"type": "keyup", "key": d["key"], "code": d["code"],
+                             "keyCode": d["keyCodeWithoutLocation"],
+                             "location": d["location"], "repeat": False})
         self._last_send = _now()
-        self.c.send("Page.dispatchKeyEvent", self._born(
-                     {"type": "keyup", "key": d["key"], "code": d["code"],
-                      "keyCode": d["keyCodeWithoutLocation"],
-                      "location": d["location"], "repeat": False}),
-                     session=self.session, timeout=None)
+        self.c.send("Page.dispatchKeyEvent", params, session=self.session, timeout=None)
+        self._seen(params, False)
         if d["code"] in self._implicit_shift:
             self._implicit_shift.discard(d["code"])
             self.up("Shift")
@@ -623,9 +630,32 @@ class Keyboard:
         """A key event's parameters with its latency, when the session has
         one: the engine creates the event, waits that long and hands it
         over, so the page's handler runs after the event's birth as it does
-        for a real keyboard ([B299])."""
-        from ._behaviour import born
-        return born(params, self.latency, self.acts)
+        for a real keyboard ([B299]).
+
+        The draw is the one `_behaviour.born` makes, in the same order: `_peek_latency` only makes it earlier."""
+        if self.latency is not None:
+            params["latency"] = self._peek_latency()
+            self._pending_latency = None
+        return params
+
+    def _peek_latency(self) -> float:
+        """The `latency` the NEXT event will carry, in ms (0 with none), drawn now and kept for that event."""
+        if self.latency is None:
+            return 0.0
+        if self._pending_latency is None:
+            self._pending_latency = self.latency.draw(self.acts.next("latency"))
+        return self._pending_latency
+
+    def _seen(self, params: dict, typed_key: bool) -> None:
+        """The reply of the event just sent is in: when did the page see it? The reply minus the smallest round trip this action has
+        seen (reply minus send minus the hold asked for). When nothing is late that is the send plus the hold, exactly."""
+        hold = params.get("latency", 0.0)
+        now = _now()
+        trip = max(0.0, now - self._last_send - hold / 1000.0)
+        self._rtt0 = trip if self._rtt0 is None else min(self._rtt0, trip)
+        self._last_visible = now - self._rtt0
+        if typed_key:
+            self._last_key_down_visible = self._last_visible
 
     def _hold(self, ms: float) -> None:
         """Keep a key (or Shift) down `ms` milliseconds counted from when its event was SENT.
@@ -642,11 +672,13 @@ class Keyboard:
         The time is absolute: the start of the action plus the plan, so what an earlier reply cost is not paid again. If it has already
         passed, nothing is slept: the event goes now, after the one before it (the calls are sequential, so the order is the plan's).
 
-        ⛔ A LATE EVENT NEVER GOES CLOSER TO ANOTHER THAN THE PLAN ITSELF PRODUCES. Each floor is `(since, ms)`: the event is not sent
-        before `since` (the `_now` of an event already sent; None skips it) plus `ms`, and the callers pass the SMALLEST such distance
-        of this action's plan (the smallest keydown-to-keydown gap, the smallest dwell, ...): computed from the plan, so it moves with
-        the seed and the text, and no constant stands in for it. Lateness is then paid back only where the plan has more room than
-        that minimum, gradually; a stall never comes out as a burst the plan could not have drawn."""
+        ⛔ A LATE EVENT NEVER GOES CLOSER TO ANOTHER THAN THE PLAN ITSELF PRODUCES, AS THE PAGE SEES IT. Each floor is `(since, ms)`: the
+        event is not sent before `since` plus `ms`, where `since` is the `_now` of the REPLY of the event it must keep its distance from
+        (None skips it) and `ms` the SMALLEST such distance of this action's plan (the smallest keydown-to-keydown gap, the smallest
+        dwell, ...), computed from the plan, so it moves with the seed and the text. Measured from the send, an event right behind a
+        late reply went out at once and reached the page right behind the late one (keydown gaps of 117 ms asked for 150). In the usual
+        case the planned time is later than any floor and decides; only after a late delivery does a floor push, and lateness is paid
+        back only where the plan has more room than its minimum."""
         due = self._origin + planned_ms / 1000.0
         for since, ms in floors:
             if since is not None:
@@ -711,9 +743,9 @@ class Keyboard:
                 if _start_ms is None:
                     self._hold(dwell_ms)
                 else:
-                    # The keyup is on its own deadline: the keydown's planned time plus its dwell, and never sooner after the keydown
-                    # was SENT than the smallest dwell of the plan, so a late keydown keeps a dwell the plan itself can produce.
-                    self._due(_start_ms + dwell_ms, (self._last_send, _min_dwell_ms))
+                    # The keyup is on its own deadline: the keydown's planned time plus its dwell, and never sooner than the smallest dwell
+                    # of the plan after the keydown's REPLY, so a late keydown keeps a dwell the plan itself can produce.
+                    self._due(_start_ms + dwell_ms, (self._last_key_down_visible, _min_dwell_ms - self._peek_latency()))
                 self.up(final)
             finally:
                 for m, (_, lag_ms) in reversed(list(zip(holds, timings))):
@@ -798,7 +830,10 @@ class Keyboard:
         min_lag = min(lag_at.values()) if lag_at else 0.0
         # The first key is at 0; a first Shift run's Shift goes down `lead` before it, so the clock starts that much later.
         self._origin = _now() + (lead_at[0] / 1000.0 if starts and starts[0] else 0.0)
-        self._last_key_down = None
+        self._last_key_down_visible = None
+        self._last_visible = None
+        self._rtt0 = None
+        self._pending_latency = None
         start = 0.0
         try:
             for i, ch in enumerate(text):
@@ -808,17 +843,20 @@ class Keyboard:
                 # takes longer than the lead, the key is late by the difference, as it always was; the keys after it are not.
                 self._due(start - (lead_at[i] if starts[i] else 0.0))
                 self._switch_to(boards[i])
-                floors = [(self._last_key_down, min_keydown_gap)]
                 if starts[i]:
                     self.down("Shift")
-                    floors.append((self._last_send, min_lead))
+                # What the page waits for THIS key: its own hold is part of the gap the page sees, so the floor is taken off by it.
+                held = self._peek_latency()
+                floors = [(self._last_key_down_visible, min_keydown_gap - held)]
+                if starts[i]:
+                    floors.append((self._last_visible, min_lead - held))
                 if boards[i] is not None:
                     self.press(ch, dwell_ms=dwell_ms, _start_ms=start, _keydown_floors=floors, _min_dwell_ms=min_dwell)
                 else:
                     self._due(start, *floors)
                     self.insert_text(ch)
                 if ends[i]:
-                    self._due(start + dwell_ms + lag_at[i], (self._last_send, min_lag))
+                    self._due(start + dwell_ms + lag_at[i], (self._last_visible, min_lag - self._peek_latency()))
                     self.up("Shift")
                 start += dwell_ms + wait_ms
         finally:
