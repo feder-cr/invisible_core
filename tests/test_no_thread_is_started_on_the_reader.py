@@ -20,7 +20,7 @@ import time
 
 import pytest
 
-from invisible_core.juggler.connection import Connection
+from invisible_core.juggler.connection import Connection, EventListeners
 from invisible_core.juggler.lifecycle import IDLE_QUIET, Lifecycle
 
 pytestmark = pytest.mark.unit
@@ -157,25 +157,78 @@ def test_two_pages_built_at_once_share_one_clock_thread(starts):
         engine.close()
 
 
-def test_a_page_built_on_the_reader_does_not_start_the_clock_there(starts):
-    """Known-bad input: a listener that builds the connection's first page ON the reader. The clock is refused there (no start from
-    the reader), and the refusal is recorded, not swallowed."""
+def test_a_page_built_on_the_reader_works_and_no_thread_is_started_there(starts):
+    """The pattern the wrapper's tests use on purpose: a listener on `Browser.attachedToTarget`, ON the reader, builds the page's
+    `Lifecycle` so that its listeners exist before the session's next event is delivered. It must work (the page is registered, its
+    networkidle silence is scheduled and comes) and start no thread on the reader.
+
+    Known-bad input: a clock made lazily by the first `Lifecycle` (and refused on the reader) -> the page is never registered and
+    `handler_errors` holds the refusal (the failure of invisible_playwright's release 0.52 e2e, `KeyError: <targetId>`)."""
     engine = _Engine()
     try:
-        built = []
+        conn = engine.connection
+        reader = conn._reader.name
+        sessions = {}
 
         def on_event(method, params, session):
-            if method == "Page.frameAttached" and not built:
-                built.append(True)
-                Lifecycle(engine.connection, "S9")
-        engine.connection.add_listener(on_event)
-        engine.send("Page.frameAttached", {"frameId": "F9"})
-        assert _wait(lambda: built), "the event never reached the listener"
-        assert _wait(lambda: engine.connection.handler_errors), "the refusal was not recorded"
-        assert "not started on its reader thread" in engine.connection.handler_errors[0], engine.connection.handler_errors
-        reader = engine.connection._reader.name
+            if method == "Browser.attachedToTarget":
+                sessions[params["targetInfo"]["targetId"]] = Lifecycle(conn, params["sessionId"])
+        conn.add_listener(on_event)
+        os.write(engine._to_us_w, json.dumps({"method": "Browser.attachedToTarget", "sessionId": None,
+                                              "params": {"sessionId": "S7", "targetInfo": {"targetId": "T7", "type": "page"}}}).encode() + b"\0")
+        assert _wait(lambda: "T7" in sessions or conn.handler_errors), "the event never reached the listener"
+        assert conn.handler_errors == [], conn.handler_errors
+        life = sessions["T7"]
+        # the page works: the events of its session, delivered right after, reach the lifecycle and networkidle comes
+        os.write(engine._to_us_w, json.dumps({"method": "Page.frameAttached", "params": {"frameId": "F7"}, "sessionId": "S7"}).encode() + b"\0")
+        os.write(engine._to_us_w, json.dumps({"method": "Page.eventFired", "params": {"frameId": "F7", "name": "load"},
+                                              "sessionId": "S7"}).encode() + b"\0")
+        assert _wait(lambda: life._settle_pending), "the silence was not scheduled on the clock"
+        life.wait_for_state("F7", "networkidle", timeout=IDLE_QUIET * 6)
         assert [c for c in starts if c[0] == reader] == [], starts
-        assert engine.connection._deadlines is None
+        assert conn.handler_errors == []
     finally:
         engine.close()
 
+
+def test_the_clock_exists_before_the_reader_delivers_its_first_message(starts):
+    """The clock is made and started by `Connection.__init__` before the reader thread: the first listener call already finds it, and
+    the one thread start of the clock was not made from the reader."""
+    to_us_r, to_us_w = os.pipe()
+    from_us_r, from_us_w = os.pipe()
+    seen = []
+    conn = None
+    try:
+        conn = Connection(from_us_w, to_us_r)
+        conn.add_listener(lambda method, params, session: seen.append(conn._deadlines))
+        os.write(to_us_w, json.dumps({"method": "Page.frameAttached", "params": {"frameId": "F"}, "sessionId": S}).encode() + b"\0")
+        assert _wait(lambda: seen), "the event never reached the listener"
+        assert seen[0] is not None and seen[0]._thread.is_alive()
+        assert seen[0] is conn.deadlines()
+        started = [c for c in starts if c[1] == "juggler-deadlines"]
+        assert len(started) == 1 and started[0][0] != conn._reader.name, starts
+    finally:
+        os.close(to_us_w)
+        if conn is not None:
+            conn.close(timeout=5)
+            conn._reader.join(5)
+        for fd in (from_us_r,):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def test_close_leaves_no_deadline_thread_alive_and_a_stand_in_makes_none(starts):
+    """`close` stops and joins the connection's clock; a stand-in connection (no reader, no page) starts no thread at all."""
+    engine = _Engine()
+    conn = engine.connection
+    clock = conn.deadlines()
+    assert clock._thread.is_alive()
+    conn.close(timeout=5)
+    assert not clock._thread.is_alive(), "close returned with the thread of deadlines still alive"
+    engine.close()
+    assert [t for t in threading.enumerate() if t.name == "juggler-deadlines" and t is clock._thread] == []
+    del starts[:]
+    EventListeners()
+    assert starts == [], "a connection without a reader started a thread"
