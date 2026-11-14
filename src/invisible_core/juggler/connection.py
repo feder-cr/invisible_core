@@ -230,9 +230,8 @@ class DeadlineClock:
     `Thread.start` does not return until the new thread is running (`self._started.wait()`): on Windows under load that wait is
     milliseconds, measured as 75% of the reader's delay, and each millisecond the reader is late moves the quiet that `networkidle` is
     measured from (7 misses in 400 with four browsers at once; none in 400 when the start did not wait). The rule is that no thread is
-    started on the reader: the thread that serves the deadlines is made with the connection's first page (`Lifecycle.__init__`, on the
-    thread that builds the page: `Context.adopt` / `new_page` in the core, the adoption thread in the wrapper, never the reader), and a
-    listener only writes a deadline and wakes it.
+    started on the reader: the thread that serves the deadlines is made and started in `Connection.__init__`, BEFORE the reader thread
+    exists, so a listener on the reader can build a page (`Lifecycle`) at any time and only writes a deadline and wakes it.
 
     A deadline belongs to a key (the lifecycle that asked): setting it again moves it, `cancel` takes it away. The function is called
     OUTSIDE this lock, on this thread, one at a time, in the order of the deadlines; one that raises does not stop the others.
@@ -263,6 +262,11 @@ class DeadlineClock:
             self._stopped = True
             self._due.clear()
             self._cv.notify()
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        """Wait for the thread to end after `stop` (never from the thread itself: a deadline that closes its connection)."""
+        if threading.current_thread() is not self._thread:
+            self._thread.join(timeout)
 
     def _run(self) -> None:
         while True:
@@ -343,20 +347,21 @@ class EventListeners:
         self._deadlines_lock = threading.Lock()
 
     def deadlines(self) -> DeadlineClock:
-        """The connection's ONE thread of deadlines (`DeadlineClock`), made on the first call.
+        """The connection's ONE thread of deadlines (`DeadlineClock`).
 
-        ⛔ NEVER FIRST CALLED FROM THE READER: it is made when the connection's first page is built (`Lifecycle.__init__`), on the
-        thread that builds it, and a page is never built on the reader. Not made in `Connection.__init__`: a connection with no page
-        (most of the unit tests) has no deadline to serve, and a thread started there for nothing moved the moment the readers of
-        those tests released their pipe ends (test_a_connection_releases_its_pipe_once failed in the full suite). It ends with the connection (`announce_closed`) or, for
-        a stand-in that is never closed, when the connection is collected."""
+        ⛔ A `Connection` has it BEFORE its reader exists (`Connection.__init__` calls `start_deadlines`), so a `Lifecycle` built by a
+        listener ON the reader (the wrapper and the client build the page inside `Browser.attachedToTarget`, so that its listeners exist
+        before the session's next event is delivered) only uses it: nothing is created and nothing is started on the reader. A stand-in
+        connection (no reader, never closed) makes it here, on its first page, and the clock ends when the connection is collected."""
+        clock = self._deadlines
+        if clock is None:
+            clock = self.start_deadlines()
+        return clock
+
+    def start_deadlines(self) -> DeadlineClock:
+        """Make and start the clock once (under a lock, so two callers share it). Ends with `announce_closed` or the collection."""
         with self._deadlines_lock:
             if self._deadlines is None:
-                # The rule, enforced and not only described: the clock is never STARTED on the reader. A page built on the reader one
-                # day would start it there and make the reader wait for the new thread; it is refused, and the listener's failure is
-                # recorded in `handler_errors` by `dispatch_event`.
-                if threading.current_thread() is getattr(self, "_reader", None):
-                    raise RuntimeError("the deadline clock of a connection is not started on its reader thread")
                 clock = DeadlineClock()
                 weakref.finalize(self, clock.stop)
                 self._deadlines = clock
@@ -532,6 +537,8 @@ class Connection(EventListeners):
         #: The launch's deadline, from `launch`; no limit for a connection
         #: that `launch` did not make. Read by `startup_send`.
         self._startup = Deadline(None)
+        # ⛔ THE CLOCK BEFORE THE READER: no thread is ever started on the reader (see `DeadlineClock`), and a page may be built on it.
+        self.start_deadlines()
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
@@ -881,6 +888,11 @@ class Connection(EventListeners):
             fd, self._to_browser = self._to_browser, -1
             if fd >= 0:
                 os.close(fd)
+        # The connection's clock ends with it, and no thread of it is left alive after `close`.
+        clock = self._deadlines
+        if clock is not None:
+            clock.stop()
+            clock.join(timeout)
         p = self._process
         if not p:
             return
