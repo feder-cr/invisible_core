@@ -461,6 +461,23 @@ def test_the_nodes_of_a_file_are_listed_by_pytest_in_the_leg(tmp_path):
         collect("tests/test_missing.py")
 
 
+def test_the_e2e_nodes_are_listed_despite_the_wrappers_addopts(tmp_path):
+    # The wrapper's pyproject says `-m 'not slow and not e2e'`: a collection that
+    # inherits it lists no e2e node, and every leg died on "no tests collected"
+    # (core #272, first run).
+    mod = _load_script()
+    (tmp_path / "pyproject.toml").write_text(
+        "\n".join(["[tool.pytest.ini_options]", "addopts = \"-m 'not slow and not e2e' --strict-markers\"",
+                   "markers = [\"e2e: x\", \"slow: x\"]", ""]), encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_e2e_only.py").write_text(
+        "\n".join(["import pytest", "", "pytestmark = pytest.mark.e2e", "", "def test_a():", "    pass",
+                   "", "def test_b():", "    pass", ""]), encoding="utf-8")
+    collect = mod.collect_nodes(tmp_path, dict(os.environ, PYTEST_ADDOPTS=""))
+    assert collect("tests/test_e2e_only.py") == ["tests/test_e2e_only.py::test_a",
+                                                 "tests/test_e2e_only.py::test_b"]
+
+
 # ------------------------------------------------- when the job is needed (run for real)
 
 def _decide_script() -> str:

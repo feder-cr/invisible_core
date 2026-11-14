@@ -363,7 +363,10 @@ def files_of(part: dict) -> list[str]:
 def collect_nodes(wrapper: Path, env: dict):
     """A ``collect`` for plan_parts: the node ids of a file, as the legs see them."""
     def collect(rel: str) -> list[str]:
-        cmd = [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", rel]
+        # `-m` overrides the wrapper's addopts (`-m 'not slow and not e2e'`), which would
+        # deselect every e2e node: the legs list what they run, all of it.
+        cmd = [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider",
+               "-m", "e2e or not e2e", rel]
         done = subprocess.run(cmd, cwd=wrapper, env=env, capture_output=True, text=True)
         nodes = [ln.strip() for ln in done.stdout.splitlines() if ln.startswith(rel + "::")]
         if done.returncode != 0 or not nodes:
