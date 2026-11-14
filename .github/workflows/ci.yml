@@ -457,7 +457,9 @@ jobs:
   # names that is not published yet is red (never a skip), and so is a part that
   # ran no file it was given.
   #
-  # TWO PARTS PER SYSTEM (four legs). The test step has 8 minutes. The legs run the
+  # TWO PARTS ON LINUX, FOUR ON WINDOWS (six legs), planned by the seconds each test
+  # file took (scripts/wrapper_test_seconds.json; the long files are cut into nodes),
+  # the same plan on every leg. The test step has 12 minutes. The legs run the
   # wrapper's own e2e command (invisible_core.testing.e2e: four browsers at once,
   # the wall-clock tests alone at the end), under xvfb on Linux as the wrapper's
   # e2e job does. INVISIBLE_CORE_PIN=allow and INVISIBLE_CORE_AUTOFIX=off: the
@@ -470,15 +472,17 @@ jobs:
       startsWith(github.head_ref, 'release/') ||
       contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 12
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {os: linux, runner: ubuntu-24.04, part: 1}
-          - {os: linux, runner: ubuntu-24.04, part: 2}
-          - {os: windows, runner: windows-2022, part: 1}
-          - {os: windows, runner: windows-2022, part: 2}
+          - {os: linux, runner: ubuntu-24.04, part: 1, parts: 2}
+          - {os: linux, runner: ubuntu-24.04, part: 2, parts: 2}
+          - {os: windows, runner: windows-2022, part: 1, parts: 4}
+          - {os: windows, runner: windows-2022, part: 2, parts: 4}
+          - {os: windows, runner: windows-2022, part: 3, parts: 4}
+          - {os: windows, runner: windows-2022, part: 4, parts: 4}
     defaults:
       run:
         shell: bash
@@ -545,10 +549,10 @@ jobs:
         working-directory: wrapper
         run: python scripts/ci_lab_geoip.py build
       - name: the wrapper's tests that stand on the core, part ${{ matrix.part }}
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: |
           RUN=(python -u scripts/wrapper_on_this_core.py run --wrapper wrapper --binary "$FF"
-               --os "${{ matrix.os }}" --part "${{ matrix.part }}" --parts 2 --procs 4
+               --os "${{ matrix.os }}" --part "${{ matrix.part }}" --parts "${{ matrix.parts }}" --procs 4
                --junit-dir "$RUNNER_TEMP/wrapper-on-this-core-junit")
           if [ "$RUNNER_OS" = "Linux" ]; then
             xvfb-run -a "${RUN[@]}"

@@ -11,8 +11,8 @@ What is held here, on the files themselves and on the function that computes the
 list of tests:
 
   1. `ci.yml` has the job, on a release pull request (head branch `release/*` or
-     the label `release`) and on a push to main, on Linux and Windows in two parts
-     each, with the pin left alone (`INVISIBLE_CORE_PIN=allow`,
+     the label `release`) and on a push to main, on Linux in two parts and on
+     Windows in four, each leg told how many parts there are, with the pin left alone (`INVISIBLE_CORE_PIN=allow`,
      `INVISIBLE_CORE_AUTOFIX=off`) and the core installed over it.
   2. The single verdict (`gate`) needs it, under the very condition the job has:
      required, and green, where the job applies; skipped where it does not.
@@ -30,6 +30,7 @@ said "fine" is not known to be able to say anything else.
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
@@ -90,9 +91,10 @@ def job_problems(spec: dict) -> list[str]:
     if "pull_request" not in on or "main" not in ((on.get("push") or {}).get("branches") or []):
         out.append("ci.yml no longer runs on pull requests and on pushes to main")
     include = ((job.get("strategy") or {}).get("matrix") or {}).get("include") or []
-    legs = sorted((m.get("os"), m.get("part")) for m in include)
-    if legs != [("linux", 1), ("linux", 2), ("windows", 1), ("windows", 2)]:
-        out.append(f"the legs are {legs}, not Linux and Windows in two parts each")
+    legs = sorted((m.get("os"), m.get("part"), m.get("parts")) for m in include)
+    if legs != [("linux", 1, 2), ("linux", 2, 2), ("windows", 1, 4), ("windows", 2, 4),
+                ("windows", 3, 4), ("windows", 4, 4)]:
+        out.append(f"the legs are {legs}, not Linux in two parts and Windows in four")
     env = job.get("env") or {}
     if str(env.get("INVISIBLE_CORE_PIN")) != "allow" or str(env.get("INVISIBLE_CORE_AUTOFIX")) != "off":
         out.append("the pin is not left alone (INVISIBLE_CORE_PIN=allow, INVISIBLE_CORE_AUTOFIX=off)")
@@ -108,8 +110,10 @@ def job_problems(spec: dict) -> list[str]:
         if needle not in text:
             out.append(what)
     run_step = next((s for s in steps if "wrapper_on_this_core.py run" in str(s.get("run", ""))), {})
-    if run_step.get("timeout-minutes") != 8:
-        out.append("the test step is not held to 8 minutes")
+    if run_step.get("timeout-minutes") != 12:
+        out.append("the test step is not held to 12 minutes")
+    if '--parts "${{ matrix.parts }}"' not in str(run_step.get("run", "")):
+        out.append("a leg is not told how many parts there are (--parts from the matrix)")
     if "xvfb-run" not in text:
         out.append("Linux does not run under a virtual display")
     return out
@@ -298,15 +302,137 @@ def test_an_attempt_that_was_run_again_is_not_a_skip(tmp_path):
     assert mod.judge_junit([_junit(tmp_path / "r.xml", [PASS, PASS_B, RERUN])], FILES, [0]) == []
 
 
-def test_the_parts_cover_the_list_once_and_windows_leaves_out_what_it_cannot_run():
+SECONDS = Path(__file__).resolve().parents[1] / "scripts" / "wrapper_test_seconds.json"
+BIG = "tests/test_nested_frame_actions.py"
+
+
+def _table(mod, system):
+    return mod.load_seconds(system, SECONDS)
+
+
+def _fake_collect(table):
+    """The nodes a file has, as the table knows them, plus one the table has never seen."""
+    def collect(rel):
+        row = table[rel]
+        return [rel + "::" + n for n in row["nodes"]] + [rel + "::test_a_node_the_table_never_saw"]
+    return collect
+
+
+def _files_of_the_table(mod, system):
+    return sorted(f for f in _table(mod, system) if f not in mod.excluded_nodes(system)[0])
+
+
+def _plan(mod, system, parts):
+    table = _table(mod, system)
+    return mod.plan_parts(_files_of_the_table(mod, system), system, parts, _fake_collect(table), table)
+
+
+@pytest.mark.parametrize("system,parts", [("linux", 2), ("windows", 4)])
+def test_every_node_runs_in_exactly_one_part_as_a_whole_file_or_a_chunk(system, parts):
     mod = _load_script()
-    files = [f"tests/test_{c}.py" for c in "abcdefg"] + ["tests/test_juggler_posix_pipe.py"]
+    table = _table(mod, system)
+    files = _files_of_the_table(mod, system)
+    collect = _fake_collect(table)
+    plan = mod.plan_parts(files, system, parts, collect, table)
+    assert len(plan) == parts
+    whole = [f for p in plan for f in p["files"]]
+    chunked = [n for p in plan for n in p["nodes"]]
+    assert len(whole) == len(set(whole)) and len(chunked) == len(set(chunked))
+    long_files = {f for f in files if table[f]["parallel"] > mod.SPLIT_OVER_SECONDS}
+    assert long_files
+    assert not set(whole) & long_files, "a long file ran whole"
+    assert sorted(set(whole) | long_files) == files, "a file ran in no part"
+    _, nodes_out = mod.excluded_nodes(system)
+    for f in long_files:
+        expected = sorted(n for n in collect(f) if not any(n.startswith(x) for x in nodes_out))
+        assert sorted(n for n in chunked if n.split("::", 1)[0] == f) == expected
+    assert {n.split("::", 1)[0] for n in chunked} == long_files
+
+
+@pytest.mark.parametrize("system,parts", [("linux", 2), ("windows", 4), ("windows", 6)])
+def test_no_part_is_empty_and_the_parts_are_balanced(system, parts):
+    mod = _load_script()
+    plan = _plan(mod, system, parts)
+    for part in plan:
+        assert part["files"] or part["nodes"], plan
+        assert mod.files_of(part)
+    seconds = [p["seconds"] for p in plan]
+    # longest first onto the least loaded part: no part is far from the mean
+    assert max(seconds) - min(seconds) <= 0.15 * (sum(seconds) / parts) + 15, seconds
+
+
+def test_the_plan_is_the_same_on_every_call_and_whatever_the_order_of_the_files():
+    mod = _load_script()
+    for system, parts in (("linux", 2), ("windows", 4)):
+        table = _table(mod, system)
+        files = _files_of_the_table(mod, system)
+        first = mod.plan_parts(files, system, parts, _fake_collect(table), table)
+        assert first == mod.plan_parts(files, system, parts, _fake_collect(table), table)
+        assert first == mod.plan_parts(list(reversed(files)), system, parts,
+                                       lambda f: list(reversed(_fake_collect(table)(f))), table)
+
+
+def test_the_file_over_90_seconds_is_split_and_the_short_ones_are_not():
+    mod = _load_script()
+    table = _table(mod, "windows")
+    assert table[BIG]["parallel"] > 90
+    plan = _plan(mod, "windows", 4)
+    holders = [i for i, p in enumerate(plan) if any(n.startswith(BIG + "::") for n in p["nodes"])]
+    assert len(holders) >= 2, "the longest file stayed in one part"
+    for p in plan:
+        assert BIG not in p["files"]
+    asked = []
+    files = _files_of_the_table(mod, "windows")
+    mod.plan_parts(files, "windows", 4, lambda f: asked.append(f) or _fake_collect(table)(f), table)
+    assert sorted(asked) == sorted(f for f in files if table[f]["parallel"] > 90), \
+        "the nodes of a file that is not long were asked for"
+
+
+def test_an_unknown_file_and_an_unknown_node_are_handled():
+    mod = _load_script()
+    table = {"tests/test_known.py": {"parallel": 40.0, "serial": 4.0},
+             BIG: {"parallel": 400.0, "serial": 0.0, "nodes": {"test_a": 100.0, "test_b": 300.0}}}
+    files = ["tests/test_known.py", "tests/test_new.py", BIG]
+    nodes = [BIG + "::test_a", BIG + "::test_b", BIG + "::test_c_unseen"]
+    plan = mod.plan_parts(files, "linux", 2, lambda f: nodes, table)
+    assert sorted(f for p in plan for f in p["files"]) == ["tests/test_known.py", "tests/test_new.py"]
+    assert sorted(n for p in plan for n in p["nodes"]) == nodes
+    # the new file is worth the default (30 s of parallel time); the unseen node is worth the
+    # average of the two the table has (200 s of parallel time)
+    assert mod.DEFAULT_SECONDS == 30.0
+    total = sum(p["seconds"] for p in plan)
+    assert total == pytest.approx(40 / 4 + 4 + 30 / 4 + (100 + 300 + 200) / 4, abs=0.2)
+
+
+def test_what_cannot_run_on_a_system_is_left_out_by_name_with_its_reason():
+    mod = _load_script()
+    theme = "tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py"
+    fission = "tests/test_fission_strategy1_bench.py"
+    posix = "tests/test_juggler_posix_pipe.py"
     for system in ("linux", "windows"):
-        parts = [mod.files_of_part(files, system, n, 2) for n in (1, 2)]
-        assert not set(parts[0]) & set(parts[1])
-        assert sorted(parts[0] + parts[1]) == sorted(
-            f for f in files if not (system == "windows" and f == "tests/test_juggler_posix_pipe.py"))
-    whole, nodes = mod.excluded_nodes("windows")
-    assert "tests/test_juggler_posix_pipe.py" in whole
-    assert any(n.endswith("test_a_missing_pref_refuses_the_launch") for n in nodes)
-    assert "tests/test_juggler_posix_pipe.py" not in mod.excluded_nodes("linux")[0]
+        assert theme in mod.excluded_nodes(system)[0]
+    assert posix in mod.excluded_nodes("windows")[0] and posix not in mod.excluded_nodes("linux")[0]
+    assert fission + "::test_same_site_other_port_stays_in_process" in mod.excluded_nodes("windows")[1]
+    assert not any(n.startswith(fission) for n in mod.excluded_nodes("linux")[1])
+    assert all(reason.strip() for _, _, reason in mod.EXCLUDED)
+    # a whole-file exclusion keeps the file out of the plan; a node exclusion keeps the node out of its chunk
+    table = {fission: {"parallel": 200.0, "serial": 0.0, "nodes": {"test_x": 100.0, "test_y": 100.0}},
+             theme: {"parallel": 1.0, "serial": 0.0}}
+    nodes = [fission + "::test_x", fission + "::test_y", fission + "::test_same_site_other_port_stays_in_process"]
+    plan = mod.plan_parts([fission, theme, "tests/test_other.py"], "windows", 2, lambda f: nodes, table)
+    assert theme not in [f for p in plan for f in p["files"]]
+    assert sorted(n for p in plan for n in p["nodes"]) == nodes[:2]
+
+
+def test_the_nodes_of_a_file_are_listed_by_pytest_in_the_leg(tmp_path):
+    mod = _load_script()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_two.py").write_text(
+        "\n".join(["import pytest", "", "def test_a():", "    pass", "",
+                   "@pytest.mark.parametrize('x', [1, 2])", "def test_b(x):", "    pass", ""]),
+        encoding="utf-8")
+    collect = mod.collect_nodes(tmp_path, dict(os.environ, PYTEST_ADDOPTS=""))
+    assert collect("tests/test_two.py") == ["tests/test_two.py::test_a", "tests/test_two.py::test_b[1]",
+                                            "tests/test_two.py::test_b[2]"]
+    with pytest.raises(RuntimeError):
+        collect("tests/test_missing.py")

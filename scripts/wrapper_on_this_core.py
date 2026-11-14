@@ -28,12 +28,22 @@ the run the day it is written; nobody keeps a list.
         the engine the seal of the installed core names, which must be PUBLISHED: if
         its release or the asset of this system is not there it is exit 1 with the
         reason, never a skip. Prints the path of the fetched binary as the last line.
-    wrapper_on_this_core.py run     --wrapper DIR --binary PATH --os linux|windows --part N [--parts 2]
-        runs the files of the part the way the wrapper's own e2e runner does
+    wrapper_on_this_core.py plan    --wrapper DIR --os linux|windows --parts N [--collect]
+        prints the plan the legs share: the estimated seconds of each part and what it
+        runs. Without --collect a long file gets no node list (it is shown whole).
+    wrapper_on_this_core.py run     --wrapper DIR --binary PATH --os linux|windows --part N --parts N
+        runs the part the way the wrapper's own e2e runner does
         (invisible_core.testing.e2e: the same command, four browsers at once, the
         wall-clock tests alone at the end) and judges the junit: red on a failure, on
         a SKIPPED test, on a pass that ran nothing, or on a file of the part of which
         no test ran.
+
+Which part runs what is a PLAN (`plan_parts`), the same on every leg: the seconds each
+test file took are in scripts/wrapper_test_seconds.json (estimated from the logs of
+the wrapper's e2e, for balancing the legs only: it never decides the verdict). A file
+over SPLIT_OVER_SECONDS is cut into chunks of its test nodes (the ids come from
+`pytest --collect-only` in the leg); the units (a whole file, or a chunk) are then
+handed to the parts longest first, each to the part with the least estimated time.
 
 Standard library only, except `engine` and `run`, which import the installed core.
 """
@@ -42,6 +52,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 import platform
 import re
@@ -52,8 +63,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-__all__ = ["EXCLUDED", "computed_list", "excluded_nodes", "files_of_part", "judge_junit",
-           "missing_from", "problems_in_junit"]
+__all__ = ["EXCLUDED", "computed_list", "excluded_nodes", "files_of", "judge_junit", "load_seconds",
+           "missing_from", "plan_parts", "problems_in_junit"]
 
 #: A wrapper test file that imports the Juggler client of the core.
 IMPORTS_JUGGLER = re.compile(
@@ -74,8 +85,16 @@ _NEVER_COLLECTED = "playwright-upstream"
 EXCLUDED = (
     ("windows", "tests/test_juggler_posix_pipe.py",
      "the POSIX leg of the pipe does not execute on Windows (module-level skipif on win32)"),
-    ("windows", "tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py::test_a_missing_pref_refuses_the_launch",
-     "the system theme is declared, and its absence refused, on Linux only (skipif on win32)"),
+    (None, "tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py",
+     "every test of the file asks engine_at_least(\"firefox-65\") and the engine the seal names is older "
+     "(the engine gate skips); on Windows the refusal tests also skip by themselves (skipif on win32: "
+     "the system theme is declared, and its absence refused, on Linux only)"),
+    ("windows", "tests/test_fission_strategy1_bench.py::test_same_site_other_port_stays_in_process",
+     "it asks for the processes of a site by name, which only Linux has (tests/_processes.py: "
+     "pytest.skip off Linux; Windows names no process, ProcessUtils_none.cpp)"),
+    ("windows", "tests/test_fission_strategy1_bench.py::test_cross_site_iframe_gets_its_own_process",
+     "the same oracle as the test above: it asks for the processes of a site by name on its first "
+     "line, and tests/_processes.py skips off Linux"),
     (None, "tests/test_juggler_transport.py::test_the_workbench_inventory_and_the_package_cannot_DRIFT",
      "reads a script of the maintainer's workbench, which no clone has (pytest.skip)"),
     (None, "tests/test_juggler_injected.py::test_OUR_CLIENT_DOES_NOT_CROSS_into_the_page_realm",
@@ -116,12 +135,115 @@ def excluded_nodes(system: str) -> tuple[list[str], list[str]]:
     return ([t for t in targets if "::" not in t], [t for t in targets if "::" in t])
 
 
-def files_of_part(files: list[str], system: str, part: int, parts: int) -> list[str]:
-    """The files this leg runs: the list without what the system leaves out, every
-    ``parts``-th file from the part's offset."""
-    whole, _ = excluded_nodes(system)
-    kept = [f for f in files if f not in whole]
-    return [f for i, f in enumerate(kept) if i % parts == part - 1]
+# ------------------------------------------------------------------ the plan
+
+#: A test file the table has no row for is taken to have run this many seconds in
+#: parallel (and none serial).
+DEFAULT_SECONDS = 30.0
+#: A file whose parallel seconds are over this is cut into chunks of its nodes.
+SPLIT_OVER_SECONDS = 90.0
+#: The browsers at once of a leg (the `--procs` of the run): a parallel second of
+#: the table counts 1/PARALLEL_WIDTH of a second of a leg, a serial one counts 1.
+PARALLEL_WIDTH = 4
+SECONDS_TABLE = Path(__file__).with_name("wrapper_test_seconds.json")
+
+
+def load_seconds(system: str, path: Path | None = None) -> dict:
+    """The table of this system: {test file: {"parallel": s, "serial": s, "nodes": {...}}}."""
+    with open(path or SECONDS_TABLE, encoding="utf-8") as fh:
+        return json.load(fh)[system]
+
+
+def _unit_seconds(parallel: float, serial: float) -> float:
+    return parallel / PARALLEL_WIDTH + serial
+
+
+def _is_excluded(node: str, nodes_out: list[str]) -> bool:
+    # --deselect matches by prefix, so a parametrized test is left out whole.
+    return any(node == n or node.startswith(n + "[") for n in nodes_out)
+
+
+def _split_file(rel: str, row: dict, nodes: list[str], k: int) -> list[dict]:
+    """``nodes`` of a file cut into ``k`` chunks balanced by the seconds the table has
+    for each node (an unknown node: the average of the file's known ones)."""
+    prefix = rel + "::"
+    par = {prefix + n: sec for n, sec in row.get("nodes", {}).items()}
+    ser = {prefix + n: sec for n, sec in row.get("serial_nodes", {}).items()}
+    known = list(par.values()) + list(ser.values())
+    average = sum(known) / len(known) if known else DEFAULT_SECONDS
+
+    def cost(node: str) -> float:
+        if node in ser:
+            return ser[node]
+        return par.get(node, average) / PARALLEL_WIDTH
+
+    k = max(1, min(k, len(nodes)))
+    chunks = [{"nodes": [], "seconds": 0.0} for _ in range(k)]
+    for node in sorted(nodes, key=lambda n: (-cost(n), n)):
+        target = min(chunks, key=lambda c: c["seconds"])  # the first of equals: deterministic
+        target["nodes"].append(node)
+        target["seconds"] += cost(node)
+    return [c for c in chunks if c["nodes"]]
+
+
+def plan_parts(files: list[str], system: str, parts: int, collect, table: dict | None = None) -> list[dict]:
+    """What each of the ``parts`` legs runs; the same on every leg.
+
+    ``collect(file)`` gives the node ids of a file (`pytest --collect-only -q`); it is
+    asked only for the files the table has as long. Returns one dict per part, in the
+    order of the parts: {"files": whole files, "nodes": node ids of the chunks,
+    "seconds": the estimate}. Left out first: the files and nodes EXCLUDED here.
+    """
+    table = load_seconds(system) if table is None else table
+    whole, nodes_out = excluded_nodes(system)
+    kept = sorted(f for f in files if f not in whole)
+
+    rows = {f: table.get(f, {"parallel": DEFAULT_SECONDS, "serial": 0.0}) for f in kept}
+    secs = {f: _unit_seconds(r["parallel"], r.get("serial", 0.0)) for f, r in rows.items()}
+    target = sum(secs.values()) / parts
+
+    units: list[dict] = []
+    for f in kept:
+        if f in table and rows[f]["parallel"] > SPLIT_OVER_SECONDS:
+            nodes = sorted(n for n in collect(f) if not _is_excluded(n, nodes_out))
+            if nodes:
+                k = max(2, math.ceil(secs[f] / target)) if target > 0 else 2
+                units += [{"file": f, **c} for c in _split_file(f, rows[f], nodes, min(k, parts))]
+                continue
+        units.append({"file": f, "nodes": None, "seconds": secs[f]})
+
+    out = [{"files": [], "nodes": [], "seconds": 0.0} for _ in range(parts)]
+    for u in sorted(units, key=lambda u: (-u["seconds"], u["file"], u["nodes"] or [])):
+        part = min(out, key=lambda p: p["seconds"])
+        if u["nodes"] is None:
+            part["files"].append(u["file"])
+        else:
+            part["nodes"] += u["nodes"]
+        part["seconds"] += u["seconds"]
+    for part in out:
+        part["files"].sort()
+        part["nodes"].sort()
+        part["seconds"] = round(part["seconds"], 1)
+    return out
+
+
+def files_of(part: dict) -> list[str]:
+    """Every test file a part touches: the whole ones and those of its node ids."""
+    return sorted(set(part["files"]) | {n.split("::", 1)[0] for n in part["nodes"]})
+
+
+def collect_nodes(wrapper: Path, env: dict):
+    """A ``collect`` for plan_parts: the node ids of a file, as the legs see them."""
+    def collect(rel: str) -> list[str]:
+        cmd = [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", rel]
+        done = subprocess.run(cmd, cwd=wrapper, env=env, capture_output=True, text=True)
+        nodes = [ln.strip() for ln in done.stdout.splitlines() if ln.startswith(rel + "::")]
+        if done.returncode != 0 or not nodes:
+            # A leg that fell back to the whole file would run what another leg runs too.
+            raise RuntimeError(f"cannot list the nodes of {rel} (pytest exit {done.returncode}):\n"
+                               f"{done.stdout[-2000:]}\n{done.stderr[-2000:]}")
+        return nodes
+    return collect
 
 
 # ----------------------------------------------------------------- the judge
@@ -252,15 +374,39 @@ def _cmd_engine(_args) -> int:
     return 0
 
 
+def _cmd_plan(args) -> int:
+    wrapper = Path(args.wrapper).resolve()
+    collect = collect_nodes(wrapper, dict(os.environ)) if args.collect else (lambda f: [])
+    plan = plan_parts(computed_list(wrapper), args.os, args.parts, collect)
+    for n, part in enumerate(plan, 1):
+        print(f"part {n}/{args.parts} {args.os}: ~{part['seconds']} s, {len(part['files'])} file(s), "
+              f"{len(part['nodes'])} node(s)")
+        for f in part["files"]:
+            print("  " + f)
+        for node in part["nodes"]:
+            print("  " + node)
+    return 0
+
+
 def _cmd_run(args) -> int:
     from invisible_core.testing import e2e
 
     wrapper = Path(args.wrapper).resolve()
     files = computed_list(wrapper)
-    mine = files_of_part(files, args.os, args.part, args.parts)
     _, nodes = excluded_nodes(args.os)
+    env = dict(os.environ)  # unlike run_e2e.main, INVISIBLE_CORE_PIN is kept: the pin is what this job overrides
+    env["INVPW_BINARY_PATH"] = args.binary
+    env["STEALTHFOX_E2E_BINARY"] = args.binary
+    env.pop("PYTEST_ADDOPTS", None)
+    plan = plan_parts(files, args.os, args.parts, collect_nodes(wrapper, env))
+    for n, part in enumerate(plan, 1):
+        print(f"[wrapper-on-this-core] plan: part {n}/{args.parts} ~{part['seconds']} s, "
+              f"{len(part['files'])} file(s) + {len(part['nodes'])} node(s)")
+    chosen = plan[args.part - 1]
+    mine = files_of(chosen)
     print(f"[wrapper-on-this-core] {len(files)} files computed, part {args.part} of {args.parts} "
-          f"on {args.os}: {len(mine)} file(s)")
+          f"on {args.os}: {len(chosen['files'])} whole file(s), {len(chosen['nodes'])} node(s) "
+          f"of the long files, ~{chosen['seconds']} s")
     for only, target, reason in EXCLUDED:
         if only in (None, args.os):
             print(f"[wrapper-on-this-core] left out: {target}: {reason}")
@@ -270,10 +416,6 @@ def _cmd_run(args) -> int:
 
     out = Path(args.junit_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)  # unlike run_e2e.main, INVISIBLE_CORE_PIN is kept: the pin is what this job overrides
-    env["INVPW_BINARY_PATH"] = args.binary
-    env["STEALTHFOX_E2E_BINARY"] = args.binary
-    env.pop("PYTEST_ADDOPTS", None)
 
     selections = [(args.procs, "not slow and not e2e")] + e2e.passes(args.procs)
     extra_nodes = ["--deselect=" + n for n in nodes]
@@ -281,7 +423,7 @@ def _cmd_run(args) -> int:
     for i, (width, selection) in enumerate(selections):
         junit = out / f"pass-{i}.xml"
         junits.append(junit)
-        cmd = e2e.command(width, mine + extra_nodes + ["-o", "junit_family=xunit2",
+        cmd = e2e.command(width, chosen["files"] + chosen["nodes"] + extra_nodes + ["-o", "junit_family=xunit2",
                                                        f"--junitxml={junit}", "-rs"],
                           selection=selection)
         print(f"[wrapper-on-this-core] -m '{selection}', browsers at once: {width}", flush=True)
@@ -310,16 +452,21 @@ def main(argv=None) -> int:
     g.add_argument("--main-script")
     g.add_argument("--main-has-no-script", action="store_true")
     sub.add_parser("engine")
+    s = sub.add_parser("plan")
+    s.add_argument("--wrapper", required=True)
+    s.add_argument("--os", required=True, choices=["linux", "windows"])
+    s.add_argument("--parts", type=int, required=True)
+    s.add_argument("--collect", action="store_true")
     s = sub.add_parser("run")
     s.add_argument("--wrapper", required=True)
     s.add_argument("--binary", required=True)
     s.add_argument("--os", required=True, choices=["linux", "windows"])
     s.add_argument("--part", type=int, required=True)
-    s.add_argument("--parts", type=int, default=2)
+    s.add_argument("--parts", type=int, required=True)
     s.add_argument("--procs", default="4")
     s.add_argument("--junit-dir", default="wrapper-on-this-core-junit")
     args = p.parse_args(argv)
-    return {"list": _cmd_list, "compare": _cmd_compare, "engine": _cmd_engine,
+    return {"list": _cmd_list, "compare": _cmd_compare, "engine": _cmd_engine, "plan": _cmd_plan,
             "run": _cmd_run}[args.cmd](args)
 
 
