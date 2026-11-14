@@ -1,0 +1,651 @@
+{
+ "source": "Seconds per wrapper test file, estimated from the completion gaps in the wrapper's e2e logs of 13/11 (the 'ms' of the measurement is seconds). 'parallel' is the sum over the nodes that run with four browsers at once, 'serial' over the wall-clock nodes that run alone at the end. Files over 90 s of parallel time also carry the seconds of each node ('nodes', 'serial_nodes'; the key is the node id without the file). Skipped nodes are left out. It only balances the legs of the job wrapper-on-this-core and never decides the verdict; a file missing from the table gets a fixed default (scripts/wrapper_on_this_core.py)",
+ "linux": {
+  "tests/test_a_closed_context_leaves_nothing_in_the_registry.py": {
+   "parallel": 0.2,
+   "serial": 0
+  },
+  "tests/test_a_closed_pipe_is_a_closed_target.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_a_context_proxy_carries_its_measured_udp_exit.py": {
+   "parallel": 0.04,
+   "serial": 0
+  },
+  "tests/test_a_context_route_disables_the_cache.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_a_detached_frame_answers_detached.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_a_field_is_typed_after_a_pause.py": {
+   "parallel": 0.0,
+   "serial": 10.25
+  },
+  "tests/test_a_launch_has_one_deadline.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_a_launch_without_a_session_gets_one.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_a_live_event_does_not_overtake_the_replay_of_a_new_page.py": {
+   "parallel": 2.57,
+   "serial": 0
+  },
+  "tests/test_a_new_page_waits_for_the_engine.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_a_page_is_handed_over_only_when_the_engine_says_it_is_ready.py": {
+   "parallel": 4.68,
+   "serial": 0
+  },
+  "tests/test_a_worker_comes_back_with_its_page_from_the_cache_e2e.py": {
+   "parallel": 68.21,
+   "serial": 0
+  },
+  "tests/test_actions_without_a_point.py": {
+   "parallel": 6.74,
+   "serial": 0
+  },
+  "tests/test_browser_output_is_drained.py": {
+   "parallel": 7.26,
+   "serial": 0
+  },
+  "tests/test_click_rhythm.py": {
+   "parallel": 12.62,
+   "serial": 0
+  },
+  "tests/test_context_locale_is_a_list.py": {
+   "parallel": 0.23,
+   "serial": 0
+  },
+  "tests/test_cursor_dispatch.py": {
+   "parallel": 3.58,
+   "serial": 0
+  },
+  "tests/test_cursor_wiring.py": {
+   "parallel": 1.21,
+   "serial": 0
+  },
+  "tests/test_drag_motion.py": {
+   "parallel": 11.02,
+   "serial": 0
+  },
+  "tests/test_element_handle_actions.py": {
+   "parallel": 18.46,
+   "serial": 0
+  },
+  "tests/test_every_order_of_the_events_of_a_popup_gives_one_page_event.py": {
+   "parallel": 65.94,
+   "serial": 0
+  },
+  "tests/test_every_page_draws_its_own_acts.py": {
+   "parallel": 0.0,
+   "serial": 14.48
+  },
+  "tests/test_fission_strategy1_bench.py": {
+   "parallel": 194.88,
+   "serial": 0,
+   "nodes": {
+    "test_a_context_of_the_top_survives_an_oop_frame_coming_and_going": 7.41,
+    "test_click_in_oop_iframe_by_selector": 8.12,
+    "test_console_from_oop_frame_reaches_client": 8.07,
+    "test_content_frame_of_an_iframe_nested_too_deep_is_none": 10.0,
+    "test_content_frame_resolves": 7.57,
+    "test_cross_site_iframe_gets_its_own_process": 9.58,
+    "test_frame_evaluate_in_oop_iframe": 8.45,
+    "test_frame_list_has_real_urls": 8.39,
+    "test_init_script_reaches_oop_frame_first": 9.32,
+    "test_named_world_declared_after_oop_iframe": 9.25,
+    "test_nested_a_b_a_parent_chain": 8.21,
+    "test_oop_frame_comes_out_of_the_back_forward_cache_with_the_top": 7.81,
+    "test_oop_frame_has_its_url_and_answers_after_the_top_comes_back_from_the_cache": 7.66,
+    "test_oop_frames_are_listed_again_after_the_top_comes_back_from_the_cache": 8.16,
+    "test_removed_oop_frame_leaves_the_frame_list_and_the_page_answers": 7.14,
+    "test_same_site_other_port_stays_in_process": 6.5,
+    "test_the_frames_have_their_urls_when_goto_returns": 63.24
+   }
+  },
+  "tests/test_frame_dispatch.py": {
+   "parallel": 2.6,
+   "serial": 0
+  },
+  "tests/test_juggler_actions.py": {
+   "parallel": 148.09,
+   "serial": 0,
+   "nodes": {
+    "test_a_timeout_SAYS_the_reason_for_the_last_attempt[client-approach]": 7.87,
+    "test_a_timeout_SAYS_the_reason_for_the_last_attempt[engine-approach]": 7.32,
+    "test_an_element_that_is_NEVER_actionable_says_WHICH_state_is_missing[client-approach]": 7.25,
+    "test_an_element_that_is_NEVER_actionable_says_WHICH_state_is_missing[engine-approach]": 6.35,
+    "test_check_and_uncheck_CHECK_instead_of_toggling[client-approach]": 10.58,
+    "test_check_and_uncheck_CHECK_instead_of_toggling[engine-approach]": 10.5,
+    "test_choosing_an_option_by_value_or_label[client-approach]": 6.26,
+    "test_choosing_an_option_by_value_or_label[engine-approach]": 6.28,
+    "test_the_click_reaches_the_page[client-approach]": 6.99,
+    "test_the_click_reaches_the_page[engine-approach]": 7.57,
+    "test_the_double_click_sends_clickCount_2[client-approach]": 8.35,
+    "test_the_double_click_sends_clickCount_2[engine-approach]": 7.74,
+    "test_the_fill_events_are_TRUSTED[client-approach]": 7.33,
+    "test_the_fill_events_are_TRUSTED[engine-approach]": 5.54,
+    "test_the_keys_arrive_with_REAL_code_and_keycode[client-approach]": 4.29,
+    "test_the_keys_arrive_with_REAL_code_and_keycode[engine-approach]": 6.52,
+    "test_the_lifecycle_WAITS_for_an_element_that_appears_later[client-approach]": 10.18,
+    "test_the_lifecycle_WAITS_for_an_element_that_appears_later[engine-approach]": 7.61,
+    "test_typing_ADDS_where_filling_REPLACES[client-approach]": 6.22,
+    "test_typing_ADDS_where_filling_REPLACES[engine-approach]": 7.36
+   }
+  },
+  "tests/test_juggler_connection.py": {
+   "parallel": 6.7,
+   "serial": 0
+  },
+  "tests/test_juggler_event_buffer.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_juggler_event_listeners.py": {
+   "parallel": 32.3,
+   "serial": 0
+  },
+  "tests/test_juggler_injected.py": {
+   "parallel": 33.77,
+   "serial": 0
+  },
+  "tests/test_juggler_lifecycle_e2e.py": {
+   "parallel": 7.11,
+   "serial": 0
+  },
+  "tests/test_juggler_posix_pipe.py": {
+   "parallel": 4.81,
+   "serial": 0
+  },
+  "tests/test_juggler_transport.py": {
+   "parallel": 140.41,
+   "serial": 0,
+   "nodes": {
+    "test_a_GAP_and_a_DECISION_do_not_read_the_same": 0.0,
+    "test_a_dialog_can_be_ANSWERED_and_not_answering_hangs_the_page": 9.76,
+    "test_a_name_that_is_not_the_driver_gets_the_only_transport": 0.0,
+    "test_a_named_launch_environment_is_the_whole_environment": 0.0,
+    "test_a_profile_WE_made_is_removed_and_the_caller_s_is_not": 0.01,
+    "test_a_screenshot_comes_back_as_real_png_bytes": 6.16,
+    "test_an_object_the_server_never_created_is_REFUSED_by_name": 0.0,
+    "test_an_out_of_perimeter_call_NAMES_THE_FEATURE": 0.0,
+    "test_an_out_of_perimeter_object_refuses_with_a_REASON": 0.0,
+    "test_an_unanswered_dialog_is_dismissed_by_the_client": 10.54,
+    "test_an_uncaught_error_reaches_the_pageerror_listener": 8.0,
+    "test_clearing_cookies_with_a_FILTER_is_refused_not_widened": 0.0,
+    "test_console_messages_reach_the_page_listener": 6.46,
+    "test_content_SERIALISES_shadow_roots_including_closed_ones": 5.63,
+    "test_cookies_round_trip_through_the_public_API": 6.88,
+    "test_create_is_announced_BEFORE_anything_can_name_the_object": 0.0,
+    "test_every_courtesy_entry_says_WHO_calls_it": 0.0,
+    "test_going_BACK_then_FORWARD_leaves_the_page_readable": 8.6,
+    "test_going_back_over_a_page_the_script_left_without_a_gesture": 7.75,
+    "test_locators_reach_INSIDE_a_closed_shadow_root": 7.27,
+    "test_set_content_runs_in_the_MAIN_world_without_node": 6.52,
+    "test_the_PAGE_still_sees_nothing_of_a_closed_root": 8.31,
+    "test_the_browser_s_temporary_files_live_and_end_with_the_session": 0.0,
+    "test_the_default_is_the_PYTHON_SERVER": 0.0,
+    "test_the_driver_is_still_reachable_by_name": 0.0,
+    "test_the_launch_handler_hands_the_named_environment_to_the_engine": 0.0,
+    "test_the_perimeter_and_the_courtesy_list_do_not_OVERLAP_by_accident": 0.0,
+    "test_the_profile_is_removed_after_the_browser_has_closed": 0.01,
+    "test_the_public_API_WAITS_for_an_element_that_arrives_late": 9.18,
+    "test_the_public_API_drives_a_page_WITHOUT_node": 13.02,
+    "test_the_public_API_reads_MANY_elements_without_node": 8.2,
+    "test_the_public_API_selects_and_checks_without_node": 11.23,
+    "test_the_serializer_TAGS_values_instead_of_sending_them_bare": 0.0,
+    "test_the_viewport_can_be_resized": 6.89
+   }
+  },
+  "tests/test_key_delay_reaches_the_keyboard.py": {
+   "parallel": 0.07,
+   "serial": 4.67
+  },
+  "tests/test_keyboard_rhythm.py": {
+   "parallel": 13.62,
+   "serial": 0
+  },
+  "tests/test_navigation_response.py": {
+   "parallel": 0.06,
+   "serial": 3.41
+  },
+  "tests/test_nested_frame_actions.py": {
+   "parallel": 441.0,
+   "serial": 0,
+   "nodes": {
+    "test_cross_site_goto_url": 8.04,
+    "test_frame_locator_additional_readers": 11.46,
+    "test_nested_fill_and_scroll[frame]": 12.04,
+    "test_nested_fill_and_scroll[frame_locator]": 11.5,
+    "test_nested_frame_elements": 10.63,
+    "test_nested_locator_reads_and_geometry[frame]": 12.45,
+    "test_nested_locator_reads_and_geometry[frame_locator]": 11.7,
+    "test_nested_navigation_updates_url": 9.48,
+    "test_nested_trusted_pointer[False-frame-click]": 11.9,
+    "test_nested_trusted_pointer[False-frame_locator-check]": 12.07,
+    "test_nested_trusted_pointer[True-frame-check]": 14.29,
+    "test_nested_trusted_pointer[True-frame_locator-click]": 12.48,
+    "test_pointer_at_large_offset_with_dpr[1-document-False-False]": 8.29,
+    "test_pointer_at_large_offset_with_dpr[1.25-document-False-True]": 10.54,
+    "test_pointer_at_large_offset_with_dpr[1.25-open-True-True]": 11.2,
+    "test_pointer_at_large_offset_with_dpr[1.5-closed-False-False]": 9.52,
+    "test_pointer_at_large_offset_with_dpr[1.5-closed-True-True]": 11.91,
+    "test_pointer_at_large_offset_with_dpr[1.5-document-True-True]": 10.66,
+    "test_pointer_at_large_offset_with_dpr[2-closed-True-True]": 11.04,
+    "test_pointer_at_large_offset_with_dpr[2-open-True-False]": 8.4,
+    "test_pointer_with_saved_site_zoom[1.1-closed-True-True]": 12.41,
+    "test_pointer_with_saved_site_zoom[1.1-document-False-False]": 8.52,
+    "test_pointer_with_saved_site_zoom[1.2-closed-True-True]": 10.18,
+    "test_pointer_with_saved_site_zoom[1.2-document-False-False]": 9.03,
+    "test_pointer_with_saved_site_zoom[1.5-document-False-True]": 10.54,
+    "test_pointer_with_saved_site_zoom[1.5-open-True-False]": 10.21,
+    "test_pointer_with_saved_site_zoom[2-closed-False-False]": 8.77,
+    "test_pointer_with_saved_site_zoom[2-open-True-True]": 10.44,
+    "test_same_document_url": 9.37,
+    "test_saved_zoom_does_not_send_child_click_to_parent": 10.3,
+    "test_shadow_landing_rejects_siblings_and_overlays[closed]": 10.38,
+    "test_shadow_landing_rejects_siblings_and_overlays[open]": 10.18,
+    "test_shadow_number_input_click[closed-False-transform-True]": 9.54,
+    "test_shadow_number_input_click[closed-False-zoom-False]": 8.27,
+    "test_shadow_number_input_click[closed-True-plain-True]": 10.12,
+    "test_shadow_number_input_click[open-False-plain-False]": 8.27,
+    "test_shadow_number_input_click[open-True-transform-False]": 9.99,
+    "test_shadow_number_input_click[open-True-zoom-True]": 9.28,
+    "test_trusted_pointer_with_shadow_frame_owner[closed]": 9.82,
+    "test_trusted_pointer_with_shadow_frame_owner[open]": 10.46,
+    "test_zoomed_binary_motion_and_wheel[1-0.5]": 12.29,
+    "test_zoomed_binary_motion_and_wheel[1.25-1.2]": 13.04
+   }
+  },
+  "tests/test_no_override_leaves_the_persona_scheme.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_page_number_follows_the_call.py": {
+   "parallel": 53.3,
+   "serial": 0
+  },
+  "tests/test_pointer_server.py": {
+   "parallel": 0.12,
+   "serial": 0
+  },
+  "tests/test_protocol_names_are_declared.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_request_gc_uses_the_page_session.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_same_document_navigation.py": {
+   "parallel": 9.68,
+   "serial": 0
+  },
+  "tests/test_screencast.py": {
+   "parallel": 37.53,
+   "serial": 0
+  },
+  "tests/test_service_worker_options.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_session_transport.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_strict_and_force.py": {
+   "parallel": 23.61,
+   "serial": 0
+  },
+  "tests/test_the_callers_code_runs_once.py": {
+   "parallel": 0.1,
+   "serial": 0
+  },
+  "tests/test_the_keyboard_follows_the_session_language.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_the_session_position_reaches_every_context.py": {
+   "parallel": 0.11,
+   "serial": 0
+  },
+  "tests/test_trial_does_not_act.py": {
+   "parallel": 7.71,
+   "serial": 0
+  }
+ },
+ "windows": {
+  "tests/test_a_closed_context_leaves_nothing_in_the_registry.py": {
+   "parallel": 0.32,
+   "serial": 0
+  },
+  "tests/test_a_closed_pipe_is_a_closed_target.py": {
+   "parallel": 0.03,
+   "serial": 0
+  },
+  "tests/test_a_context_proxy_carries_its_measured_udp_exit.py": {
+   "parallel": 0.2,
+   "serial": 0
+  },
+  "tests/test_a_context_route_disables_the_cache.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_a_detached_frame_answers_detached.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_a_field_is_typed_after_a_pause.py": {
+   "parallel": 0.01,
+   "serial": 12.91
+  },
+  "tests/test_a_launch_has_one_deadline.py": {
+   "parallel": 6.08,
+   "serial": 0
+  },
+  "tests/test_a_launch_without_a_session_gets_one.py": {
+   "parallel": 0.03,
+   "serial": 0
+  },
+  "tests/test_a_live_event_does_not_overtake_the_replay_of_a_new_page.py": {
+   "parallel": 2.66,
+   "serial": 0
+  },
+  "tests/test_a_new_page_waits_for_the_engine.py": {
+   "parallel": 0.0,
+   "serial": 0
+  },
+  "tests/test_a_page_is_handed_over_only_when_the_engine_says_it_is_ready.py": {
+   "parallel": 4.87,
+   "serial": 0
+  },
+  "tests/test_a_worker_comes_back_with_its_page_from_the_cache_e2e.py": {
+   "parallel": 119.34,
+   "serial": 0,
+   "nodes": {
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[oop-frame-other-site-goto]": 14.88,
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[oop-frame-other-site-location]": 14.68,
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[oop-frame-same-site-goto]": 15.4,
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[oop-frame-same-site-location]": 14.35,
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[top-other-site-goto]": 14.37,
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[top-other-site-location]": 15.93,
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[top-same-site-goto]": 14.18,
+    "test_a_worker_leaves_with_its_page_for_the_cache_and_comes_back_the_same[top-same-site-location]": 15.55
+   }
+  },
+  "tests/test_actions_without_a_point.py": {
+   "parallel": 15.09,
+   "serial": 0
+  },
+  "tests/test_browser_output_is_drained.py": {
+   "parallel": 13.85,
+   "serial": 0
+  },
+  "tests/test_click_rhythm.py": {
+   "parallel": 14.41,
+   "serial": 0
+  },
+  "tests/test_context_locale_is_a_list.py": {
+   "parallel": 0.36,
+   "serial": 0
+  },
+  "tests/test_cursor_dispatch.py": {
+   "parallel": 3.65,
+   "serial": 0
+  },
+  "tests/test_cursor_wiring.py": {
+   "parallel": 1.35,
+   "serial": 0
+  },
+  "tests/test_drag_motion.py": {
+   "parallel": 18.46,
+   "serial": 0
+  },
+  "tests/test_element_handle_actions.py": {
+   "parallel": 29.32,
+   "serial": 0
+  },
+  "tests/test_every_order_of_the_events_of_a_popup_gives_one_page_event.py": {
+   "parallel": 68.35,
+   "serial": 0
+  },
+  "tests/test_every_page_draws_its_own_acts.py": {
+   "parallel": 0.01,
+   "serial": 18.51
+  },
+  "tests/test_fission_strategy1_bench.py": {
+   "parallel": 321.1,
+   "serial": 0,
+   "nodes": {
+    "test_a_context_of_the_top_survives_an_oop_frame_coming_and_going": 15.1,
+    "test_click_in_oop_iframe_by_selector": 17.86,
+    "test_console_from_oop_frame_reaches_client": 16.24,
+    "test_content_frame_of_an_iframe_nested_too_deep_is_none": 19.07,
+    "test_content_frame_resolves": 15.48,
+    "test_frame_evaluate_in_oop_iframe": 17.85,
+    "test_frame_list_has_real_urls": 18.5,
+    "test_init_script_reaches_oop_frame_first": 18.29,
+    "test_named_world_declared_after_oop_iframe": 15.83,
+    "test_nested_a_b_a_parent_chain": 14.88,
+    "test_oop_frame_comes_out_of_the_back_forward_cache_with_the_top": 16.19,
+    "test_oop_frame_has_its_url_and_answers_after_the_top_comes_back_from_the_cache": 15.41,
+    "test_oop_frames_are_listed_again_after_the_top_comes_back_from_the_cache": 15.46,
+    "test_removed_oop_frame_leaves_the_frame_list_and_the_page_answers": 15.6,
+    "test_the_frames_have_their_urls_when_goto_returns": 89.35
+   }
+  },
+  "tests/test_frame_dispatch.py": {
+   "parallel": 2.69,
+   "serial": 0
+  },
+  "tests/test_juggler_actions.py": {
+   "parallel": 221.19,
+   "serial": 0,
+   "nodes": {
+    "test_a_timeout_SAYS_the_reason_for_the_last_attempt[client-approach]": 11.37,
+    "test_a_timeout_SAYS_the_reason_for_the_last_attempt[engine-approach]": 11.54,
+    "test_an_element_that_is_NEVER_actionable_says_WHICH_state_is_missing[client-approach]": 13.27,
+    "test_an_element_that_is_NEVER_actionable_says_WHICH_state_is_missing[engine-approach]": 11.31,
+    "test_check_and_uncheck_CHECK_instead_of_toggling[client-approach]": 13.51,
+    "test_check_and_uncheck_CHECK_instead_of_toggling[engine-approach]": 11.91,
+    "test_choosing_an_option_by_value_or_label[client-approach]": 10.77,
+    "test_choosing_an_option_by_value_or_label[engine-approach]": 10.66,
+    "test_the_click_reaches_the_page[engine-approach]": 12.12,
+    "test_the_double_click_sends_clickCount_2[client-approach]": 11.07,
+    "test_the_double_click_sends_clickCount_2[engine-approach]": 10.57,
+    "test_the_fill_events_are_TRUSTED[client-approach]": 13.48,
+    "test_the_fill_events_are_TRUSTED[engine-approach]": 10.11,
+    "test_the_keys_arrive_with_REAL_code_and_keycode[client-approach]": 12.69,
+    "test_the_keys_arrive_with_REAL_code_and_keycode[engine-approach]": 11.79,
+    "test_the_lifecycle_WAITS_for_an_element_that_appears_later[client-approach]": 11.78,
+    "test_the_lifecycle_WAITS_for_an_element_that_appears_later[engine-approach]": 11.09,
+    "test_typing_ADDS_where_filling_REPLACES[client-approach]": 10.3,
+    "test_typing_ADDS_where_filling_REPLACES[engine-approach]": 11.86
+   }
+  },
+  "tests/test_juggler_connection.py": {
+   "parallel": 9.77,
+   "serial": 0
+  },
+  "tests/test_juggler_event_buffer.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_juggler_event_listeners.py": {
+   "parallel": 27.85,
+   "serial": 0
+  },
+  "tests/test_juggler_injected.py": {
+   "parallel": 73.38,
+   "serial": 0
+  },
+  "tests/test_juggler_lifecycle_e2e.py": {
+   "parallel": 9.53,
+   "serial": 0
+  },
+  "tests/test_juggler_transport.py": {
+   "parallel": 296.69,
+   "serial": 0,
+   "nodes": {
+    "test_a_GAP_and_a_DECISION_do_not_read_the_same": 0.0,
+    "test_a_dialog_can_be_ANSWERED_and_not_answering_hangs_the_page": 17.96,
+    "test_a_name_that_is_not_the_driver_gets_the_only_transport": 0.0,
+    "test_a_named_launch_environment_is_the_whole_environment": 0.0,
+    "test_a_profile_WE_made_is_removed_and_the_caller_s_is_not": 0.01,
+    "test_a_screenshot_comes_back_as_real_png_bytes": 19.14,
+    "test_an_object_the_server_never_created_is_REFUSED_by_name": 0.0,
+    "test_an_out_of_perimeter_call_NAMES_THE_FEATURE": 0.0,
+    "test_an_out_of_perimeter_object_refuses_with_a_REASON": 0.0,
+    "test_an_unanswered_dialog_is_dismissed_by_the_client": 20.2,
+    "test_an_uncaught_error_reaches_the_pageerror_listener": 18.76,
+    "test_clearing_cookies_with_a_FILTER_is_refused_not_widened": 0.0,
+    "test_console_messages_reach_the_page_listener": 16.28,
+    "test_content_SERIALISES_shadow_roots_including_closed_ones": 15.78,
+    "test_cookies_round_trip_through_the_public_API": 16.92,
+    "test_create_is_announced_BEFORE_anything_can_name_the_object": 0.01,
+    "test_every_courtesy_entry_says_WHO_calls_it": 0.0,
+    "test_going_BACK_then_FORWARD_leaves_the_page_readable": 16.82,
+    "test_going_back_over_a_page_the_script_left_without_a_gesture": 18.81,
+    "test_locators_reach_INSIDE_a_closed_shadow_root": 16.62,
+    "test_set_content_runs_in_the_MAIN_world_without_node": 16.8,
+    "test_the_PAGE_still_sees_nothing_of_a_closed_root": 17.64,
+    "test_the_browser_s_temporary_files_live_and_end_with_the_session": 0.02,
+    "test_the_default_is_the_PYTHON_SERVER": 0.0,
+    "test_the_driver_is_still_reachable_by_name": 0.0,
+    "test_the_launch_handler_hands_the_named_environment_to_the_engine": 0.01,
+    "test_the_perimeter_and_the_courtesy_list_do_not_OVERLAP_by_accident": 0.01,
+    "test_the_profile_is_removed_after_the_browser_has_closed": 0.01,
+    "test_the_public_API_WAITS_for_an_element_that_arrives_late": 20.55,
+    "test_the_public_API_reads_MANY_elements_without_node": 17.66,
+    "test_the_public_API_selects_and_checks_without_node": 19.12,
+    "test_the_serializer_TAGS_values_instead_of_sending_them_bare": 0.0,
+    "test_the_viewport_can_be_resized": 27.58
+   }
+  },
+  "tests/test_key_delay_reaches_the_keyboard.py": {
+   "parallel": 0.07,
+   "serial": 7.35
+  },
+  "tests/test_keyboard_rhythm.py": {
+   "parallel": 24.16,
+   "serial": 0
+  },
+  "tests/test_navigation_response.py": {
+   "parallel": 0.1,
+   "serial": 6.91
+  },
+  "tests/test_nested_frame_actions.py": {
+   "parallel": 700.95,
+   "serial": 0,
+   "nodes": {
+    "test_cross_site_goto_url": 13.0,
+    "test_frame_locator_additional_readers": 14.61,
+    "test_nested_fill_and_scroll[frame]": 20.02,
+    "test_nested_fill_and_scroll[frame_locator]": 14.21,
+    "test_nested_frame_elements": 17.39,
+    "test_nested_locator_reads_and_geometry[frame]": 14.6,
+    "test_nested_locator_reads_and_geometry[frame_locator]": 16.46,
+    "test_nested_navigation_updates_url": 15.82,
+    "test_nested_trusted_pointer[False-frame-click]": 15.01,
+    "test_nested_trusted_pointer[False-frame_locator-check]": 15.7,
+    "test_nested_trusted_pointer[True-frame-check]": 14.87,
+    "test_nested_trusted_pointer[True-frame_locator-click]": 16.37,
+    "test_pointer_at_large_offset_with_dpr[1-document-False-False]": 14.79,
+    "test_pointer_at_large_offset_with_dpr[1.25-document-False-True]": 15.92,
+    "test_pointer_at_large_offset_with_dpr[1.25-open-True-True]": 20.25,
+    "test_pointer_at_large_offset_with_dpr[1.5-closed-False-False]": 13.46,
+    "test_pointer_at_large_offset_with_dpr[1.5-closed-True-True]": 17.32,
+    "test_pointer_at_large_offset_with_dpr[1.5-document-True-True]": 17.04,
+    "test_pointer_at_large_offset_with_dpr[2-closed-True-True]": 17.36,
+    "test_pointer_at_large_offset_with_dpr[2-open-True-False]": 16.58,
+    "test_pointer_with_saved_site_zoom[1.1-closed-True-True]": 18.07,
+    "test_pointer_with_saved_site_zoom[1.1-document-False-False]": 17.06,
+    "test_pointer_with_saved_site_zoom[1.2-closed-True-True]": 18.51,
+    "test_pointer_with_saved_site_zoom[1.2-document-False-False]": 19.17,
+    "test_pointer_with_saved_site_zoom[1.5-document-False-True]": 21.13,
+    "test_pointer_with_saved_site_zoom[1.5-open-True-False]": 17.4,
+    "test_pointer_with_saved_site_zoom[2-closed-False-False]": 18.74,
+    "test_pointer_with_saved_site_zoom[2-open-True-True]": 16.78,
+    "test_same_document_url": 12.0,
+    "test_saved_zoom_does_not_send_child_click_to_parent": 15.25,
+    "test_shadow_landing_rejects_siblings_and_overlays[closed]": 16.66,
+    "test_shadow_landing_rejects_siblings_and_overlays[open]": 15.64,
+    "test_shadow_number_input_click[closed-False-transform-True]": 18.88,
+    "test_shadow_number_input_click[closed-False-zoom-False]": 18.2,
+    "test_shadow_number_input_click[closed-True-plain-True]": 17.87,
+    "test_shadow_number_input_click[open-False-plain-False]": 13.79,
+    "test_shadow_number_input_click[open-True-transform-False]": 18.18,
+    "test_shadow_number_input_click[open-True-zoom-True]": 19.03,
+    "test_trusted_pointer_with_shadow_frame_owner[closed]": 14.26,
+    "test_trusted_pointer_with_shadow_frame_owner[open]": 13.75,
+    "test_zoomed_binary_motion_and_wheel[1-0.5]": 20.05,
+    "test_zoomed_binary_motion_and_wheel[1.25-1.2]": 19.73
+   }
+  },
+  "tests/test_no_override_leaves_the_persona_scheme.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_page_number_follows_the_call.py": {
+   "parallel": 66.23,
+   "serial": 0
+  },
+  "tests/test_pointer_server.py": {
+   "parallel": 0.16,
+   "serial": 0
+  },
+  "tests/test_protocol_names_are_declared.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_request_gc_uses_the_page_session.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_same_document_navigation.py": {
+   "parallel": 17.65,
+   "serial": 0
+  },
+  "tests/test_screencast.py": {
+   "parallel": 44.02,
+   "serial": 0
+  },
+  "tests/test_service_worker_options.py": {
+   "parallel": 0.02,
+   "serial": 0
+  },
+  "tests/test_session_transport.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_strict_and_force.py": {
+   "parallel": 28.07,
+   "serial": 0
+  },
+  "tests/test_the_callers_code_runs_once.py": {
+   "parallel": 0.11,
+   "serial": 0
+  },
+  "tests/test_the_keyboard_follows_the_session_language.py": {
+   "parallel": 0.01,
+   "serial": 0
+  },
+  "tests/test_the_session_position_reaches_every_context.py": {
+   "parallel": 0.11,
+   "serial": 0
+  },
+  "tests/test_trial_does_not_act.py": {
+   "parallel": 13.02,
+   "serial": 0
+  }
+ }
+}
