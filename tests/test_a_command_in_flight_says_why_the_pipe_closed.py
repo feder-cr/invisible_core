@@ -63,6 +63,12 @@ class _Browser:
                 os.close(fd)
             except OSError:
                 pass
+        # The output's read end and the reader's are released HERE, not left to the garbage collector: one collected during the next
+        # test of the process freed a descriptor number under it (test_a_connection_releases_its_pipe_once reuses the numbers it frees).
+        self.output._thread.join(5)
+        self.output._stream.close()
+        self.connection._reader.join(5)
+        self.connection.close(timeout=5)
 
 
 def _in_flight(conn: Connection, method: str) -> tuple:
