@@ -445,9 +445,11 @@ jobs:
   # main, installs it, puts THIS checkout's core over the pin, fetches the engine
   # the seal names and runs those test files, on Linux and Windows.
   #
-  # WHEN: on a release pull request (head branch `release/*`, or the label
-  # `release`) and on every push to main. Any other pull request skips it, and the
-  # `gate` below knows that is the right state for those and the wrong one for these.
+  # WHEN: on a release pull request (head branch `release/*`), on every push to
+  # main, and on a pull request that touches the job itself (this file, the script,
+  # its table of seconds, or its test): `wrapper-job-needed` decides and says it in
+  # its output `run`. Any other pull request skips the job, and the `gate` below
+  # knows that is the right state for those and the wrong one for the others.
   #
   # WHICH TESTS is computed, not typed: scripts/wrapper_on_this_core.py greps the
   # wrapper's tests for the files that import `invisible_core.juggler` or build a
@@ -465,12 +467,45 @@ jobs:
   # e2e job does. INVISIBLE_CORE_PIN=allow and INVISIBLE_CORE_AUTOFIX=off: the
   # wrapper checks its pin at import, and the repair would put the pinned core back
   # over the one under test.
+  wrapper-job-needed:
+    name: wrapper-job-needed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # A diff that cannot be read is red (set -e), never "nothing changed".
+          set -e
+          run=false
+          if [ "$EVENT" = "push" ]; then
+            run=true
+          else
+            case "$HEAD_REF" in release/*) run=true ;; esac
+            git diff --name-only "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed.txt"
+            while IFS= read -r path; do
+              case "$path" in
+                .github/workflows/ci.yml|scripts/wrapper_on_this_core.py|scripts/wrapper_test_seconds.json|tests/test_the_wrapper_job_runs_on_the_core.py)
+                  run=true ;;
+              esac
+            done < "$RUNNER_TEMP/changed.txt"
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "wrapper-on-this-core is needed: $run"
+
   wrapper-on-this-core:
     name: wrapper-on-this-core (${{ matrix.os }}, part ${{ matrix.part }})
-    if: >-
-      github.event_name == 'push' ||
-      startsWith(github.head_ref, 'release/') ||
-      contains(github.event.pull_request.labels.*.name, 'release')
+    needs: [wrapper-job-needed]
+    if: needs.wrapper-job-needed.outputs.run == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
@@ -575,7 +610,7 @@ jobs:
   gate:
     needs: [tests, msix-host, arm64-host, branding-is-retail, repair-through-the-installer,
             default-selection-stays-inside, default-selection-stays-inside-windows,
-            wrapper-on-this-core]
+            wrapper-job-needed, wrapper-on-this-core]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -583,10 +618,7 @@ jobs:
         env:
           # The same condition as the `if:` of wrapper-on-this-core
           # (tests/test_the_wrapper_job_runs_on_the_core.py holds the two alike).
-          WRAPPER_JOB_REQUIRED: >-
-            ${{ github.event_name == 'push' ||
-            startsWith(github.head_ref, 'release/') ||
-            contains(github.event.pull_request.labels.*.name, 'release') }}
+          WRAPPER_JOB_REQUIRED: ${{ needs.wrapper-job-needed.outputs.run == 'true' }}
         run: |
           echo "tests: ${{ needs.tests.result }}"
           echo "msix-host: ${{ needs.msix-host.result }}"
@@ -595,6 +627,7 @@ jobs:
           echo "repair-through-the-installer: ${{ needs.repair-through-the-installer.result }}"
           echo "default-selection-stays-inside: ${{ needs.default-selection-stays-inside.result }}"
           echo "default-selection-stays-inside-windows: ${{ needs.default-selection-stays-inside-windows.result }}"
+          echo "wrapper-job-needed: ${{ needs.wrapper-job-needed.result }}"
           echo "wrapper-on-this-core: ${{ needs.wrapper-on-this-core.result }} (required: $WRAPPER_JOB_REQUIRED)"
           test "${{ needs.tests.result }}" = "success"
           test "${{ needs.msix-host.result }}" = "success"
@@ -603,9 +636,13 @@ jobs:
           test "${{ needs.repair-through-the-installer.result }}" = "success"
           test "${{ needs.default-selection-stays-inside.result }}" = "success"
           test "${{ needs.default-selection-stays-inside-windows.result }}" = "success"
-          # Required on a release pull request and on a push to main: green, and a
-          # job that did not run there is red, never "skipped, so fine". Any other
-          # pull request has no reason to run it, and a skip is its right state.
+          # The decision itself must have been made: without it the job below would
+          # read as "not needed" and a skip would pass.
+          test "${{ needs.wrapper-job-needed.result }}" = "success"
+          # Required on a release pull request, on a push to main and on a pull
+          # request that touches the job: green, and a job that did not run there is
+          # red, never "skipped, so fine". Any other pull request has no reason to
+          # run it, and a skip is its right state.
           if [ "$WRAPPER_JOB_REQUIRED" = "true" ]; then
             test "${{ needs.wrapper-on-this-core.result }}" = "success"
           else

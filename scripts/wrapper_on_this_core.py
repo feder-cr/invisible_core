@@ -32,6 +32,8 @@ the run the day it is written; nobody keeps a list.
         prints the plan the legs share: the estimated seconds of each part and what it
         runs. Without --collect a long file gets no node list (it is shown whole).
     wrapper_on_this_core.py run     --wrapper DIR --binary PATH --os linux|windows --part N --parts N
+        first checks that the reason of every exclusion of the system still holds (red,
+        naming the entry, if not: "the reason is gone: run it, remove the exclusion"), then
         runs the part the way the wrapper's own e2e runner does
         (invisible_core.testing.e2e: the same command, four browsers at once, the
         wall-clock tests alone at the end) and judges the junit: red on a failure, on
@@ -63,7 +65,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-__all__ = ["EXCLUDED", "computed_list", "excluded_nodes", "files_of", "judge_junit", "load_seconds",
+__all__ = ["EXCLUDED", "WITNESSES", "witness_problems", "computed_list", "excluded_nodes", "files_of", "judge_junit", "load_seconds",
            "missing_from", "plan_parts", "problems_in_junit"]
 
 #: A wrapper test file that imports the Juggler client of the core.
@@ -127,6 +129,132 @@ def missing_from(computed: list[str], reference: list[str]) -> list[str]:
 
 def _excluded_for(system: str) -> list[str]:
     return [target for only, target, _ in EXCLUDED if only in (None, system)]
+
+
+# ---------------------------------------------------------------- the witnesses
+#
+# An exclusion says "this cannot run here, and this is why". A reason can stop being
+# true (the engine gate opens, the wrapper learns to run the test) and the exclusion
+# would stay for ever, hiding a test that now could run. So every EXCLUDED entry has a
+# WITNESS: a check, on the wrapper checkout, that its reason still holds. A witness
+# that does not hold is RED, naming the entry: run it, remove the exclusion.
+
+_ENGINE_TAG = re.compile(r"^firefox-(\d+)(?:-candidate)?$")
+_ENGINE_GATE = re.compile(r"engine_at_least\(\s*[\"']firefox-(\d+)[\"']\s*\)")
+
+
+def _read(wrapper: Path, rel: str) -> str:
+    path = Path(wrapper) / rel
+    if not path.is_file():
+        raise _Gone(f"{rel} is not in the wrapper any more")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+class _Gone(Exception):
+    """The reason of an exclusion no longer holds (the message says what changed)."""
+
+
+def _function_body(text: str, name: str, rel: str) -> str:
+    m = re.search(rf"^def {re.escape(name)}\(.*?(?=^(?:def |@|class )|\Z)", text, re.MULTILINE | re.DOTALL)
+    if not m:
+        raise _Gone(f"{rel} has no test {name} any more")
+    return m.group(0)
+
+
+def _w_module_skipif_win32(rel: str):
+    def check(wrapper: Path, engine_tag: str | None) -> None:
+        if not re.search(r"^pytestmark\s*=\s*pytest\.mark\.skipif\(\s*sys\.platform\s*==\s*[\"']win32[\"']",
+                         _read(wrapper, rel), re.MULTILINE):
+            raise _Gone(f"{rel} no longer skips the whole module on win32")
+    return check
+
+
+def _w_engine_gate(rel: str):
+    """Every test of the file asks for an engine newer than the one the seal names."""
+    def check(wrapper: Path, engine_tag: str | None) -> None:
+        m = _ENGINE_TAG.match(engine_tag or "")
+        if not m:
+            raise _Gone(f"the seal of the core under test has no engine number (tag {engine_tag!r}): "
+                        f"it is not known whether {rel} is still gated")
+        have = int(m.group(1))
+        blocks = re.split(r"^(?:async )?def test_", _read(wrapper, rel), flags=re.MULTILINE)[1:]
+        if not blocks:
+            raise _Gone(f"{rel} has no test any more")
+        for block in blocks:
+            gate = _ENGINE_GATE.search(block)
+            if not gate:
+                raise _Gone(f"a test of {rel} (test_{block.split('(', 1)[0]}) no longer asks engine_at_least")
+            if int(gate.group(1)) <= have:
+                raise _Gone(f"the engine the seal names ({engine_tag}) is firefox-{have}, and "
+                            f"{rel} asks only for firefox-{gate.group(1)}: its tests run now")
+    return check
+
+
+def _w_processes_by_site(test_name: str):
+    """The test asks for the processes of a site by name, and the helper skips off Linux."""
+    rel = "tests/test_fission_strategy1_bench.py"
+
+    def check(wrapper: Path, engine_tag: str | None) -> None:
+        helper = _read(wrapper, "tests/_processes.py")
+        if not re.search(r"if not sys\.platform\.startswith\([\"']linux[\"']\):\s*\n\s*pytest\.skip\(", helper):
+            raise _Gone("tests/_processes.py no longer skips off Linux")
+        text = _read(wrapper, rel)
+        if not re.search(r"^def processes_of\(.*?\n\s+return site_processes_below\(", text,
+                         re.MULTILINE | re.DOTALL):
+            raise _Gone(f"processes_of of {rel} no longer goes through site_processes_below")
+        if "processes_of(" not in _function_body(text, test_name, rel):
+            raise _Gone(f"{test_name} no longer asks for the processes of a site")
+    return check
+
+
+def _w_workbench(rel: str, test_name: str, skip_reason: str, absent: str, depth: int):
+    """The test skips when a file of the maintainer's workbench is not there, and no clone has it."""
+    def check(wrapper: Path, engine_tag: str | None) -> None:
+        body = _function_body(_read(wrapper, rel), test_name, rel)
+        if f'pytest.skip("{skip_reason}")' not in body:
+            raise _Gone(f"{test_name} no longer skips when the workbench is absent")
+        if Path(absent).name not in body:
+            raise _Gone(f"{test_name} no longer reads {absent}")
+        # `Path(__file__).resolve().parents[N]` of tests/<file>: N = 1 is the wrapper itself.
+        base = Path(wrapper).resolve().parents[depth - 2]
+        if (base / absent).exists():
+            raise _Gone(f"{base / absent} exists in this clone: the test runs now")
+    return check
+
+
+#: entry (its target in EXCLUDED) -> the check of its reason.
+WITNESSES = {
+    "tests/test_juggler_posix_pipe.py": _w_module_skipif_win32("tests/test_juggler_posix_pipe.py"),
+    "tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py":
+        _w_engine_gate("tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py"),
+    "tests/test_fission_strategy1_bench.py::test_same_site_other_port_stays_in_process":
+        _w_processes_by_site("test_same_site_other_port_stays_in_process"),
+    "tests/test_fission_strategy1_bench.py::test_cross_site_iframe_gets_its_own_process":
+        _w_processes_by_site("test_cross_site_iframe_gets_its_own_process"),
+    "tests/test_juggler_transport.py::test_the_workbench_inventory_and_the_package_cannot_DRIFT":
+        _w_workbench("tests/test_juggler_transport.py", "test_the_workbench_inventory_and_the_package_cannot_DRIFT",
+                     "the workbench is not next to this checkout", "scripts/inventario_voce6.py", 3),
+    "tests/test_juggler_injected.py::test_OUR_CLIENT_DOES_NOT_CROSS_into_the_page_realm":
+        _w_workbench("tests/test_juggler_injected.py", "test_OUR_CLIENT_DOES_NOT_CROSS_into_the_page_realm",
+                     "the trap page lives in the workbench, not here", "tests/gates/observable_crossings.py", 3),
+}
+
+
+def witness_problems(wrapper: Path, system: str, engine_tag: str | None) -> list[str]:
+    """One line for every exclusion of ``system`` whose reason does not hold (or has no witness)."""
+    out = []
+    for only, target, _reason in EXCLUDED:
+        if only not in (None, system):
+            continue
+        witness = WITNESSES.get(target)
+        if witness is None:
+            out.append(f"{target}: excluded with no witness that its reason still holds")
+            continue
+        try:
+            witness(Path(wrapper), engine_tag)
+        except _Gone as exc:
+            out.append(f"{target}: the reason is gone: run it, remove the exclusion ({exc})")
+    return out
 
 
 def excluded_nodes(system: str) -> tuple[list[str], list[str]]:
@@ -394,6 +522,13 @@ def _cmd_run(args) -> int:
     wrapper = Path(args.wrapper).resolve()
     files = computed_list(wrapper)
     _, nodes = excluded_nodes(args.os)
+    from invisible_core.seal import active_seal
+    gone = witness_problems(wrapper, args.os, active_seal().tag)
+    if gone:
+        print("[wrapper-on-this-core] RED: an exclusion has no reason left:", file=sys.stderr)
+        for line in gone:
+            print("  " + line, file=sys.stderr)
+        return 1
     env = dict(os.environ)  # unlike run_e2e.main, INVISIBLE_CORE_PIN is kept: the pin is what this job overrides
     env["INVPW_BINARY_PATH"] = args.binary
     env["STEALTHFOX_E2E_BINARY"] = args.binary

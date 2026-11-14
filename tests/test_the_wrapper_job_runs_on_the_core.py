@@ -10,8 +10,10 @@ released.
 What is held here, on the files themselves and on the function that computes the
 list of tests:
 
-  1. `ci.yml` has the job, on a release pull request (head branch `release/*` or
-     the label `release`) and on a push to main, on Linux in two parts and on
+  1. `ci.yml` has the job, on a release pull request (head branch `release/*`),
+     on a push to main and on a pull request that touches the job itself (the
+     small job `wrapper-job-needed` decides, and is run here on a real diff), on
+     Linux in two parts and on
      Windows in four, each leg told how many parts there are, with the pin left alone (`INVISIBLE_CORE_PIN=allow`,
      `INVISIBLE_CORE_AUTOFIX=off`) and the core installed over it.
   2. The single verdict (`gate`) needs it, under the very condition the job has:
@@ -20,7 +22,9 @@ list of tests:
      finds the files of a sample wrapper tree that import the Juggler client or
      build one of its objects by hand, and only those. A list that got shorter
      than main's is red; an empty one is red.
-  4. A run is red on a failure, on a SKIPPED test, on a part that ran no file it
+  4. Every exclusion has a witness that its reason still holds, and a witness that
+     no longer holds is red naming the entry.
+  5. A run is red on a failure, on a SKIPPED test, on a part that ran no file it
      was given, and on a run that ran nothing; a failed attempt that was run again
      is not a skip.
 
@@ -44,6 +48,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 SCRIPT = ROOT / "scripts" / "wrapper_on_this_core.py"
 JOB = "wrapper-on-this-core"
+JOB_FILES = (".github/workflows/ci.yml", "scripts/wrapper_on_this_core.py",
+             "scripts/wrapper_test_seconds.json", "tests/test_the_wrapper_job_runs_on_the_core.py")
 
 
 def _load_script():
@@ -80,13 +86,26 @@ def job_problems(spec: dict) -> list[str]:
     job = jobs.get(JOB)
     if not isinstance(job, dict):
         return [f"ci.yml has no job `{JOB}`"]
-    condition = _flat(job.get("if"))
-    for needle, what in (("github.event_name=='push'", "a push to main"),
-                         ("startsWith(github.head_ref,'release/')", "a release/* head branch"),
-                         ("contains(github.event.pull_request.labels.*.name,'release')",
-                          "the label `release`")):
-        if needle not in condition:
-            out.append(f"the job does not run on {what}")
+    if _flat(job.get("if")) != "needs.wrapper-job-needed.outputs.run=='true'" \
+            or "wrapper-job-needed" not in (job.get("needs") or []):
+        out.append("the job does not run where `wrapper-job-needed` says (its output `run`)")
+    selector = jobs.get("wrapper-job-needed")
+    decide = next((x for x in ((selector or {}).get("steps") or []) if x.get("id") == "decide"), None)
+    if not selector or not decide:
+        out.append("ci.yml has no job `wrapper-job-needed` that decides")
+    else:
+        if "run" not in (selector.get("outputs") or {}):
+            out.append("`wrapper-job-needed` has no output `run`")
+        if not any((x.get("with") or {}).get("fetch-depth") == 0 for x in selector["steps"]):
+            out.append("`wrapper-job-needed` does not fetch the history it diffs")
+        text = str(decide.get("run", ""))
+        for needle, what in (('"push"', "a push to main"), ("release/*", "a release/* head branch"),
+                             ("git diff --name-only", "a diff of the pull request")) + tuple(
+                                 (f, f"a change of {f}") for f in JOB_FILES):
+            if needle not in text:
+                out.append(f"the job does not run on {what}")
+        if "label" in text or "labels" in str(decide.get("env", "")):
+            out.append("the job still looks at a label")
     on = spec.get("on") or {}
     if "pull_request" not in on or "main" not in ((on.get("push") or {}).get("branches") or []):
         out.append("ci.yml no longer runs on pull requests and on pushes to main")
@@ -125,6 +144,8 @@ def gate_problems(spec: dict) -> list[str]:
     out = []
     if JOB not in (gate.get("needs") or []):
         out.append(f"`gate` does not need `{JOB}`")
+    if "wrapper-job-needed" not in (gate.get("needs") or []):
+        out.append("`gate` does not need `wrapper-job-needed`")
     steps = gate.get("steps") or []
     env = {k: v for s in steps for k, v in (s.get("env") or {}).items()}
     if _bare(env.get("WRAPPER_JOB_REQUIRED", "")) != _bare(job.get("if", "")):
@@ -133,6 +154,8 @@ def gate_problems(spec: dict) -> list[str]:
     required = re.search(r'if \[ "\$WRAPPER_JOB_REQUIRED" = "true" \]; then\s+'
                          r'test "\$\{\{ needs\.wrapper-on-this-core\.result \}\}" = "success"\s+'
                          r'else\s+test "\$\{\{ needs\.wrapper-on-this-core\.result \}\}" = "skipped"\s+fi', run)
+    if 'test "${{ needs.wrapper-job-needed.result }}" = "success"' not in run:
+        out.append("`gate` does not demand that the decision was made (a failed decision reads as a skip)")
     if not required:
         out.append("`gate` does not demand success where the job is required and a skip elsewhere")
     return out
@@ -167,11 +190,11 @@ def test_a_job_that_runs_on_less_is_caught():
     spec = _spec()
     job = spec["jobs"][JOB]
     job["if"] = "github.event_name == 'push'"
+    spec["jobs"]["wrapper-job-needed"]["steps"][-1]["run"] = "echo run=true >> $GITHUB_OUTPUT"
     job["strategy"]["matrix"]["include"] = job["strategy"]["matrix"]["include"][:2]
     job["env"]["INVISIBLE_CORE_AUTOFIX"] = "on"
     found = job_problems(spec)
-    assert any("release/*" in p for p in found)
-    assert any("label" in p for p in found)
+    assert any("wrapper-job-needed" in p for p in found)
     assert any("legs" in p for p in found)
     assert any("pin" in p for p in found)
 
@@ -436,3 +459,193 @@ def test_the_nodes_of_a_file_are_listed_by_pytest_in_the_leg(tmp_path):
                                             "tests/test_two.py::test_b[2]"]
     with pytest.raises(RuntimeError):
         collect("tests/test_missing.py")
+
+
+# ------------------------------------------------- when the job is needed (run for real)
+
+def _decide_script() -> str:
+    step = next(x for x in _spec()["jobs"]["wrapper-job-needed"]["steps"] if x.get("id") == "decide")
+    return step["run"]
+
+
+def _decide(tmp_path, event, head_ref, changed):
+    """Runs the `decide` step in a throwaway repo where the head commit changes ``changed``."""
+    import shutil
+    import subprocess
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("no bash on this machine")
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t" "@example.invalid"]
+
+    def run(*cmd):
+        return subprocess.run(list(cmd), cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+    run(*git, "init", "-q")
+    (repo / "keep.txt").write_text("a", encoding="utf-8")
+    run(*git, "add", "-A")
+    run(*git, "commit", "-q", "-m", "base")
+    base = run("git", "rev-parse", "HEAD")
+    for rel in changed:
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text("b", encoding="utf-8")
+    (repo / "keep.txt").write_text("b", encoding="utf-8")
+    run(*git, "add", "-A")
+    run(*git, "commit", "-q", "-m", "head")
+    head = run("git", "rev-parse", "HEAD")
+    out = tmp_path / "out.txt"
+    out.write_text("", encoding="utf-8")
+    script = tmp_path / "decide.sh"
+    script.write_text(_decide_script(), encoding="utf-8", newline="\n")
+    env = dict(__import__("os").environ, EVENT=event, HEAD_REF=head_ref, BASE_SHA=base, HEAD_SHA=head,
+               RUNNER_TEMP=str(tmp_path), GITHUB_OUTPUT=str(out))
+    done = subprocess.run([bash, str(script)], cwd=repo, env=env, capture_output=True, text=True)
+    return done, out.read_text(encoding="utf-8").strip()
+
+
+def test_the_job_is_needed_on_a_push_a_release_branch_and_a_change_of_the_job_only(tmp_path):
+    for n, (event, head_ref, changed, expected) in enumerate([
+            ("push", "", [], "run=true"),
+            ("pull_request", "release/65.72.0", [], "run=true"),
+            ("pull_request", "fix/x", ["src/other.py", "docs/a.md"], "run=false"),
+            ("pull_request", "fix/x", ["tests/test_other.py", "scripts/other.py"], "run=false")]
+            + [("pull_request", "fix/x", [f], "run=true") for f in JOB_FILES]):
+        done, out = _decide(tmp_path / str(n), event, head_ref, changed)
+        assert done.returncode == 0, done.stderr
+        assert out == expected, (event, head_ref, changed, out)
+
+
+def test_a_diff_that_cannot_be_read_is_red_not_not_needed(tmp_path):
+    (tmp_path / "x").mkdir()
+    import subprocess
+    done, out = _decide(tmp_path / "x", "pull_request", "fix/x", [])
+    assert done.returncode == 0 and out == "run=false"
+    # the same step, with a base that does not exist
+    script = tmp_path / "x" / "decide.sh"
+    env = dict(__import__("os").environ, EVENT="pull_request", HEAD_REF="fix/x", BASE_SHA="0" * 40,
+               HEAD_SHA="1" * 40, RUNNER_TEMP=str(tmp_path / "x"), GITHUB_OUTPUT=str(tmp_path / "x" / "out2.txt"))
+    bad = subprocess.run([__import__("shutil").which("bash"), str(script)], cwd=tmp_path / "x" / "repo",
+                         env=env, capture_output=True, text=True)
+    assert bad.returncode != 0
+    assert not (tmp_path / "x" / "out2.txt").exists() or "run=false" not in (tmp_path / "x" / "out2.txt").read_text()
+
+
+# ------------------------------------------------------------------ the witnesses
+
+# The text of the wrapper's test files as they are today, cut to what each witness reads.
+TODAY = {
+    "tests/test_juggler_posix_pipe.py": (
+        "import sys\nimport pytest\n\npytestmark = pytest.mark.skipif(\n    sys.platform == \"win32\",\n"
+        "    reason=\"the POSIX leg does not execute on Windows\")\n\ndef test_the_posix_pipe_carries_messages_both_ways():\n    pass\n"),
+    "tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py": (
+        "import pytest\n\n" "@pytest.mark.e2e\n" "@pytest.mark.skipif(ON_WINDOWS, reason=\"x\")\n"
+        "def test_a_missing_pref_refuses_the_launch(firefox_binary, engine_at_least, pref):\n"
+        "    engine_at_least(\"firefox-65\")\n    pass\n\n" "@pytest.mark.e2e\n"
+        "def test_every_pref_declared_the_launch_succeeds(firefox_binary, engine_at_least):\n"
+        "    engine_at_least(\"firefox-65\")\n    pass\n"),
+    "tests/_processes.py": (
+        "import sys\nimport pytest\n\ndef site_processes_below(root_pid, site, engine_dir=None):\n"
+        "    import psutil\n\n    if not sys.platform.startswith(\"linux\"):\n"
+        "        pytest.skip(\"only Linux names a content process\")\n    return set()\n"),
+    "tests/test_fission_strategy1_bench.py": (
+        "import pytest\nfrom _processes import site_processes_below\n\n"
+        "def processes_of(site, engine_dir):\n    \"\"\"The pids.\"\"\"\n"
+        "    return site_processes_below(os.getpid(), site, engine_dir)\n\n\n"
+        "@pytest.mark.e2e\ndef test_cross_site_iframe_gets_its_own_process(page, engine_dir):\n"
+        "    here = processes_of(SITE_A, engine_dir)\n\n\n"
+        "@pytest.mark.e2e\ndef test_same_site_other_port_stays_in_process(page, engine_dir):\n"
+        "    before = processes_of(SITE_A, engine_dir)\n\n\n"
+        "@pytest.mark.e2e\ndef test_frame_list_has_real_urls(page):\n    pass\n"),
+    "tests/test_juggler_transport.py": (
+        "import pytest\n\ndef test_the_workbench_inventory_and_the_package_cannot_DRIFT():\n"
+        "    tool = pathlib.Path(__file__).resolve().parents[3] / \"scripts\" \\\n        / \"inventario_voce6.py\"\n"
+        "    if not tool.exists():\n        pytest.skip(\"the workbench is not next to this checkout\")\n\n"
+        "def test_other():\n    pass\n"),
+    "tests/test_juggler_injected.py": (
+        "import pytest\n\ndef test_OUR_CLIENT_DOES_NOT_CROSS_into_the_page_realm():\n"
+        "    spec = importlib.util.spec_from_file_location(\n        \"oc\", str(pathlib.Path(__file__).resolve().parents[3]\n"
+        "                  / \"tests\" / \"gates\" / \"observable_crossings.py\"))\n"
+        "    if spec is None or not pathlib.Path(spec.origin).is_file():\n"
+        "        pytest.skip(\"the trap page lives in the workbench, not here\")\n\n"
+        "def test_other():\n    pass\n"),
+}
+
+# The same text with the reason taken out of it: what each witness must notice.
+REASON_REMOVED = {
+    "tests/test_juggler_posix_pipe.py": lambda t: t.replace("sys.platform == \"win32\"", "False"),
+    "tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py":
+        lambda t: t.replace("engine_at_least(\"firefox-65\")", "engine_at_least(\"firefox-60\")", 1),
+    "tests/_processes.py": lambda t: t.replace("if not sys.platform.startswith(\"linux\"):", "if False:"),
+    "tests/test_fission_strategy1_bench.py": lambda t: t.replace("return site_processes_below(", "return set(("),
+    "tests/test_juggler_transport.py": lambda t: t.replace("pytest.skip(", "print("),
+    "tests/test_juggler_injected.py": lambda t: t.replace("pytest.skip(", "print("),
+}
+
+
+def _wrapper_tree(tmp_path, edits=None):
+    root = tmp_path / "work" / "wrapper"
+    for rel, text in TODAY.items():
+        if edits and rel in edits:
+            text = edits[rel](text)
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    return root
+
+
+def _entries(mod, system):
+    return [t for only, t, _ in mod.EXCLUDED if only in (None, system)]
+
+
+@pytest.mark.parametrize("system", ["linux", "windows"])
+def test_every_exclusion_has_a_witness_and_each_holds_on_todays_text(tmp_path, system):
+    mod = _load_script()
+    assert set(mod.WITNESSES) == {t for _, t, _ in mod.EXCLUDED}, "an exclusion with no witness, or a witness of none"
+    assert mod.witness_problems(_wrapper_tree(tmp_path), system, "firefox-64-candidate") == []
+
+
+def test_each_witness_is_red_on_a_text_with_its_reason_removed_and_names_the_entry(tmp_path):
+    mod = _load_script()
+    for n, (only, target, _) in enumerate(mod.EXCLUDED):
+        rel = target.split("::")[0]
+        for system in ("linux", "windows"):
+            if only not in (None, system):
+                continue
+            root = _wrapper_tree(tmp_path / f"{n}{system}", {rel: REASON_REMOVED[rel]})
+            found = mod.witness_problems(root, system, "firefox-64")
+            mine = [f for f in found if f.startswith(target + ":")]
+            assert len(mine) == 1, (target, system, found)
+            assert "the reason is gone: run it, remove the exclusion" in mine[0]
+
+
+def test_the_engine_witness_is_red_once_the_seal_names_the_engine_the_file_waits_for(tmp_path):
+    mod = _load_script()
+    theme = "tests/test_a_missing_system_theme_pref_refuses_the_launch_e2e.py"
+    root = _wrapper_tree(tmp_path)
+    for tag, red in (("firefox-64", False), ("firefox-64-candidate", False), ("firefox-65-candidate", True),
+                     ("firefox-66", True), ("local", True), (None, True)):
+        found = [f for f in mod.witness_problems(root, "linux", tag) if f.startswith(theme)]
+        assert bool(found) is red, (tag, found)
+
+
+def test_the_workbench_witness_is_red_where_the_workbench_files_are_present(tmp_path):
+    mod = _load_script()
+    root = _wrapper_tree(tmp_path)
+    (root.parent.parent / "scripts").mkdir()
+    (root.parent.parent / "scripts" / "inventario_voce6.py").write_text("x", encoding="utf-8")
+    found = mod.witness_problems(root, "linux", "firefox-64")
+    assert len(found) == 1 and "test_the_workbench_inventory" in found[0] and "exists in this clone" in found[0]
+
+
+def test_an_exclusion_whose_file_is_gone_or_has_no_witness_is_red(tmp_path):
+    mod = _load_script()
+    root = _wrapper_tree(tmp_path)
+    (root / "tests" / "test_juggler_posix_pipe.py").unlink()
+    found = mod.witness_problems(root, "windows", "firefox-64")
+    assert len(found) == 1 and "the reason is gone" in found[0] and "posix_pipe" in found[0]
+    saved = dict(mod.WITNESSES)
+    try:
+        mod.WITNESSES.pop("tests/test_juggler_posix_pipe.py")
+        assert any("no witness" in f for f in mod.witness_problems(_wrapper_tree(tmp_path / "b"), "windows", "firefox-64"))
+    finally:
+        mod.WITNESSES.update(saved)
