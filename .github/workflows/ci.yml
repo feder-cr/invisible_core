@@ -437,13 +437,152 @@ jobs:
           print(f"{passed} tests ran with nothing outside the process")
           PY
 
+  # THE WRAPPER'S TESTS, ON THE CORE ABOUT TO BE PUBLISHED. The wrapper pins this
+  # package and is published AFTER it, so its own CI installs the PINNED core from
+  # the index: for a release of the core, no test of the wrapper that stands on the
+  # core's Juggler client (Lifecycle, InjectedScript, Connection, the protocol) had
+  # ever run on the code that was about to go out. This job checks out the wrapper's
+  # main, installs it, puts THIS checkout's core over the pin, fetches the engine
+  # the seal names and runs those test files, on Linux and Windows.
+  #
+  # WHEN: on a release pull request (head branch `release/*`, or the label
+  # `release`) and on every push to main. Any other pull request skips it, and the
+  # `gate` below knows that is the right state for those and the wrong one for these.
+  #
+  # WHICH TESTS is computed, not typed: scripts/wrapper_on_this_core.py greps the
+  # wrapper's tests for the files that import `invisible_core.juggler` or build a
+  # Lifecycle / InjectedScript / Connection by hand. It is compared, in this job,
+  # with the list MAIN's copy of that script gives on the same wrapper tree: a list
+  # that got shorter is red. A test that is skipped is red, an engine the seal
+  # names that is not published yet is red (never a skip), and so is a part that
+  # ran no file it was given.
+  #
+  # TWO PARTS PER SYSTEM (four legs). The test step has 8 minutes. The legs run the
+  # wrapper's own e2e command (invisible_core.testing.e2e: four browsers at once,
+  # the wall-clock tests alone at the end), under xvfb on Linux as the wrapper's
+  # e2e job does. INVISIBLE_CORE_PIN=allow and INVISIBLE_CORE_AUTOFIX=off: the
+  # wrapper checks its pin at import, and the repair would put the pinned core back
+  # over the one under test.
+  wrapper-on-this-core:
+    name: wrapper-on-this-core (${{ matrix.os }}, part ${{ matrix.part }})
+    if: >-
+      github.event_name == 'push' ||
+      startsWith(github.head_ref, 'release/') ||
+      contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: linux, runner: ubuntu-24.04, part: 1}
+          - {os: linux, runner: ubuntu-24.04, part: 2}
+          - {os: windows, runner: windows-2022, part: 1}
+          - {os: windows, runner: windows-2022, part: 2}
+    defaults:
+      run:
+        shell: bash
+    env:
+      INVISIBLE_CORE_PIN: allow
+      INVISIBLE_CORE_AUTOFIX: "off"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      # The core of this change. Full history: the comparison below reads the copy
+      # of the script that main (or the commit before a push) has.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: oss-invisible/playwright
+          ref: main
+          path: wrapper
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: the list of tests is not shorter than main's
+        run: |
+          # The list of main is what main's copy of the script computes on THIS wrapper
+          # tree. A base that cannot be read is red, not "main has nothing".
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BASE="${{ github.event.before }}"
+          else
+            BASE="origin/main"
+          fi
+          if ! git rev-parse --verify -q "$BASE^{commit}" > /dev/null; then
+            echo "cannot read $BASE: it is not known what main has" >&2
+            exit 1
+          fi
+          if git cat-file -e "$BASE:scripts/wrapper_on_this_core.py" 2> /dev/null; then
+            git show "$BASE:scripts/wrapper_on_this_core.py" > "$RUNNER_TEMP/main_wrapper_on_this_core.py"
+            python scripts/wrapper_on_this_core.py compare --wrapper wrapper \
+              --main-script "$RUNNER_TEMP/main_wrapper_on_this_core.py"
+          else
+            python scripts/wrapper_on_this_core.py compare --wrapper wrapper --main-has-no-script
+          fi
+      - name: the wrapper, then THIS core over its pin
+        run: |
+          python -m pip install --upgrade pip
+          (cd wrapper && python -m pip install ".[dev]")
+          # Playwright only as a system tool, for the libraries Firefox needs on a bare runner.
+          python -m pip install "playwright==$(cat wrapper/scripts/playwright_pin.txt)"
+          python -m pip install --force-reinstall --no-deps .
+          python -c "import invisible_core; print('core under test:', invisible_core.__file__)"
+      - name: system libraries and a virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          sudo "$(which python)" -m playwright install-deps firefox
+      - name: the engine the seal names (published, or red)
+        run: |
+          # An assignment, not `echo "FF=$(...)"`: a failure inside a command
+          # substitution that is only an argument is lost, and "the engine is not
+          # published" must stop the job here.
+          OUT="$(cd "$RUNNER_TEMP" && python "$GITHUB_WORKSPACE/scripts/wrapper_on_this_core.py" engine)"
+          echo "FF=$(echo "$OUT" | tail -1)" >> "$GITHUB_ENV"
+      - name: the GeoIP database (made by the wrapper, same bytes every run)
+        working-directory: wrapper
+        run: python scripts/ci_lab_geoip.py build
+      - name: the wrapper's tests that stand on the core, part ${{ matrix.part }}
+        timeout-minutes: 8
+        run: |
+          RUN=(python -u scripts/wrapper_on_this_core.py run --wrapper wrapper --binary "$FF"
+               --os "${{ matrix.os }}" --part "${{ matrix.part }}" --parts 2 --procs 4
+               --junit-dir "$RUNNER_TEMP/wrapper-on-this-core-junit")
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a "${RUN[@]}"
+          else
+            "${RUN[@]}"
+          fi
+      - name: the leg ran with the pinned GeoIP database
+        if: always()
+        working-directory: wrapper
+        run: |
+          python scripts/ci_lab_geoip.py evidence --out "$(dirname "$GEOIP_USED_OUT")/geoip-evidence.json" > /dev/null
+          python scripts/ci_lab_geoip.py verify --evidence "$(dirname "$GEOIP_USED_OUT")/geoip-evidence.json" --used "$GEOIP_USED_OUT"
+      - name: close every Firefox left (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-Process firefox -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          "left: " + @(Get-Process firefox -ErrorAction SilentlyContinue).Count
+
   gate:
     needs: [tests, msix-host, arm64-host, branding-is-retail, repair-through-the-installer,
-            default-selection-stays-inside, default-selection-stays-inside-windows]
+            default-selection-stays-inside, default-selection-stays-inside-windows,
+            wrapper-on-this-core]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: refuse unless every matrix job succeeded
+        env:
+          # The same condition as the `if:` of wrapper-on-this-core
+          # (tests/test_the_wrapper_job_runs_on_the_core.py holds the two alike).
+          WRAPPER_JOB_REQUIRED: >-
+            ${{ github.event_name == 'push' ||
+            startsWith(github.head_ref, 'release/') ||
+            contains(github.event.pull_request.labels.*.name, 'release') }}
         run: |
           echo "tests: ${{ needs.tests.result }}"
           echo "msix-host: ${{ needs.msix-host.result }}"
@@ -452,6 +591,7 @@ jobs:
           echo "repair-through-the-installer: ${{ needs.repair-through-the-installer.result }}"
           echo "default-selection-stays-inside: ${{ needs.default-selection-stays-inside.result }}"
           echo "default-selection-stays-inside-windows: ${{ needs.default-selection-stays-inside-windows.result }}"
+          echo "wrapper-on-this-core: ${{ needs.wrapper-on-this-core.result }} (required: $WRAPPER_JOB_REQUIRED)"
           test "${{ needs.tests.result }}" = "success"
           test "${{ needs.msix-host.result }}" = "success"
           test "${{ needs.arm64-host.result }}" = "success"
@@ -459,3 +599,11 @@ jobs:
           test "${{ needs.repair-through-the-installer.result }}" = "success"
           test "${{ needs.default-selection-stays-inside.result }}" = "success"
           test "${{ needs.default-selection-stays-inside-windows.result }}" = "success"
+          # Required on a release pull request and on a push to main: green, and a
+          # job that did not run there is red, never "skipped, so fine". Any other
+          # pull request has no reason to run it, and a skip is its right state.
+          if [ "$WRAPPER_JOB_REQUIRED" = "true" ]; then
+            test "${{ needs.wrapper-on-this-core.result }}" = "success"
+          else
+            test "${{ needs.wrapper-on-this-core.result }}" = "skipped"
+          fi
